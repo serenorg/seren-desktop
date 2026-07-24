@@ -240,6 +240,20 @@ impl ResolutionSummary {
     }
 }
 
+/// The host's authoritative live execution state for one conversation, broadcast
+/// on every gate suspend/settle so the frontend converges without waiting for a
+/// poll and a host-initiated transition (a reload sweep, a lapsed TTL) surfaces at
+/// once. Derived from the persisted continuation rows — the rows remain the single
+/// source of truth; this is the host pushing that truth rather than the renderer
+/// re-deriving it on a timer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStateSnapshot {
+    pub conversation_id: String,
+    pub state: TaskExecutionState,
+    pub summary: ResolutionSummary,
+}
+
 /// A persisted continuation row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContinuationRow {

@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 use crate::approval_continuation::{
     self, ContinuationRow, ContinuationScope, ContinuationState, ContinuationView,
     RegisteredContinuation, RequestedCapability, ResolutionSummary, ResolveDecision, ResolveOutcome,
+    TaskStateSnapshot,
 };
 use crate::authorization_audit::{self, AuditContext, AuditEntry, AuditEvent};
 use crate::capability_lease::{
@@ -1628,6 +1629,41 @@ impl ToolAuthorizationState {
         })
     }
 
+    /// The host's authoritative live state and outcome counts for a conversation in
+    /// one consistent read. This is what the host broadcasts on every gate
+    /// suspend/settle so the frontend converges without polling; combining the
+    /// aggregate state and the summary under a single connection lock guarantees
+    /// they describe the same instant. Overdue pending blocks are expired first, so
+    /// a lapsed request never keeps a task spuriously `waiting_for_approval`.
+    pub fn task_state_snapshot(
+        &self,
+        conversation_id: &str,
+    ) -> Result<TaskStateSnapshot, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            expire_overdue_audited(conn, conversation_id, &now);
+            let rows = approval_continuation::read_continuations(conn, conversation_id)?;
+            Ok(TaskStateSnapshot {
+                conversation_id: conversation_id.to_string(),
+                state: approval_continuation::aggregate_task_state(&rows),
+                summary: approval_continuation::summarize(&rows),
+            })
+        })
+    }
+
+    /// The conversation that owns a continuation, or `None` if unknown. Host-internal
+    /// (no resume token): the settle commands look this up so they can broadcast the
+    /// affected conversation's new task state without the renderer having to name it.
+    pub fn conversation_for_approval(
+        &self,
+        approval_id: &str,
+    ) -> Result<Option<String>, String> {
+        self.with_conn(|conn| {
+            Ok(approval_continuation::find_by_id(conn, approval_id)?
+                .map(|row| row.conversation_id))
+        })
+    }
+
     /// Outcome counts for a conversation, backing completion integrity
     /// (`can_complete`) and the final summary disclosure of denied/skipped/expired/
     /// unresolved work.
@@ -1690,8 +1726,10 @@ impl ToolAuthorizationState {
     /// `waiting_for_approval` state at once instead of leaving it dangling until its
     /// TTL. Fail-safe — it only revokes a pending approval opportunity, never grants
     /// authority, and records an expiry (not a denial), so a later re-attempt
-    /// re-prompts. Each lapse is audited (#3193-D). Returns the count expired.
-    pub fn expire_all_pending_continuations(&self) -> Result<usize, String> {
+    /// re-prompts. Each lapse is audited (#3193-D). Returns the distinct conversation
+    /// ids it affected so the caller can broadcast each task's new (unblocked) state,
+    /// clearing a stale `waiting_for_approval` at once instead of at the next poll.
+    pub fn expire_all_pending_continuations(&self) -> Result<Vec<String>, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
             let expired = approval_continuation::expire_all_pending(conn, &now)?;
@@ -1704,7 +1742,11 @@ impl ToolAuthorizationState {
                     &now,
                 );
             }
-            Ok(expired.len())
+            let mut conversations: Vec<String> =
+                expired.into_iter().map(|row| row.conversation_id).collect();
+            conversations.sort();
+            conversations.dedup();
+            Ok(conversations)
         })
     }
 
@@ -3045,6 +3087,54 @@ mod tests {
         assert!(!s.resolution_summary("conv-a").unwrap().can_complete());
     }
 
+    /// The host snapshot the frontend consumes is authoritative across the whole
+    /// lifecycle: `waiting_for_approval` with one unresolved block on register, then
+    /// `running` with the block counted as approved on settle. This is the payload
+    /// broadcast on every gate suspend/settle so the frontend never has to derive or
+    /// poll for the state.
+    #[test]
+    fn task_state_snapshot_tracks_host_state_across_lifecycle() {
+        let s = state();
+        let registered = s
+            .register_continuation("conv-a", send_cap(), ContinuationScope::Linear, 300)
+            .unwrap();
+
+        let blocked = s.task_state_snapshot("conv-a").unwrap();
+        assert_eq!(blocked.conversation_id, "conv-a");
+        assert_eq!(blocked.state, TaskExecutionState::WaitingForApproval);
+        assert_eq!(blocked.summary.unresolved, 1);
+        assert!(!blocked.summary.can_complete());
+
+        s.resolve_continuation(
+            &registered.approval_id,
+            &registered.resume_token,
+            ResolveDecision::Approve,
+        )
+        .unwrap();
+
+        let released = s.task_state_snapshot("conv-a").unwrap();
+        assert_eq!(released.state, TaskExecutionState::Running);
+        assert_eq!(released.summary.unresolved, 0);
+        assert_eq!(released.summary.approved, 1);
+        assert!(released.summary.can_complete());
+    }
+
+    /// The settle commands broadcast the affected conversation's new state without
+    /// the renderer naming it, so the host must resolve a continuation's owner from
+    /// its id alone.
+    #[test]
+    fn conversation_for_approval_resolves_owner() {
+        let s = state();
+        let registered = s
+            .register_continuation("conv-owner", send_cap(), ContinuationScope::Linear, 300)
+            .unwrap();
+        assert_eq!(
+            s.conversation_for_approval(&registered.approval_id).unwrap(),
+            Some("conv-owner".to_string())
+        );
+        assert_eq!(s.conversation_for_approval("no-such-id").unwrap(), None);
+    }
+
     /// Equivalent retries reuse the same pending request — no prompt storm.
     #[test]
     fn equivalent_retries_dedup_to_one_pending_request() {
@@ -3233,8 +3323,13 @@ mod tests {
             TaskExecutionState::RunningWithBlockedActions
         );
 
-        // Two live pending blocks (the approved one is already settled) are expired.
-        assert_eq!(s.expire_all_pending_continuations().unwrap(), 2);
+        // Two live pending blocks (the approved one is already settled) are expired;
+        // the sweep reports both owning conversations so the caller can broadcast
+        // each task's now-unblocked state.
+        assert_eq!(
+            s.expire_all_pending_continuations().unwrap(),
+            vec!["conv-a".to_string(), "conv-b".to_string()]
+        );
 
         // Both tasks are released; nothing blocks completion.
         assert_eq!(
@@ -3255,7 +3350,7 @@ mod tests {
         assert!(audit_events(&s, "conv-b").contains(&"approval_expired".to_string()));
 
         // Idempotent: nothing pending remains, so a second reconciliation is a no-op.
-        assert_eq!(s.expire_all_pending_continuations().unwrap(), 0);
+        assert!(s.expire_all_pending_continuations().unwrap().is_empty());
     }
 
     /// An independent branch block keeps the task running-with-blocked-actions,

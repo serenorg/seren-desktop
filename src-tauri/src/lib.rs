@@ -757,9 +757,22 @@ pub fn run() {
                                 .try_state::<tool_authorization::ToolAuthorizationState>()
                             {
                                 match auth.expire_all_pending_continuations() {
-                                    Ok(expired) if expired > 0 => log::warn!(
-                                        "[ToolAuthorization] Expired {expired} orphaned approval continuation(s) on main view reload"
-                                    ),
+                                    Ok(conversations) if !conversations.is_empty() => {
+                                        log::warn!(
+                                            "[ToolAuthorization] Expired orphaned approval continuation(s) across {} conversation(s) on main view reload",
+                                            conversations.len()
+                                        );
+                                        // Broadcast each released task's new state so a
+                                        // stale "waiting for approval" clears at once on
+                                        // the fresh page instead of at the next poll.
+                                        for conversation_id in &conversations {
+                                            commands::tool_authorization::emit_task_execution_state(
+                                                &app,
+                                                &auth,
+                                                conversation_id,
+                                            );
+                                        }
+                                    }
                                     Ok(_) => {}
                                     Err(err) => log::warn!(
                                         "[ToolAuthorization] Failed to expire orphaned continuations on reload: {err}"

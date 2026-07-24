@@ -7,6 +7,7 @@ import { postNotification } from "@/services/notifications";
 import {
   type ContinuationView,
   listPendingApprovals,
+  type TaskStateSnapshot,
 } from "@/services/tool-authorization";
 
 /**
@@ -49,6 +50,14 @@ interface ShellApprovalRequestPayload {
 interface StoreShape {
   live: LiveApprovalRequest[];
   pending: ContinuationView[];
+  /**
+   * The host's authoritative task-execution state per conversation, pushed on
+   * `orchestrator://task-execution-state`. Drives the thread status label without
+   * the renderer re-deriving it; the pending list stays the authority for whether
+   * anything is still blocked, so a read-triggered TTL expiry can never leave a
+   * stale label behind.
+   */
+  taskStates: Record<string, TaskStateSnapshot>;
 }
 
 /** Live requests outlive the executor's 5-minute window only by this margin. */
@@ -57,7 +66,11 @@ const LIVE_REQUEST_MAX_AGE_MS = 6 * 60 * 1000;
 /** How often to re-read host state while anything is pending (observes TTL expiry). */
 const PENDING_REFRESH_INTERVAL_MS = 60 * 1000;
 
-const [state, setState] = createStore<StoreShape>({ live: [], pending: [] });
+const [state, setState] = createStore<StoreShape>({
+  live: [],
+  pending: [],
+  taskStates: {},
+});
 
 /**
  * Pending capability requests already notified this session. The host dedups
@@ -104,13 +117,27 @@ export function liveRequestForContinuation(
  */
 export function threadApprovalStatus(conversationId: string): string | null {
   const pending = pendingForConversation(conversationId);
+  // The pending list is authoritative for "is anything still blocked" — nothing
+  // pending means not blocked, even if a host state event has not yet arrived or a
+  // read-triggered TTL expiry cleared the block without a fresh push.
   if (pending.length === 0) return null;
-  if (pending.some((view) => view.blockedScope === "linear")) {
+  const blockedCount =
+    pending.length === 1
+      ? "1 action blocked"
+      : `${pending.length} actions blocked`;
+  const hostState = state.taskStates[conversationId]?.state;
+  if (hostState === "running_with_blocked_actions") {
+    return blockedCount;
+  }
+  // A linear block suspends the whole turn: trust the host's state, and before its
+  // first push fall back to the pending continuations' own scope.
+  if (
+    hostState === "waiting_for_approval" ||
+    pending.some((view) => view.blockedScope === "linear")
+  ) {
     return "Waiting for approval";
   }
-  return pending.length === 1
-    ? "1 action blocked"
-    : `${pending.length} actions blocked`;
+  return blockedCount;
 }
 
 /** Re-read host-pending approvals; prune lapsed live requests as a side effect. */
@@ -260,6 +287,18 @@ export async function initializeApprovalsStore(): Promise<void> {
       setTimeout(() => void refreshPendingApprovals(), 300);
     });
   }
+
+  // The host broadcasts a conversation's authoritative task state on every gate
+  // suspend/settle (and its own reload sweep). Consume it so the thread status
+  // converges immediately — including host-initiated transitions the renderer
+  // never emitted — instead of waiting for the poll below.
+  await listen<TaskStateSnapshot>(
+    "orchestrator://task-execution-state",
+    (event) => {
+      setState("taskStates", event.payload.conversationId, event.payload);
+      void refreshPendingApprovals();
+    },
+  );
 
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) void refreshPendingApprovals();
