@@ -26,6 +26,9 @@ const MAX_ARRAY_ITEMS = 25;
 interface GatewayApprovalResult {
   approved: boolean;
   connectionId?: string | null;
+  /** True when the approval UI lapsed without a decision, so the block is an
+   * explicit expiry rather than a user denial. */
+  timedOut?: boolean;
 }
 
 interface GatewayConnectionArgsResult {
@@ -104,6 +107,162 @@ function contextForPublisherRoute(
     context.target = args.connection_id;
   }
   return context;
+}
+
+// A continuation outlives the approval UI's own timeout, so the renderer's
+// timeout fires first and settles the block as an *explicit* expiry rather than
+// the host auto-expiring it mid-prompt.
+const APPROVAL_CONTINUATION_TTL_SECS =
+  Math.floor(GATEWAY_APPROVAL_TIMEOUT_MS / 1000) + 60;
+
+/**
+ * What the gate blocked, in the host's terms. Mirrors `RequestedCapability` in
+ * `src-tauri/src/approval_continuation.rs`.
+ */
+interface RequestedCapability {
+  route: ToolRoute;
+  publisherSlug: string;
+  toolName: string;
+  operationClass: string;
+  description: string;
+  isDestructive: boolean;
+  command?: string;
+  host?: string;
+  target?: string;
+}
+
+/**
+ * The host's record of a suspended continuation. `resumeToken` is held here to
+ * settle the block and is NEVER forwarded to the model; `modelResult` is the
+ * redacted payload safe to surface. Mirrors `RegisteredContinuation` in
+ * `src-tauri/src/approval_continuation.rs`.
+ */
+interface RegisteredContinuation {
+  approvalId: string;
+  resumeToken: string;
+  blockedScope: "linear" | "branch";
+  taskState: string;
+  deduplicated: boolean;
+  modelResult: Record<string, unknown>;
+}
+
+/**
+ * Outcome of authorizing one tool call. On a block, the structured tool result
+ * is ready to return to the model — never a generic "not approved" string, so a
+ * denial, expiry, and skip are distinguishable and the model can adapt.
+ */
+type ToolAuthorization =
+  | { approved: true; connectionId?: string | null }
+  | { approved: false; toolResult: ToolResult };
+
+type BlockedKind = "denied" | "expired" | "skipped";
+
+/**
+ * Register a host-owned suspended continuation for a blocked action, so the
+ * paused action becomes a visible, resumable record (never a hung tool call) and
+ * equivalent retries dedup to one pending request. Returns null if the host is
+ * unavailable — the approval UI still runs; only the persisted state is skipped.
+ */
+async function registerApprovalContinuation(
+  route: ToolRoute,
+  publisherSlug: string,
+  toolName: string,
+  decision: AuthorizationDecision,
+  context: OperationContext,
+  conversationId: string,
+): Promise<RegisteredContinuation | null> {
+  const requested: RequestedCapability = {
+    route,
+    publisherSlug,
+    toolName,
+    operationClass: decision.operationClass,
+    description: decision.description,
+    isDestructive: decision.isDestructive,
+    command: context.command,
+    host: context.host,
+    target: context.target,
+  };
+  try {
+    return await invoke<RegisteredContinuation>(
+      "register_approval_continuation",
+      {
+        conversationId,
+        requested,
+        scope: "linear",
+        ttlSecs: APPROVAL_CONTINUATION_TTL_SECS,
+      },
+    );
+  } catch (err) {
+    console.error(
+      "[Tool Executor] Failed to register approval continuation:",
+      err,
+    );
+    return null;
+  }
+}
+
+/**
+ * Settle a suspended continuation exactly once. Approve/deny/skip are user
+ * decisions; expire is the system outcome of a lapsed approval UI. Idempotent
+ * host-side, so a failed settle is safe to ignore.
+ */
+async function settleApprovalContinuation(
+  registered: RegisteredContinuation,
+  kind: "approve" | "deny" | "skip" | "expire",
+): Promise<void> {
+  try {
+    if (kind === "expire") {
+      await invoke("expire_approval_continuation", {
+        approvalId: registered.approvalId,
+        resumeToken: registered.resumeToken,
+      });
+    } else {
+      await invoke("resolve_approval_continuation", {
+        approvalId: registered.approvalId,
+        resumeToken: registered.resumeToken,
+        decision: kind,
+      });
+    }
+  } catch (err) {
+    console.error(
+      "[Tool Executor] Failed to settle approval continuation:",
+      err,
+    );
+  }
+}
+
+/**
+ * A structured tool result for a blocked action. Distinguishes denial, expiry,
+ * and skip and carries adaptation guidance, so the model gets a clear, distinct
+ * signal instead of a generic, ambiguous "not approved" error.
+ */
+function blockedToolResult(
+  toolCallId: string,
+  kind: BlockedKind,
+  capability: string,
+  approvalId?: string,
+): ToolResult {
+  const guidance: Record<BlockedKind, string> = {
+    denied:
+      "The user denied this action. Do not retry it; continue the task without it or ask how to proceed.",
+    expired:
+      "The approval request expired before the user decided. Do not retry automatically; report that this action is still pending authorization.",
+    skipped:
+      "The user skipped this action. Continue with the rest of the task and do not retry it.",
+  };
+  const payload: Record<string, unknown> = {
+    status: `action_${kind}`,
+    capability,
+    message: guidance[kind],
+  };
+  if (approvalId) {
+    payload.approvalId = approvalId;
+  }
+  return {
+    tool_call_id: toolCallId,
+    content: JSON.stringify(payload),
+    is_error: true,
+  };
 }
 
 /**
@@ -282,7 +441,7 @@ async function requestGatewayApproval(
     const timeout = setTimeout(() => {
       console.log(`[Tool Executor] Approval timeout for ${approvalId}`);
       unlisten?.();
-      resolve({ approved: false });
+      resolve({ approved: false, timedOut: true });
     }, GATEWAY_APPROVAL_TIMEOUT_MS);
 
     listen<{ id: string; approved: boolean; connectionId?: string | null }>(
@@ -331,23 +490,41 @@ async function authorizeToolOperation(
   toolName: string,
   args: Record<string, unknown>,
   conversationId: string | null,
-): Promise<GatewayApprovalResult> {
+  toolCallId: string,
+): Promise<ToolAuthorization> {
   const sessionId = sessionConversationId(conversationId);
+  const context = contextForPublisherRoute(route, args);
   const decision = await consultAuthorizationGate(
     route,
     publisherSlug,
     toolName,
     sessionId,
-    contextForPublisherRoute(route, args),
+    context,
   );
+  const capability = `${publisherSlug}/${toolName}`;
 
   if (decision.decision === "allow") {
     return { approved: true };
   }
   if (decision.decision === "deny") {
     console.log(`[Tool Executor] Host denied ${publisherSlug}/${toolName}`);
-    return { approved: false };
+    return {
+      approved: false,
+      toolResult: blockedToolResult(toolCallId, "denied", capability),
+    };
   }
+
+  // A prompt suspends the action: record it host-side so the block is visible and
+  // resumable (never a hung call), then run the approval UI and settle it exactly
+  // once with the outcome.
+  const registered = await registerApprovalContinuation(
+    route,
+    publisherSlug,
+    toolName,
+    decision,
+    context,
+    sessionId,
+  );
 
   const approval = await requestGatewayApproval(
     publisherSlug,
@@ -368,7 +545,29 @@ async function authorizeToolOperation(
     approval.approved,
   );
 
-  return approval;
+  if (approval.approved) {
+    if (registered) {
+      await settleApprovalContinuation(registered, "approve");
+    }
+    return { approved: true, connectionId: approval.connectionId };
+  }
+
+  const kind: BlockedKind = approval.timedOut ? "expired" : "denied";
+  if (registered) {
+    await settleApprovalContinuation(
+      registered,
+      approval.timedOut ? "expire" : "deny",
+    );
+  }
+  return {
+    approved: false,
+    toolResult: blockedToolResult(
+      toolCallId,
+      kind,
+      capability,
+      registered?.approvalId,
+    ),
+  };
 }
 
 /**
@@ -383,29 +582,64 @@ async function authorizeSubprocess(
   toolName: string,
   command: string,
   conversationId: string | null,
-  runApprovalUi: () => Promise<boolean>,
-): Promise<boolean> {
+  toolCallId: string,
+  runApprovalUi: () => Promise<GatewayApprovalResult>,
+): Promise<ToolAuthorization> {
+  const sessionId = sessionConversationId(conversationId);
+  const context: OperationContext = { command };
   const decision = await consultAuthorizationGate(
     route,
     "seren",
     toolName,
-    sessionConversationId(conversationId),
-    { command },
+    sessionId,
+    context,
   );
+  // The lease/gate key a subprocess on its leading program token; use that as the
+  // capability label so a block names what the user actually saw.
+  const capability = command.trim().split(/\s+/)[0] || toolName;
+
   if (decision.decision === "deny") {
-    return false;
+    return {
+      approved: false,
+      toolResult: blockedToolResult(toolCallId, "denied", capability),
+    };
   }
   if (decision.decision === "allow") {
-    return true;
+    return { approved: true };
   }
-  return runApprovalUi();
-}
 
-function deniedToolResult(toolCallId: string): ToolResult {
+  const registered = await registerApprovalContinuation(
+    route,
+    "seren",
+    toolName,
+    decision,
+    context,
+    sessionId,
+  );
+  const outcome = await runApprovalUi();
+
+  if (outcome.approved) {
+    if (registered) {
+      await settleApprovalContinuation(registered, "approve");
+    }
+    return { approved: true };
+  }
+
+  const kind: BlockedKind = outcome.timedOut ? "expired" : "denied";
+  if (registered) {
+    await settleApprovalContinuation(
+      registered,
+      outcome.timedOut ? "expire" : "deny",
+    );
+  }
   return {
-    tool_call_id: toolCallId,
-    content: "Operation was not approved by user",
-    is_error: true,
+    approved: false,
+    toolResult: blockedToolResult(
+      toolCallId,
+      kind,
+      capability,
+      registered?.approvalId,
+    ),
   };
 }
 
@@ -448,7 +682,7 @@ async function resolveGatewayOAuthConnectionArgs(
 async function requestShellApproval(
   command: string,
   timeoutSecs: number,
-): Promise<boolean> {
+): Promise<GatewayApprovalResult> {
   const approvalId = `shell-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   console.log(
@@ -466,7 +700,7 @@ async function requestShellApproval(
       "[Tool Executor] Failed to emit shell approval request:",
       err,
     );
-    return false;
+    return { approved: false };
   }
 
   return new Promise((resolve) => {
@@ -474,7 +708,7 @@ async function requestShellApproval(
     const timeout = setTimeout(() => {
       console.log(`[Tool Executor] Shell approval timeout for ${approvalId}`);
       unlisten?.();
-      resolve(false);
+      resolve({ approved: false, timedOut: true });
     }, SHELL_APPROVAL_TIMEOUT_MS);
 
     listen<{ id: string; approved: boolean }>(
@@ -486,7 +720,7 @@ async function requestShellApproval(
         );
         clearTimeout(timeout);
         unlisten?.();
-        resolve(event.payload.approved);
+        resolve({ approved: event.payload.approved });
       },
     )
       .then((fn) => {
@@ -498,7 +732,7 @@ async function requestShellApproval(
           err,
         );
         clearTimeout(timeout);
-        resolve(false);
+        resolve({ approved: false });
       });
   });
 }
@@ -522,15 +756,16 @@ export async function executeTool(
     // Check if this is a built-in Seren tool (seren__toolName)
     if (name.startsWith("seren__")) {
       const serenToolName = name.slice("seren__".length);
-      const approval = await authorizeToolOperation(
+      const auth = await authorizeToolOperation(
         "seren",
         "seren",
         serenToolName,
         args,
         conversationId,
+        toolCall.id,
       );
-      if (!approval.approved) {
-        return deniedToolResult(toolCall.id);
+      if (!auth.approved) {
+        return auth.toolResult;
       }
       const response = await callSerenTool(serenToolName, args);
       const content =
@@ -593,15 +828,16 @@ export async function executeTool(
     switch (name) {
       case "seren_web_fetch": {
         // Arbitrary-URL fetch is open-world data egress; gate it before egress.
-        const approval = await authorizeToolOperation(
+        const auth = await authorizeToolOperation(
           "web",
           "seren",
           "web_fetch",
           args,
           conversationId,
+          toolCall.id,
         );
-        if (!approval.approved) {
-          return deniedToolResult(toolCall.id);
+        if (!auth.approved) {
+          return auth.toolResult;
         }
 
         const url = args.url as string;
@@ -638,19 +874,16 @@ export async function executeTool(
           invokeArgs.injectSerenCredentials = args.inject_seren_credentials;
         }
 
-        const approved = await authorizeSubprocess(
+        const auth = await authorizeSubprocess(
           "shell",
           "execute_command",
           command,
           conversationId,
+          toolCall.id,
           () => requestShellApproval(command, timeoutSecs),
         );
-        if (!approved) {
-          return {
-            tool_call_id: toolCall.id,
-            content: "Command was not approved by user",
-            is_error: true,
-          };
+        if (!auth.approved) {
+          return auth.toolResult;
         }
 
         // Backs the Tail / LIVE pane (#2100). Idempotent — first call
@@ -699,19 +932,16 @@ export async function executeTool(
         const preview = `${cwd}> ${argv.map((item) => JSON.stringify(item)).join(" ")}`;
         // The lease's command rules match the skill's leading program token, so
         // pass the raw argv (not the cwd-prefixed preview) as the command.
-        const approved = await authorizeSubprocess(
+        const auth = await authorizeSubprocess(
           "skill",
           "run_skill_script",
           argv.join(" "),
           conversationId,
+          toolCall.id,
           () => requestShellApproval(preview, timeoutSecs),
         );
-        if (!approved) {
-          return {
-            tool_call_id: toolCall.id,
-            content: "Skill script was not approved by user",
-            is_error: true,
-          };
+        if (!auth.approved) {
+          return auth.toolResult;
         }
 
         const invokeArgs: {
@@ -795,15 +1025,16 @@ async function executeMcpTool(
     // The "mcp" route tells the host gate this is a local stdio server: its
     // name is user-controlled and carries no trusted metadata, so its reads are
     // never auto-trusted even when the name resembles a publisher slug.
-    const approval = await authorizeToolOperation(
+    const auth = await authorizeToolOperation(
       "mcp",
       serverName,
       toolName,
       args,
       conversationId,
+      toolCallId,
     );
-    if (!approval.approved) {
-      return deniedToolResult(toolCallId);
+    if (!auth.approved) {
+      return auth.toolResult;
     }
 
     const result = await mcpClient.callTool(serverName, {
@@ -888,20 +1119,21 @@ async function executeGatewayTool(
   try {
     let callArgs = args;
 
-    const approval = await authorizeToolOperation(
+    const auth = await authorizeToolOperation(
       "gateway",
       publisherSlug,
       toolName,
       args,
       conversationId,
+      toolCallId,
     );
-    if (!approval.approved) {
-      console.log("[Tool Executor] Operation denied by user");
-      return deniedToolResult(toolCallId);
+    if (!auth.approved) {
+      console.log("[Tool Executor] Operation blocked before execution");
+      return auth.toolResult;
     }
 
-    if (approval.connectionId) {
-      callArgs = { ...args, connection_id: approval.connectionId };
+    if (auth.connectionId) {
+      callArgs = { ...args, connection_id: auth.connectionId };
     }
 
     const resolvedArgs = await resolveGatewayOAuthConnectionArgs(

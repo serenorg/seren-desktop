@@ -3,9 +3,14 @@
 
 use tauri::State;
 
+use crate::approval_continuation::{
+    ContinuationScope, ContinuationView, RegisteredContinuation, RequestedCapability,
+    ResolutionSummary, ResolveDecision, ResolveOutcome,
+};
 use crate::capability_lease::{
     BundleRequest, CapabilityLease, LeaseBudgets, LeasePredicates, ProposedBundle, derive_bundle,
 };
+use crate::orchestrator::types::TaskExecutionState;
 use crate::tool_authorization::{
     AuthorizationDecision, OperationContext, ToolAuthorizationState, ToolRoute,
 };
@@ -91,4 +96,79 @@ pub fn revoke_capability_lease(
     lease_id: String,
 ) -> Result<bool, String> {
     state.revoke_lease(&lease_id)
+}
+
+/// Register a suspended continuation for an authorization-blocked action so the
+/// paused action is a visible, resumable record rather than a hung tool call
+/// (#3193-C). The renderer calls this when the gate returns `prompt`, then keeps
+/// the returned `resumeToken` in its own state and forwards only `modelResult` to
+/// the model. Equivalent retries dedup to one pending request.
+#[tauri::command]
+pub fn register_approval_continuation(
+    state: State<'_, ToolAuthorizationState>,
+    conversation_id: String,
+    requested: RequestedCapability,
+    scope: Option<ContinuationScope>,
+    ttl_secs: i64,
+) -> Result<RegisteredContinuation, String> {
+    // A linear turn is the conservative default: the whole task waits unless the
+    // caller can prove the blocked action is an independent branch.
+    let scope = scope.unwrap_or(ContinuationScope::Linear);
+    state.register_continuation(&conversation_id, requested, scope, ttl_secs)
+}
+
+/// Resolve a suspended continuation with the user's decision (approve/deny/skip).
+/// Idempotent exactly once and gated on the host-minted `resumeToken`, so a model
+/// that learns the public `approvalId` cannot self-approve.
+#[tauri::command]
+pub fn resolve_approval_continuation(
+    state: State<'_, ToolAuthorizationState>,
+    approval_id: String,
+    resume_token: String,
+    decision: ResolveDecision,
+) -> Result<ResolveOutcome, String> {
+    state.resolve_continuation(&approval_id, &resume_token, decision)
+}
+
+/// Explicitly expire a suspended continuation (the renderer's approval timeout),
+/// so a lapsed action becomes `approval_expired` rather than a degraded generic
+/// tool failure. Idempotent and token-gated.
+#[tauri::command]
+pub fn expire_approval_continuation(
+    state: State<'_, ToolAuthorizationState>,
+    approval_id: String,
+    resume_token: String,
+) -> Result<ResolveOutcome, String> {
+    state.expire_continuation(&approval_id, &resume_token)
+}
+
+/// The live task-execution state for a conversation, derived from its
+/// continuations. Backs the persistent thread status surface.
+#[tauri::command]
+pub fn task_execution_state(
+    state: State<'_, ToolAuthorizationState>,
+    conversation_id: String,
+) -> Result<TaskExecutionState, String> {
+    state.task_execution_state(&conversation_id)
+}
+
+/// Outcome counts for a conversation, backing completion integrity
+/// (`can_complete`) and the final summary disclosure of denied/skipped/expired/
+/// unresolved work.
+#[tauri::command]
+pub fn approval_resolution_summary(
+    state: State<'_, ToolAuthorizationState>,
+    conversation_id: String,
+) -> Result<ResolutionSummary, String> {
+    state.resolution_summary(&conversation_id)
+}
+
+/// Every suspended continuation for a conversation, redacted (no resume tokens),
+/// for the inspection surface.
+#[tauri::command]
+pub fn list_approval_continuations(
+    state: State<'_, ToolAuthorizationState>,
+    conversation_id: String,
+) -> Result<Vec<ContinuationView>, String> {
+    state.list_continuations(&conversation_id)
 }
