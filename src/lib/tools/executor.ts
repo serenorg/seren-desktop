@@ -537,13 +537,18 @@ async function authorizeToolOperation(
     },
   );
 
-  await recordAuthorizationDecision(
-    route,
-    publisherSlug,
-    toolName,
-    sessionId,
-    approval.approved,
-  );
+  // Only an explicit choice is durable. An approval-UI timeout is an expiry, not
+  // a denial: persisting it would auto-deny the operation on the next attempt, so
+  // the decision store is left untouched and a later call re-prompts.
+  if (!approval.timedOut) {
+    await recordAuthorizationDecision(
+      route,
+      publisherSlug,
+      toolName,
+      sessionId,
+      approval.approved,
+    );
+  }
 
   if (approval.approved) {
     if (registered) {

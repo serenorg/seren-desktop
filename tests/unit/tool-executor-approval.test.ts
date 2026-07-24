@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   approvalId: "",
   approvalResponse: true,
+  // When true, the approval-response listener never fires, so the approval UI's
+  // own timeout is what resolves the request (an expiry).
+  approvalNoResponse: false,
   shellApprovalId: "",
   shellApprovalResponse: true,
   // Default gate decision; individual tests override before calling executeTool.
@@ -171,6 +174,7 @@ describe("tool executor authorization gate", () => {
     vi.clearAllMocks();
     mocks.approvalId = "";
     mocks.approvalResponse = true;
+    mocks.approvalNoResponse = false;
     mocks.shellApprovalId = "";
     mocks.shellApprovalResponse = true;
     mocks.authorizeError = false;
@@ -234,9 +238,12 @@ describe("tool executor authorization gate", () => {
         }) => void,
       ) => {
         if (eventName === "gateway-tool-approval-response") {
-          handler({
-            payload: { id: mocks.approvalId, approved: mocks.approvalResponse },
-          });
+          // Simulate the user never answering: leave the request to time out.
+          if (!mocks.approvalNoResponse) {
+            handler({
+              payload: { id: mocks.approvalId, approved: mocks.approvalResponse },
+            });
+          }
         }
         if (eventName === "shell-command-approval-response") {
           handler({
@@ -340,6 +347,35 @@ describe("tool executor authorization gate", () => {
     expect(recordCalls()).toEqual([
       expect.objectContaining({ approved: false }),
     ]);
+  });
+
+  it("treats an approval-UI timeout as an expiry, not a durable denial", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision.decision = "prompt";
+    mocks.authorizeDecision.promptKind = "session";
+    mocks.authorizeDecision.operationClass = "unclassified";
+    // The user never answers; the request must resolve via its own timeout.
+    mocks.approvalNoResponse = true;
+
+    vi.useFakeTimers();
+    try {
+      const pending = executeTool(
+        gatewayCall("new-publisher", "inspect_records"),
+        "conv-a",
+      );
+      // Fire the 5-minute approval timeout (GATEWAY_APPROVAL_TIMEOUT_MS).
+      await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
+      const result = await pending;
+
+      expect(result.is_error).toBe(true);
+      expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+      // Structured, distinct expiry — not a generic "not approved".
+      expect(JSON.parse(result.content).status).toBe("action_expired");
+      // The expiry must NOT be persisted; a later attempt has to re-prompt.
+      expect(recordCalls()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails closed when the gate is unavailable", async () => {
