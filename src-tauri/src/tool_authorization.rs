@@ -3831,6 +3831,236 @@ mod tests {
         );
     }
 
+    // ---- closing E2E: a high-risk external write through the gate (#3280) ---
+    //
+    // Slice D proved the lease mechanism with local `echo` shell commands; it
+    // never drove a genuine high-risk *external side-effect* (a publisher send)
+    // through the gate under an explicitly-approved high-risk lease. These tests
+    // close that gap deterministically: the covered send is allowed silently, the
+    // gateway transport redeems its handle for the exact operation, the decision
+    // is audited credential-safe, and a revoked or expired lease refuses the
+    // outstanding handle and re-escalates instead of leaking a late write.
+
+    /// The external-write args a model would send. Carries a secret-shaped value
+    /// so the credential-safety assertion has something real to catch.
+    fn external_write_args() -> serde_json::Value {
+        serde_json::json!({
+            "to": "recipient@example.com",
+            "subject": "Q3 report",
+            "idempotency_key": "sk-live-DO-NOT-LEAK-1234567890"
+        })
+    }
+
+    /// A lease that opts one publisher + one target into high-risk coverage — the
+    /// explicit, bounded envelope a user approves for an outbound workflow. The
+    /// publisher slug is deliberately one with no hard-coded Desktop entry.
+    fn high_risk_send_lease(s: &ToolAuthorizationState, conversation_id: &str) -> CapabilityLease {
+        let predicates = LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "outbound-mailer".to_string(),
+                allow_high_risk: true,
+                target: Some("conn-primary".to_string()),
+            }],
+            ..Default::default()
+        };
+        s.grant_lease(
+            conversation_id,
+            "Send outbound mail via the primary connection",
+            3600,
+            predicates,
+            call_budget(25),
+        )
+        .unwrap()
+    }
+
+    /// The happy path: a model-originated high-risk publisher send, covered by an
+    /// explicitly-approved high-risk lease, is authorized *silently* (an allow,
+    /// not a one-shot prompt); the gateway transport redeems its handle for that
+    /// exact publisher/tool/body; and the decision is recorded in
+    /// `authorization_audit` as `lease_used`, keyed to the lease and the resource
+    /// target, with no argument payload or credential.
+    #[test]
+    fn high_risk_external_write_runs_silently_under_a_lease_and_is_audited() {
+        let s = state();
+        let lease = high_risk_send_lease(&s, "conv-a");
+        let args = external_write_args();
+
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-primary"),
+                Some(&args),
+            )
+            .unwrap();
+        assert_eq!(
+            decision.decision, "allow",
+            "an approved high-risk lease covers the send silently"
+        );
+        let handle = decision.handle.expect("a silent allow still mints a dispatch handle");
+
+        // What gateway_http::enforce_publisher_dispatch does before the POST
+        // leaves the app: redeem exactly this handle for this publisher/tool/body.
+        // Redemption succeeding is what permits the real external write.
+        let binding = binding_for_publisher_args(&args);
+        s.consume_dispatch_handle(
+            &handle,
+            ToolRoute::Gateway,
+            "outbound-mailer",
+            "post_send_message",
+            &binding,
+        )
+        .unwrap();
+
+        // The decision is auditable as a lease use — keyed to the lease and the
+        // resource target, never the argument payload or the secret it carried.
+        let entries = s.list_audit("conv-a", 100).unwrap();
+        let used = entries
+            .iter()
+            .find(|e| e.event == "lease_used")
+            .expect("the covered send is audited as lease_used");
+        assert_eq!(used.subject_id.as_deref(), Some(lease.id.as_str()));
+        assert_eq!(used.route.as_deref(), Some("gateway"));
+        assert_eq!(used.publisher_slug.as_deref(), Some("outbound-mailer"));
+        assert_eq!(used.tool_name.as_deref(), Some("post_send_message"));
+        assert_eq!(used.detail.as_deref(), Some("conn-primary"));
+        for entry in &entries {
+            let row = serde_json::to_string(entry).unwrap();
+            assert!(!row.contains("sk-live"), "audit row leaked a credential-shaped argument: {row}");
+            assert!(
+                !row.contains("recipient@example.com"),
+                "audit row leaked the argument payload: {row}"
+            );
+        }
+
+        // Target scoping: the same send to a different connection is not covered
+        // and escalates to an exact one-shot instead of riding the lease.
+        let other = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-secondary"),
+                Some(&args),
+            )
+            .unwrap();
+        assert_eq!(other.decision, "prompt");
+        assert_eq!(other.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
+    /// The denial half: once the covering lease is revoked, an already-minted
+    /// handle can no longer be redeemed (the real POST is refused at the
+    /// transport), and re-authorizing the same send returns a fresh one-shot
+    /// prompt — a durable, distinct block, never a silent allow.
+    #[test]
+    fn revoking_the_lease_blocks_the_external_write_with_a_distinct_signal() {
+        let s = state();
+        let lease = high_risk_send_lease(&s, "conv-a");
+        let args = external_write_args();
+        let binding = binding_for_publisher_args(&args);
+
+        let handle = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-primary"),
+                Some(&args),
+            )
+            .unwrap()
+            .handle
+            .expect("the covered send mints a handle");
+
+        assert!(s.revoke_lease(&lease.id).unwrap());
+
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                &binding,
+            )
+            .is_err(),
+            "a revoked lease must kill its outstanding dispatch handle"
+        );
+
+        let after = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-primary"),
+                Some(&args),
+            )
+            .unwrap();
+        assert_eq!(after.decision, "prompt", "a revoked envelope re-escalates, never silently allows");
+        assert_eq!(after.prompt_kind.as_deref(), Some("one-shot"));
+        assert!(audit_events(&s, "conv-a").contains(&"lease_revoked".to_string()));
+    }
+
+    /// The expiry half: an expired lease covers nothing. The gate escalates to a
+    /// one-shot prompt, and a handle minted before expiry is refused at the
+    /// transport, so a lapsed envelope cannot leak a late external write.
+    #[test]
+    fn an_expired_lease_blocks_the_external_write() {
+        let s = state();
+        let lease = high_risk_send_lease(&s, "conv-a");
+        let args = external_write_args();
+        let binding = binding_for_publisher_args(&args);
+
+        let handle = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-primary"),
+                Some(&args),
+            )
+            .unwrap()
+            .handle
+            .expect("the covered send mints a handle");
+
+        // Force the lease window closed by rewriting its stored expiry into the past.
+        s.with_conn(|conn| {
+            let mut expired = lease.clone();
+            expired.expires_at = "2000-01-01T00:00:00.000Z".to_string();
+            write_lease(conn, &expired)
+        })
+        .unwrap();
+
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                &binding,
+            )
+            .is_err(),
+            "an expired lease must refuse its outstanding dispatch handle"
+        );
+
+        let after = s
+            .authorize(
+                ToolRoute::Gateway,
+                "outbound-mailer",
+                "post_send_message",
+                "conv-a",
+                &target_ctx("conn-primary"),
+                Some(&args),
+            )
+            .unwrap();
+        assert_eq!(after.decision, "prompt");
+        assert_eq!(after.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
     // ---- standing policies (#3193-E) — headless pre-authorization -----------
 
     fn standing_policy_input(
