@@ -46,6 +46,7 @@ pub mod services {
 
 pub mod sandbox;
 
+pub mod approval_continuation;
 pub mod audio;
 mod auth;
 pub mod capability_lease;
@@ -1093,6 +1094,12 @@ pub fn run() {
             commands::tool_authorization::grant_capability_lease,
             commands::tool_authorization::list_capability_leases,
             commands::tool_authorization::revoke_capability_lease,
+            commands::tool_authorization::register_approval_continuation,
+            commands::tool_authorization::resolve_approval_continuation,
+            commands::tool_authorization::expire_approval_continuation,
+            commands::tool_authorization::task_execution_state,
+            commands::tool_authorization::approval_resolution_summary,
+            commands::tool_authorization::list_approval_continuations,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,

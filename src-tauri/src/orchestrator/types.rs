@@ -265,6 +265,49 @@ pub enum PlanStatus {
     Failed,
 }
 
+/// Execution state of a task (or turn) with respect to authorization blocks.
+///
+/// An authorization block must never look like a hung agent (#3193-C). As soon as
+/// the gate suspends a required action, the owning task leaves `Running` for a
+/// visible blocked state, and every non-approval outcome resolves to its own
+/// terminal state so a paused action is never a silent stall or a generic tool
+/// error.
+///
+/// - `Running` — no unresolved authorization block.
+/// - `RunningWithBlockedActions` — an independent branch is blocked on approval,
+///   but the scheduler proved other work can continue.
+/// - `WaitingForApproval` — a linear turn (or all remaining work) depends on a
+///   pending approval, so the whole task waits visibly.
+/// - `ApprovalDenied` / `ApprovalExpired` / `ActionSkipped` — terminal outcomes of
+///   a single suspended action, surfaced in the final summary so denied, expired,
+///   and skipped work is disclosed rather than hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskExecutionState {
+    Running,
+    RunningWithBlockedActions,
+    WaitingForApproval,
+    ApprovalDenied,
+    ApprovalExpired,
+    ActionSkipped,
+}
+
+impl TaskExecutionState {
+    /// The lowercase wire token, matching the `serde(rename_all = "snake_case")`
+    /// representation. Lets the store persist and compare a state without a
+    /// serde round-trip.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::RunningWithBlockedActions => "running_with_blocked_actions",
+            Self::WaitingForApproval => "waiting_for_approval",
+            Self::ApprovalDenied => "approval_denied",
+            Self::ApprovalExpired => "approval_expired",
+            Self::ActionSkipped => "action_skipped",
+        }
+    }
+}
+
 /// Wrapper for worker events sent to the frontend with conversation context.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrchestratorEvent {
@@ -455,6 +498,27 @@ mod tests {
 
         let json = serde_json::to_value(DelegationType::FullHandoff).unwrap();
         assert_eq!(json, "full_handoff");
+    }
+
+    #[test]
+    fn task_execution_state_wire_matches_serde() {
+        // The store persists and the frontend renders the snake_case token; the
+        // `as_wire` shortcut must never drift from the serde representation.
+        for state in [
+            TaskExecutionState::Running,
+            TaskExecutionState::RunningWithBlockedActions,
+            TaskExecutionState::WaitingForApproval,
+            TaskExecutionState::ApprovalDenied,
+            TaskExecutionState::ApprovalExpired,
+            TaskExecutionState::ActionSkipped,
+        ] {
+            let serialized = serde_json::to_value(state).unwrap();
+            assert_eq!(serialized, state.as_wire());
+        }
+        assert_eq!(
+            serde_json::to_value(TaskExecutionState::WaitingForApproval).unwrap(),
+            "waiting_for_approval"
+        );
     }
 
     #[test]
