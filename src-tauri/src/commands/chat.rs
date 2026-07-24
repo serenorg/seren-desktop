@@ -95,6 +95,104 @@ fn clear_conversation_index_best_effort(app: &AppHandle) {
     }
 }
 
+/// A deleted conversation's agent identity, enough to locate its on-disk CLI
+/// session transcript(s). Only agent conversations with a captured session id
+/// have transcripts on disk.
+struct AgentTranscriptTarget {
+    agent_type: String,
+    session_id: String,
+    agent_cwd: Option<String>,
+}
+
+/// Read the transcript targets for the given conversations before their rows are
+/// deleted. Skips rows with no captured `agent_session_id` (plain chats and
+/// agent sessions that never wrote a transcript).
+fn collect_agent_transcript_targets(
+    conn: &Connection,
+    conversation_ids: &[String],
+) -> rusqlite::Result<Vec<AgentTranscriptTarget>> {
+    let mut stmt = conn.prepare(
+        "SELECT agent_type, agent_session_id, agent_cwd
+         FROM conversations
+         WHERE id = ?1 AND agent_session_id IS NOT NULL AND agent_session_id <> ''",
+    )?;
+    let mut targets = Vec::new();
+    for id in conversation_ids {
+        let rows = stmt.query_map(params![id], |row| {
+            Ok(AgentTranscriptTarget {
+                agent_type: row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+                session_id: row.get::<_, String>(1)?,
+                agent_cwd: row.get::<_, Option<String>>(2)?,
+            })
+        })?;
+        for target in rows {
+            targets.push(target?);
+        }
+    }
+    Ok(targets)
+}
+
+/// Best-effort deletion of a deleted conversation's raw CLI session
+/// transcript(s) — Claude Code (`~/.claude/projects/<cwd>/<id>.jsonl`) and Codex
+/// (`~/.codex/sessions/**/rollout-*-<id>.jsonl`). Mirrors the index-cleanup
+/// helpers: a missing, locked, or unresolvable file is logged, never fatal, so
+/// the delete itself always succeeds.
+fn delete_agent_transcripts_best_effort(targets: &[AgentTranscriptTarget]) {
+    if targets.is_empty() {
+        return;
+    }
+    let claude_root = crate::claude_memory::claude_projects_root().ok();
+    let codex_root = crate::terminal::codex_sessions_root();
+    remove_agent_transcripts(targets, claude_root.as_deref(), codex_root.as_deref());
+}
+
+/// Core of [`delete_agent_transcripts_best_effort`], with the Claude/Codex roots
+/// injected so it can be exercised against a real temporary filesystem. Session
+/// ids must parse as UUIDs before a path is touched, which doubles as
+/// path-injection defense.
+fn remove_agent_transcripts(
+    targets: &[AgentTranscriptTarget],
+    claude_root: Option<&std::path::Path>,
+    codex_root: Option<&std::path::Path>,
+) {
+    for target in targets {
+        let uses_claude = matches!(target.agent_type.as_str(), "claude-code" | "claude-codex");
+        let uses_codex = matches!(target.agent_type.as_str(), "codex" | "claude-codex");
+
+        if uses_claude {
+            if let (Some(root), Some(cwd)) = (claude_root, target.agent_cwd.as_deref()) {
+                if uuid::Uuid::parse_str(&target.session_id).is_ok() {
+                    let path = crate::claude_memory::session_jsonl_path(
+                        root,
+                        std::path::Path::new(cwd),
+                        &target.session_id,
+                    );
+                    remove_transcript_file(&path);
+                }
+            }
+        }
+        if uses_codex {
+            if let Some(root) = codex_root {
+                for path in crate::terminal::codex_transcripts_for_session(root, &target.session_id)
+                {
+                    remove_transcript_file(&path);
+                }
+            }
+        }
+    }
+}
+
+fn remove_transcript_file(path: &std::path::Path) {
+    match std::fs::remove_file(path) {
+        Ok(()) => log::info!("[Delete] Removed CLI session transcript {}", path.display()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => log::warn!(
+            "[Delete] Failed to remove CLI session transcript {}: {err}",
+            path.display()
+        ),
+    }
+}
+
 async fn refresh_conversation_index_meta_best_effort(
     app: AppHandle,
     conversation_id: String,
@@ -629,14 +727,16 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
     let index_id = id.clone();
-    run_db(app.clone(), move |conn| {
+    let transcript_targets = run_db(app.clone(), move |conn| {
+        let targets = collect_agent_transcript_targets(conn, std::slice::from_ref(&id))?;
         delete_conversation_records(conn, &[id])?;
         vacuum_database(conn)?;
-        Ok(())
+        Ok(targets)
     })
     .await?;
     delete_conversation_index_best_effort(&app, &index_id);
     vacuum_conversation_index_best_effort(&app);
+    delete_agent_transcripts_best_effort(&transcript_targets);
     Ok(())
 }
 
@@ -645,21 +745,23 @@ pub async fn delete_conversations_by_employee(
     app: AppHandle,
     employee_id: String,
 ) -> Result<i64, String> {
-    let (deleted, conversation_ids) = run_db(app.clone(), move |conn| {
+    let (deleted, conversation_ids, transcript_targets) = run_db(app.clone(), move |conn| {
         let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
         let conversation_ids = stmt
             .query_map(params![employee_id], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(stmt);
+        let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
         let deleted = delete_conversation_records(conn, &conversation_ids)?;
         vacuum_database(conn)?;
-        Ok((deleted as i64, conversation_ids))
+        Ok((deleted as i64, conversation_ids, targets))
     })
     .await?;
     for conversation_id in &conversation_ids {
         delete_conversation_index_best_effort(&app, conversation_id);
     }
     vacuum_conversation_index_best_effort(&app);
+    delete_agent_transcripts_best_effort(&transcript_targets);
     Ok(deleted)
 }
 
@@ -2152,15 +2254,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentArchiveOrigin, AgentConversation, DERIVED_KIND_CASE_SQL, ExpectedHappyRestoration,
-        HappyRestorationCandidate, HappyRestorationLookup, archive_agent_conversation_in_db,
-        archive_happy_provider_session_in_db, claim_happy_provider_session_owner_in_db,
-        claim_happy_provider_session_owner_with_provenance_in_db, delete_conversation_records,
-        emit_happy_archive_event, emit_happy_provider_archive_event,
+        AgentArchiveOrigin, AgentConversation, AgentTranscriptTarget, DERIVED_KIND_CASE_SQL,
+        ExpectedHappyRestoration, HappyRestorationCandidate, HappyRestorationLookup,
+        archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
+        claim_happy_provider_session_owner_in_db,
+        claim_happy_provider_session_owner_with_provenance_in_db, collect_agent_transcript_targets,
+        delete_conversation_records, emit_happy_archive_event, emit_happy_provider_archive_event,
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
         lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
         lookup_happy_session_id_by_conversation_in_db, migrate_happy_restoration_relay_in_db,
-        set_agent_conversation_session_id_in_db, upsert_agent_conversation_in_db, vacuum_database,
+        remove_agent_transcripts, set_agent_conversation_session_id_in_db,
+        upsert_agent_conversation_in_db, vacuum_database,
     };
     use crate::services::database::{configure_connection, setup_schema};
     use rusqlite::{Connection, params};
@@ -2172,6 +2276,89 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn
+    }
+
+    #[test]
+    fn deleting_agent_conversation_removes_its_cli_transcripts() {
+        let conn = open();
+        let claude_id = "5973b6c0-94b8-487b-a530-2aeb6098ae0e";
+        let codex_id = "11111111-2222-4333-8444-555555555555";
+        let cwd = "/work/project";
+
+        // Two agent conversations (Claude Code + Codex) and one plain chat that
+        // must be left untouched because it has no captured session id.
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, agent_session_id, agent_cwd)
+             VALUES
+               ('claude-convo', 't', 0, 'agent', 'claude-code', ?1, ?3),
+               ('codex-convo',  't', 0, 'agent', 'codex',       ?2, ?3)",
+            params![claude_id, codex_id, cwd],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind) VALUES ('plain-chat', 't', 0, 'chat')",
+            [],
+        )
+        .unwrap();
+
+        let targets = collect_agent_transcript_targets(
+            &conn,
+            &[
+                "claude-convo".to_string(),
+                "codex-convo".to_string(),
+                "plain-chat".to_string(),
+            ],
+        )
+        .unwrap();
+        // The plain chat has no session id, so only the two agent rows surface.
+        assert_eq!(targets.len(), 2);
+
+        // Lay down real transcript files where production would have written them.
+        let claude_root = tempfile::TempDir::new().unwrap();
+        let codex_root = tempfile::TempDir::new().unwrap();
+        let claude_path = crate::claude_memory::session_jsonl_path(
+            claude_root.path(),
+            std::path::Path::new(cwd),
+            claude_id,
+        );
+        std::fs::create_dir_all(claude_path.parent().unwrap()).unwrap();
+        std::fs::write(&claude_path, b"{}").unwrap();
+
+        let codex_day = codex_root.path().join("2026").join("06").join("16");
+        std::fs::create_dir_all(&codex_day).unwrap();
+        let codex_path = codex_day.join(format!("rollout-2026-06-16T07-24-21-{codex_id}.jsonl"));
+        std::fs::write(&codex_path, b"{}").unwrap();
+
+        remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
+
+        assert!(!claude_path.exists(), "claude transcript should be deleted");
+        assert!(!codex_path.exists(), "codex transcript should be deleted");
+
+        // Idempotent: a second pass over now-missing files must not panic.
+        remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
+    }
+
+    #[test]
+    fn transcript_targets_reject_non_uuid_session_ids() {
+        // A non-UUID session id must be skipped, so the file that its naive path
+        // would resolve to is left untouched (path-injection defense).
+        let claude_root = tempfile::TempDir::new().unwrap();
+        let codex_root = tempfile::TempDir::new().unwrap();
+        let naive_path = crate::claude_memory::session_jsonl_path(
+            claude_root.path(),
+            std::path::Path::new("/work"),
+            "not-a-uuid",
+        );
+        std::fs::create_dir_all(naive_path.parent().unwrap()).unwrap();
+        std::fs::write(&naive_path, b"keep").unwrap();
+
+        let targets = vec![AgentTranscriptTarget {
+            agent_type: "claude-code".to_string(),
+            session_id: "not-a-uuid".to_string(),
+            agent_cwd: Some("/work".to_string()),
+        }];
+        remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
+        assert!(naive_path.exists(), "non-UUID session id must be skipped");
     }
 
     #[test]
