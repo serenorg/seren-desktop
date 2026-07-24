@@ -47,6 +47,7 @@ pub const MEMORY_MCP_TOOLS: &[&str] = &[
     "memory_timeline",
     "consolidate",
     "configure_publishers",
+    "delete_memories_by_source",
 ];
 
 /// Managed state for memory operations.
@@ -179,6 +180,26 @@ impl MemoryState {
             log::warn!("memory tool {tool_name} failed: {error}");
         }
         parsed
+    }
+
+    /// Permanently erase every retained conversation source (and its derived
+    /// memories) sharing `source_uri`, via the memory service's
+    /// `delete_memories_by_source` tool. The desktop writes a conversation-level
+    /// `source_uri`, so one call clears a whole conversation. Returns the
+    /// service's audit counts (`{sources_deleted, memories_deleted}`). The caller
+    /// treats failures as best-effort so a conversation delete never fails on an
+    /// unreachable or unauthenticated memory service.
+    pub async fn delete_conversation_sources(
+        &self,
+        app: &tauri::AppHandle,
+        source_uri: &str,
+    ) -> Result<Value, String> {
+        self.call_memory_tool(
+            app,
+            "delete_memories_by_source",
+            json!({ "source_uri": source_uri }),
+        )
+        .await
     }
 }
 

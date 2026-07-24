@@ -31,6 +31,17 @@ export const MEMORY_TOOL_NAMES = [
 
 export type MemoryToolName = (typeof MEMORY_TOOL_NAMES)[number];
 
+// Conversation-level source URI shared by every retained turn in a conversation.
+// The memory service treats `source_uri` as the conversation grouping key and
+// matches it exactly, so `delete_memories_by_source` can erase the whole
+// conversation's retained sources in one call. `source_external_id` stays
+// per-message. The Rust delete cascade rebuilds this same string
+// (`conversation_source_uri` in `src-tauri/src/commands/chat.rs`) — keep both in
+// sync.
+export function conversationSourceUri(conversationId: string): string {
+  return `seren://desktop/conversations/${conversationId}`;
+}
+
 export interface MemoryRef {
   id?: string;
   content: string;
