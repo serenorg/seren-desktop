@@ -49,8 +49,25 @@ vi.mock("@/stores/settings.store", () => ({
   },
 }));
 
-import { processAssistantResponseMemory } from "@/services/memory";
+import {
+  conversationSourceUri,
+  processAssistantResponseMemory,
+} from "@/services/memory";
 import { privacyStore } from "@/stores/privacy.store";
+
+describe("conversation source URI", () => {
+  // This exact string is the cascade key. The Rust delete path
+  // (`conversation_source_uri` in src-tauri/src/commands/chat.rs) rebuilds the
+  // identical value to erase a conversation's retained sources; a mismatch means
+  // `delete_memories_by_source` matches nothing and transcripts silently survive
+  // a delete.
+  it("is conversation-level, with no per-message segment", () => {
+    expect(conversationSourceUri("abc-123")).toBe(
+      "seren://desktop/conversations/abc-123",
+    );
+    expect(conversationSourceUri("abc-123")).not.toContain("/messages/");
+  });
+});
 
 describe("verbatim source retention", () => {
   beforeEach(() => {

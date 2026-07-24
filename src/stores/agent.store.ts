@@ -432,6 +432,7 @@ import {
 } from "@/services/credential-lease";
 import {
   bootstrapMemoryContext,
+  conversationSourceUri,
   processAssistantResponseMemory,
   recallMemoryContext,
 } from "@/services/memory";
@@ -8674,7 +8675,7 @@ export const agentStore = {
           sessionId: session.conversationId,
           sourceExternalId: `desktop:agent:${message.id}`,
           sourceUri: session.conversationId
-            ? `seren://desktop/conversations/${session.conversationId}/messages/${message.id}`
+            ? conversationSourceUri(session.conversationId)
             : undefined,
         }).catch((err) => {
           console.warn("[AgentStore] process memory failed:", err);

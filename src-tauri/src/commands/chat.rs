@@ -230,6 +230,73 @@ fn remove_transcript_file(path: &std::path::Path) {
     }
 }
 
+/// Conversation-level source URI for a conversation's retained cloud-memory
+/// sources. MUST match the frontend `conversationSourceUri` in
+/// `src/services/memory.ts`; the memory service matches this string exactly, so
+/// one `delete_memories_by_source` call erases every retained turn in the
+/// conversation.
+pub(crate) fn conversation_source_uri(conversation_id: &str) -> String {
+    format!("seren://desktop/conversations/{conversation_id}")
+}
+
+/// Summed audit counts returned by the cloud-memory source erasure.
+#[derive(Default)]
+pub(crate) struct MemorySourceEraseCounts {
+    pub sources_deleted: i64,
+    pub memories_deleted: i64,
+}
+
+/// Permanently erase the retained cloud-memory sources (and their derived
+/// memories) for each conversation, keyed on the conversation-level source URI.
+/// Best-effort and never fatal: an unauthenticated or offline memory service is
+/// logged and the remaining conversations still run. Returns the summed audit
+/// counts so the erase-all flow can report them.
+async fn erase_memory_sources(
+    app: &AppHandle,
+    conversation_ids: &[String],
+) -> MemorySourceEraseCounts {
+    let mut counts = MemorySourceEraseCounts::default();
+    if conversation_ids.is_empty() {
+        return counts;
+    }
+    let memory_state = app.state::<MemoryState>();
+    for id in conversation_ids {
+        let source_uri = conversation_source_uri(id);
+        match memory_state
+            .delete_conversation_sources(app, &source_uri)
+            .await
+        {
+            Ok(value) => {
+                counts.sources_deleted += value
+                    .get("sources_deleted")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                counts.memories_deleted += value
+                    .get("memories_deleted")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+            }
+            Err(err) => log::warn!(
+                "[Delete] Cloud-memory source erase failed for conversation {id}: {err}"
+            ),
+        }
+    }
+    counts
+}
+
+/// Fire-and-forget the retained cloud-memory source erasure so an interactive
+/// conversation delete stays responsive. The local delete has already
+/// committed; this cleans up the remote copy in the background.
+fn spawn_memory_source_erase_best_effort(app: &AppHandle, conversation_ids: Vec<String>) {
+    if conversation_ids.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = erase_memory_sources(&app, &conversation_ids).await;
+    });
+}
+
 async fn refresh_conversation_index_meta_best_effort(
     app: AppHandle,
     conversation_id: String,
@@ -774,6 +841,7 @@ pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), Strin
     delete_conversation_index_best_effort(&app, &index_id);
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
+    spawn_memory_source_erase_best_effort(&app, vec![index_id]);
     Ok(())
 }
 
@@ -799,6 +867,7 @@ pub async fn delete_conversations_by_employee(
     }
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
+    spawn_memory_source_erase_best_effort(&app, conversation_ids);
     Ok(deleted)
 }
 
@@ -2264,7 +2333,7 @@ pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
 }
 
 /// Outcome of erasing one conversation-data target in the erase-all flow.
-/// `status` is one of `ok`, `failed`, `delegated`, or `unsupported`.
+/// `status` is one of `ok`, `failed`, or `delegated`.
 #[derive(Serialize)]
 pub struct EraseTargetReport {
     pub target: String,
@@ -2286,10 +2355,11 @@ impl EraseTargetReport {
 /// per-target success/failure report. Each target is best-effort and isolated:
 /// a failure in one is recorded and the remaining targets still run.
 ///
+/// `cloud_memories` erases each conversation's retained sources (and their
+/// derived memories) via the memory service's `delete_memories_by_source`.
 /// Remote targets this flow does not perform are reported honestly rather than
 /// omitted — `remote_history_schema` and `claude_agent_preferences` are
-/// delegated to their own controls, and `cloud_memories` is unsupported because
-/// the memory service exposes no source/bulk delete (tracked in #3198).
+/// delegated to their own controls.
 #[tauri::command]
 pub async fn erase_all_conversation_data(
     app: AppHandle,
@@ -2309,17 +2379,24 @@ pub async fn erase_all_conversation_data(
         let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
         delete_conversation_records(conn, &conversation_ids)?;
         vacuum_database(conn)?;
-        Ok((conversation_ids.len(), targets))
+        Ok((conversation_ids, targets))
     })
     .await;
 
+    // Conversation ids captured before deletion, reused to erase each
+    // conversation's retained cloud-memory sources below.
+    let mut erased_conversation_ids: Vec<String> = Vec::new();
     let transcript_targets = match chat_result {
-        Ok((count, targets)) => {
+        Ok((conversation_ids, targets)) => {
             reports.push(EraseTargetReport::new(
                 "local_chat_db",
                 "ok",
-                Some(format!("{count} conversation(s) removed; VACUUM + WAL truncate")),
+                Some(format!(
+                    "{} conversation(s) removed; VACUUM + WAL truncate",
+                    conversation_ids.len()
+                )),
             ));
+            erased_conversation_ids = conversation_ids;
             targets
         }
         Err(err) => {
@@ -2386,10 +2463,19 @@ pub async fn erase_all_conversation_data(
             "Use \"Wipe Remote Copy\" — needs the SerenDB project/branch and a typed database-name confirmation.".to_string(),
         ),
     ));
+    // Cloud memory: erase each conversation's retained sources (and their
+    // derived memories) by conversation-level source URI. Best-effort per
+    // conversation; the summed audit counts are reported.
+    let memory_counts = erase_memory_sources(&app, &erased_conversation_ids).await;
     reports.push(EraseTargetReport::new(
         "cloud_memories",
-        "unsupported",
-        Some("The memory service exposes no source or bulk delete (tracked in #3198).".to_string()),
+        "ok",
+        Some(format!(
+            "{} retained source(s) and {} derived memory(ies) erased across {} conversation(s)",
+            memory_counts.sources_deleted,
+            memory_counts.memories_deleted,
+            erased_conversation_ids.len()
+        )),
     ));
     reports.push(EraseTargetReport::new(
         "claude_agent_preferences",
@@ -2433,7 +2519,8 @@ mod tests {
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
         claim_happy_provider_session_owner_with_provenance_in_db, collect_agent_transcript_targets,
-        delete_conversation_records, emit_happy_archive_event, emit_happy_provider_archive_event,
+        conversation_source_uri, delete_conversation_records, emit_happy_archive_event,
+        emit_happy_provider_archive_event,
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
         lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
         lookup_happy_session_id_by_conversation_in_db, migrate_happy_restoration_relay_in_db,
@@ -2450,6 +2537,19 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn
+    }
+
+    // The conversation-delete cloud-memory cascade matches retained sources by
+    // this exact string. It MUST stay identical to the frontend
+    // `conversationSourceUri` (src/services/memory.ts) — the same value written
+    // at capture time — or `delete_memories_by_source` matches nothing and
+    // retained transcripts silently survive the delete.
+    #[test]
+    fn conversation_source_uri_matches_capture_contract() {
+        assert_eq!(
+            conversation_source_uri("abc-123"),
+            "seren://desktop/conversations/abc-123"
+        );
     }
 
     #[test]

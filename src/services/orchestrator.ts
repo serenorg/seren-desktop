@@ -25,6 +25,7 @@ import {
 } from "@/services/employees-runtime";
 import {
   bootstrapMemoryContextDetails,
+  conversationSourceUri,
   processAssistantResponseMemory,
   recallMemoryContext,
 } from "@/services/memory";
@@ -745,7 +746,7 @@ function handleComplete(
       sessionId: conversationId,
       projectContext: fileTreeState.rootPath || undefined,
       sourceExternalId: `desktop:orchestrator:${assistantMessage.id}`,
-      sourceUri: `seren://desktop/conversations/${conversationId}/messages/${assistantMessage.id}`,
+      sourceUri: conversationSourceUri(conversationId),
     })
       .then((result) => {
         if (!result?.messageMemory) return;
