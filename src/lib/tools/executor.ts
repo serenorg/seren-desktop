@@ -300,7 +300,7 @@ async function reserveLeaseSpend(
   asset: string,
 ): Promise<SpendReservation> {
   try {
-    return await invoke<SpendReservation>("reserve_lease_spend", {
+    const reservation = await invoke<SpendReservation>("reserve_lease_spend", {
       route: "gateway",
       publisherSlug,
       toolName,
@@ -309,6 +309,16 @@ async function reserveLeaseSpend(
       asset,
       costMicros,
     });
+    // A malformed response cannot be trusted to have metered the budget:
+    // fail closed to an explicit prompt rather than a silent payment.
+    if (
+      reservation?.outcome === "charged" ||
+      reservation?.outcome === "escalate" ||
+      reservation?.outcome === "uncovered"
+    ) {
+      return reservation;
+    }
+    return { outcome: "escalate" };
   } catch (err) {
     console.error("[Tool Executor] Failed to reserve lease spend:", err);
     return { outcome: "escalate" };
