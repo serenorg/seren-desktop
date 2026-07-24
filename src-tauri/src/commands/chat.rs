@@ -242,10 +242,16 @@ pub(crate) fn conversation_source_uri(conversation_id: &str) -> String {
 }
 
 /// Summed audit counts returned by the cloud-memory source erasure.
+/// `sources_deleted`/`memories_deleted` come from the service response;
+/// `failures` is a local accumulator (not wire data) counting conversations
+/// whose erase call errored. A non-zero `failures` means the erase could not be
+/// confirmed complete and retained sources may remain.
 #[derive(Default, Deserialize)]
 pub(crate) struct MemorySourceEraseCounts {
     pub sources_deleted: i64,
     pub memories_deleted: i64,
+    #[serde(skip)]
+    pub failures: usize,
 }
 
 #[derive(Deserialize)]
@@ -303,11 +309,44 @@ async fn erase_memory_sources(
                 counts.memories_deleted += outcome.memories_deleted;
             }
             Err(err) => {
+                counts.failures += 1;
                 log::warn!("[Delete] Cloud-memory source erase failed for conversation {id}: {err}")
             }
         }
     }
     counts
+}
+
+/// Build the erase-all `cloud_memories` report from the summed erase counts.
+/// Any per-conversation failure means the erase could not be confirmed
+/// complete, so the report is `failed` (not a false green `ok`) — a silent
+/// privacy false-positive is worse than a visible failure. Kept separate from
+/// the command so the ok/failed decision is unit-testable without a live
+/// memory service.
+fn cloud_memory_erase_report(
+    counts: &MemorySourceEraseCounts,
+    total_conversations: usize,
+) -> (&'static str, String) {
+    if counts.failures == 0 {
+        (
+            "ok",
+            format!(
+                "{} retained source(s) and {} derived memory(ies) erased across {} conversation(s)",
+                counts.sources_deleted, counts.memories_deleted, total_conversations
+            ),
+        )
+    } else {
+        (
+            "failed",
+            format!(
+                "{} of {} conversation(s) could not be erased from cloud memory (service unreachable or unauthenticated) — retained sources may remain; {} source(s) and {} derived memory(ies) erased before the failure(s)",
+                counts.failures,
+                total_conversations,
+                counts.sources_deleted,
+                counts.memories_deleted
+            ),
+        )
+    }
 }
 
 /// Fire-and-forget the retained cloud-memory source erasure so an interactive
@@ -2480,17 +2519,16 @@ pub async fn erase_all_conversation_data(
     ));
     // Cloud memory: erase each conversation's retained sources (and their
     // derived memories) by conversation-level source URI. Best-effort per
-    // conversation; the summed audit counts are reported.
+    // conversation, but reported honestly: if any conversation's erase failed
+    // (offline / unauthenticated memory service) the target is `failed`, not a
+    // false green `ok` that implies the retained cloud transcripts are gone.
     let memory_counts = erase_memory_sources(&app, &erased_conversation_ids).await;
+    let (memory_status, memory_detail) =
+        cloud_memory_erase_report(&memory_counts, erased_conversation_ids.len());
     reports.push(EraseTargetReport::new(
         "cloud_memories",
-        "ok",
-        Some(format!(
-            "{} retained source(s) and {} derived memory(ies) erased across {} conversation(s)",
-            memory_counts.sources_deleted,
-            memory_counts.memories_deleted,
-            erased_conversation_ids.len()
-        )),
+        memory_status,
+        Some(memory_detail),
     ));
     reports.push(EraseTargetReport::new(
         "claude_agent_preferences",
@@ -2531,10 +2569,11 @@ mod tests {
     use super::{
         AgentArchiveOrigin, AgentConversation, AgentTranscriptTarget, DERIVED_KIND_CASE_SQL,
         ExpectedHappyRestoration, HappyRestorationCandidate, HappyRestorationLookup,
-        MemorySourceEraseResponse,
+        MemorySourceEraseCounts, MemorySourceEraseResponse,
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
-        claim_happy_provider_session_owner_with_provenance_in_db, collect_agent_transcript_targets,
+        claim_happy_provider_session_owner_with_provenance_in_db, cloud_memory_erase_report,
+        collect_agent_transcript_targets,
         conversation_source_uri, delete_conversation_records, emit_happy_archive_event,
         emit_happy_provider_archive_event,
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
@@ -2567,6 +2606,42 @@ mod tests {
             conversation_source_uri("abc-123"),
             "seren://desktop/conversations/abc-123"
         );
+    }
+
+    // Erase-all must never report the cloud-memory target as a green `ok` when
+    // any per-conversation erase failed — that would tell the user their
+    // retained cloud transcripts are gone when the service was never reached.
+    #[test]
+    fn cloud_memory_erase_report_reflects_failures_honestly() {
+        // All erases succeeded → ok with the audit counts.
+        let ok = MemorySourceEraseCounts {
+            sources_deleted: 2,
+            memories_deleted: 3,
+            failures: 0,
+        };
+        let (status, detail) = cloud_memory_erase_report(&ok, 5);
+        assert_eq!(status, "ok");
+        assert!(detail.contains("2 retained source(s)"));
+        assert!(detail.contains("3 derived memory(ies)"));
+
+        // Every erase failed (service unreachable) → failed, not a false ok.
+        let all_failed = MemorySourceEraseCounts {
+            sources_deleted: 0,
+            memories_deleted: 0,
+            failures: 5,
+        };
+        let (status, detail) = cloud_memory_erase_report(&all_failed, 5);
+        assert_eq!(status, "failed");
+        assert!(detail.contains("5 of 5 conversation(s) could not be erased"));
+
+        // Some succeeded, some failed → still failed (erasure not confirmed).
+        let partial = MemorySourceEraseCounts {
+            sources_deleted: 1,
+            memories_deleted: 1,
+            failures: 2,
+        };
+        let (status, _) = cloud_memory_erase_report(&partial, 3);
+        assert_eq!(status, "failed");
     }
 
     #[test]
