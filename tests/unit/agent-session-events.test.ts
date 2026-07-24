@@ -9,10 +9,14 @@ const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const agentRuntimeSource = readFileSync(
+  resolve("src/lib/agent/runtime.ts"),
+  "utf-8",
+);
 
 describe("stale event filtering for terminated sessions", () => {
   it("maintains a terminatedSessionIds set", () => {
-    expect(agentStoreSource).toContain(
+    expect(agentRuntimeSource).toContain(
       "const terminatedSessionIds = new Set<string>()",
     );
   });
@@ -54,8 +58,8 @@ describe("stale event filtering for terminated sessions", () => {
 
 describe("spawn context map for diagnostic logging", () => {
   it("maintains a spawnContextMap with agent type and conversation ID", () => {
-    expect(agentStoreSource).toContain("const spawnContextMap = new Map<");
-    expect(agentStoreSource).toContain(
+    expect(agentRuntimeSource).toContain("const spawnContextMap = new Map<");
+    expect(agentRuntimeSource).toContain(
       "{ agentType: string; conversationId?: string }",
     );
   });

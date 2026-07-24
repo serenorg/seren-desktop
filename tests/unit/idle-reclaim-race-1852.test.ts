@@ -9,6 +9,10 @@ const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const agentRuntimeSource = readFileSync(
+  resolve("src/lib/agent/runtime.ts"),
+  "utf-8",
+);
 const threadStoreSource = readFileSync(
   resolve("src/stores/thread.store.ts"),
   "utf-8",
@@ -44,7 +48,7 @@ describe("#1852 — Fix 2: idle-reclaim honours navigation intent", () => {
 
 describe("#1852 — Fix 3: self-inflicted terminates do not surface in chat", () => {
   it("declares an expectedTerminateSessionIds set", () => {
-    expect(agentStoreSource).toMatch(
+    expect(agentRuntimeSource).toMatch(
       /const expectedTerminateSessionIds\s*=\s*new Set<string>\(\)/,
     );
   });

@@ -3,9 +3,8 @@
 
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createEffect, createRoot } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { produce } from "solid-js/store";
 import {
-  HappyArchiveFence,
   planHappyArchiveInvalidation,
   planHappyProviderArchiveInvalidation,
   retireHappyArchivedSiblingProvider,
@@ -17,6 +16,29 @@ import {
   serializeAgentConversationMetadata,
   serializeAgentMessageMetadata,
 } from "@/lib/agent/message-metadata";
+import {
+  agentOAuthRoutingAvailability,
+  agentOAuthRoutingDelivery,
+  agentOAuthRoutingRefreshes,
+  agentOAuthRoutingRevisions,
+  agentOAuthRoutingSelectionThreads,
+  expectedTerminateSessionIds,
+  happyArchiveFence,
+  happyProviderArchiveTombstones,
+  messagePersistQueues,
+  pairedConfigPersisted,
+  pendingSessionEvents,
+  reattachingConversations,
+  recoveryInFlightMap,
+  restartTimers,
+  sessionReadyPromises,
+  setState,
+  spawnContextMap,
+  spawnFailureTimestamps,
+  spawningConversations,
+  state,
+  terminatedSessionIds,
+} from "@/lib/agent/runtime";
 import {
   extractEvidenceFromAgentMessages,
   type FinalizationEvidence,
@@ -74,41 +96,6 @@ export {
   serializeAgentMessageMetadata,
 } from "@/lib/agent/message-metadata";
 
-/** Per-session ready promises — resolved when backend emits "ready" status */
-const sessionReadyPromises = new Map<
-  string,
-  { promise: Promise<void>; resolve: () => void }
->();
-
-/** Conversations with a spawn currently in progress. Prevents double-spawn
- *  when selectThread fires twice before the first spawn registers the session. */
-const spawningConversations = new Set<string>();
-
-/** Conversations with a live-session re-attach currently in progress.
- *  Multiple resume triggers can race before the adopted session reaches state. */
-const reattachingConversations = new Map<string, Promise<boolean>>();
-
-/** Session IDs that have been explicitly terminated. The global event subscriber
- *  drops events for these IDs to prevent stale errors from dead sessions leaking
- *  into new/live sessions. Cleared when the global subscriber is torn down. */
-const terminatedSessionIds = new Set<string>();
-
-const happyArchiveFence = new HappyArchiveFence();
-
-/** Exact provider sessions archived before a conversation owner was durable.
- * Kept separate from conversation fences so an unowned standby cannot evict
- * its healthy serving sibling. */
-const happyProviderArchiveTombstones = new Set<string>();
-
-/** Session IDs that the agent store just terminated programmatically. The
- *  runtime emits "Session terminated before request completed." (and other
- *  death-string `provider://error` events) when in-flight control requests
- *  reject during a programmatic kill — those are self-inflicted and must
- *  not surface as user-visible chat errors. The error handler short-circuits
- *  death-string events for ids in this set. Cleared at the end of
- *  terminateSession after the IPC kill completes. #1852. */
-const expectedTerminateSessionIds = new Set<string>();
-
 /** Lazy getter for the user's current navigation target, registered by
  *  thread.store. `getIdleClaudeSessionIds` consults this so a parallel spawn's
  *  preemptive idle-reclaim never targets the conversation the user is viewing —
@@ -121,15 +108,6 @@ export function registerActiveNavigationThreadIdGetter(
 ): void {
   activeNavigationThreadIdGetter = getter;
 }
-
-/** Lightweight context for sessions that are mid-spawn (IPC call in flight).
- *  Populated before providerService.spawnAgent and cleaned up after the session
- *  is registered in state.sessions. The global event logger consults this map
- *  so early events show the correct agent type and conversation ID. */
-const spawnContextMap = new Map<
-  string,
-  { agentType: string; conversationId?: string }
->();
 
 /** Max time to wait for a session to become ready before giving up */
 const SESSION_READY_TIMEOUT_MS = 30_000;
@@ -215,12 +193,6 @@ export class PredictiveCompactMutex {
  * cross the threshold in the same promptComplete tick. #1631.
  */
 const predictiveCompactMutex = new PredictiveCompactMutex();
-
-/**
- * Per-thread restart-timer handles. Cleared when the turn produces its
- * first stream chunk or when a terminal error flips the bubble. #1631.
- */
-const restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /** Invisibility-budget constants per restart-dependent scenario (#1631). */
 export const BUDGET_COLD_START_MS = 60_000;
@@ -2006,7 +1978,7 @@ export interface ThreadRuntimeState {
   lastPromptDocNames?: string[];
 }
 
-interface AgentState {
+export interface AgentState {
   /** Available agents and their status */
   availableAgents: AgentInfo[];
   /** Active sessions keyed by session ID */
@@ -2098,28 +2070,6 @@ function unifiedRowToAgent(row: UnifiedConversationRow): DbAgentConversation {
   };
 }
 
-const [state, setState] = createStore<AgentState>({
-  availableAgents: [],
-  sessions: {},
-  threadStates: {},
-  persistedMessages: {},
-  activeSessionId: null,
-  selectedAgentType: "claude-code",
-  recentAgentConversations: [],
-  remoteSessions: [],
-  remoteSessionsNextCursor: null,
-  remoteSessionsLoading: false,
-  remoteSessionsError: null,
-  isLoading: false,
-  error: null,
-  installStatus: null,
-  cliScanRejection: null,
-  cliUpdateActionRequired: null,
-  pendingPermissions: [],
-  pendingDiffProposals: [],
-  agentModeEnabled: false,
-});
-
 /** Kill a provider that completed after its owning Happy conversation was
  * archived. This path can run before the session was ever registered in the
  * Solid store, so it must call the provider directly rather than delegate to
@@ -2197,12 +2147,6 @@ async function discardLateArchivedProviderSession(
     }),
   );
 }
-
-const agentOAuthRoutingRefreshes = new Map<string, Promise<boolean>>();
-const agentOAuthRoutingAvailability = new Map<string, boolean>();
-const agentOAuthRoutingDelivery = new Map<string, boolean>();
-const agentOAuthRoutingRevisions = new Map<string, string>();
-const agentOAuthRoutingSelectionThreads = new Map<string, string>();
 
 function currentAgentOAuthRoutingRevision(): string {
   return `${oauthConnectionsRevision()}:${oauthSelectionsRevision()}`;
@@ -2288,15 +2232,7 @@ createRoot(() => {
 });
 
 let globalUnsubscribe: UnlistenFn | null = null;
-const pendingSessionEvents = new Map<string, AgentEvent[]>();
-
-/** Guard against concurrent auto-recovery spawns in sendPrompt (per-session). */
-const recoveryInFlightMap = new Map<string, Promise<string | null>>();
 const LEGACY_CLAUDE_LOCAL_SESSION_ID_RE = /^session-\d+$/;
-const messagePersistQueues = new Map<string, Promise<void>>();
-
-/** Last pairedConfig JSON written per conversation, to skip no-op DB writes. */
-const pairedConfigPersisted = new Map<string, string>();
 
 // Chunk accumulation buffers — plain JS, not reactive.
 // Flushed to the SolidJS store at CHUNK_FLUSH_MS intervals to reduce
@@ -2482,7 +2418,6 @@ const MAX_CLAUDE_INIT_RETRIES = 3;
 /** Spawn cascade guard: track recent failures per conversation to prevent infinite loops. */
 const SPAWN_CASCADE_WINDOW_MS = 30_000;
 const SPAWN_CASCADE_MAX_FAILURES = 3;
-const spawnFailureTimestamps = new Map<string, number[]>();
 
 function recordSpawnFailure(conversationId: string): void {
   const now = Date.now();

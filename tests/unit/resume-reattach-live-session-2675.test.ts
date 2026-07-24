@@ -9,6 +9,10 @@ const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const agentRuntimeSource = readFileSync(
+  resolve("src/lib/agent/runtime.ts"),
+  "utf-8",
+);
 const providerServiceSource = readFileSync(
   resolve("src/services/providers.ts"),
   "utf-8",
@@ -40,7 +44,7 @@ describe("#2675 — live re-attach restores runtime state", () => {
   });
 
   it("reattachLiveSession serializes concurrent adoption for one conversation", () => {
-    expect(agentStoreSource).toContain("const reattachingConversations");
+    expect(agentRuntimeSource).toContain("const reattachingConversations");
     expect(reattachBody).toContain(
       "const inFlight = reattachingConversations.get(conversationId)",
     );
