@@ -5,7 +5,29 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+use crate::capability_lease::{
+    self, CapabilityLease, LeaseBudgets, LeaseOutcome, LeasePredicates, OperationRequest,
+};
+
+/// The small argument slice the gate needs to evaluate lease predicates for a
+/// call. Extracted from the tool arguments by the renderer per route: `command`
+/// for shell/skill, `host` for web fetch, `target` (resource/account/connection)
+/// and `cost_micros` for publisher operations. All optional — a call with no
+/// context simply cannot match a predicate that requires it.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationContext {
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
+    #[serde(default)]
+    pub target: Option<String>,
+    #[serde(default)]
+    pub cost_micros: Option<u64>,
+}
 
 /// Which executor route the renderer is asking about. The route decides how a
 /// call is classified: publisher routes use the operationId verb grammar, while
@@ -37,6 +59,19 @@ impl ToolRoute {
             "skill" => Ok(Self::Skill),
             "web" => Ok(Self::Web),
             other => Err(format!("Unknown tool route: {other}")),
+        }
+    }
+
+    /// The lowercase wire token for this route. Kept in sync with `parse` so an
+    /// exclusion predicate can name a route by the same string the renderer sends.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Gateway => "gateway",
+            Self::Seren => "seren",
+            Self::Mcp => "mcp",
+            Self::Shell => "shell",
+            Self::Skill => "skill",
+            Self::Web => "web",
         }
     }
 }
@@ -444,21 +479,48 @@ impl ToolAuthorizationState {
         })
     }
 
-    /// The gate: classify, then resolve against the persisted store. High-risk
-    /// operations always prompt (one-shot) and are never persisted; trusted reads
-    /// run silently; unclassified operations reuse a stored grant/denial or prompt
-    /// once for a session decision.
+    /// The gate: classify, evaluate any task-scoped capability lease, then fall
+    /// back to the per-tool decision store.
+    ///
+    /// Order enforces `deny > prompt > allow`:
+    /// 1. Trusted reads run silently.
+    /// 2. An active lease is consulted next. A lease exclusion denies outright;
+    ///    a covered call inside budget runs silently (and the budget is charged),
+    ///    letting a long-running task proceed without per-call prompts. This is
+    ///    what lets an otherwise one-shot high-risk shell command run under an
+    ///    approved command-rule lease.
+    /// 3. If no lease covers the call, the Stage-1 posture is preserved: high-risk
+    ///    prompts one-shot; unclassified reuses a stored grant/denial or prompts
+    ///    once for a session decision. A new host/account/root/operation class or
+    ///    an exhausted budget therefore surfaces as a single scope-escalation.
     pub fn authorize(
         &self,
         route: ToolRoute,
         publisher_slug: &str,
         tool_name: &str,
         conversation_id: &str,
+        context: &OperationContext,
     ) -> Result<AuthorizationDecision, String> {
         let class = classify_for_route(route, publisher_slug, tool_name);
 
         if class == OperationClass::TrustedRead {
             return Ok(AuthorizationDecision::allow(class));
+        }
+
+        let request = OperationRequest {
+            route,
+            class,
+            publisher_slug: publisher_slug.to_string(),
+            tool_name: tool_name.to_string(),
+            command: context.command.clone(),
+            host: context.host.clone(),
+            target: context.target.clone(),
+            cost_micros: context.cost_micros.unwrap_or(0),
+        };
+        match self.evaluate_and_charge_leases(conversation_id, &request)? {
+            LeaseOutcome::Deny => return Ok(AuthorizationDecision::deny(class)),
+            LeaseOutcome::Allow(_) => return Ok(AuthorizationDecision::allow(class)),
+            LeaseOutcome::Escalate => {}
         }
 
         if class == OperationClass::HighRisk {
@@ -488,6 +550,114 @@ impl ToolAuthorizationState {
         }
     }
 
+    /// Read the active leases for a conversation, evaluate the call, and — when a
+    /// lease covers it — charge that lease's budget, all under one connection lock
+    /// so the read/decrement is atomic and two concurrent calls cannot both spend
+    /// the last unit of a budget.
+    fn evaluate_and_charge_leases(
+        &self,
+        conversation_id: &str,
+        request: &OperationRequest,
+    ) -> Result<LeaseOutcome, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let leases = read_leases(conn, conversation_id)?;
+            let outcome = capability_lease::evaluate_for_conversation(
+                &leases,
+                request,
+                conversation_id,
+                &now,
+            );
+            if let LeaseOutcome::Allow(lease_id) = &outcome
+                && let Some(mut lease) = leases.into_iter().find(|lease| &lease.id == lease_id)
+            {
+                lease.budgets.calls_used = lease.budgets.calls_used.saturating_add(1);
+                if request.cost_micros > 0 {
+                    lease.budgets.spend_used_micros = lease
+                        .budgets
+                        .spend_used_micros
+                        .saturating_add(request.cost_micros);
+                }
+                write_lease(conn, &lease)?;
+            }
+            Ok(outcome)
+        })
+    }
+
+    /// Persist a user-approved lease. Called only from the host-side grant command
+    /// a human approval invokes — never from a model tool call — so model output
+    /// can never mint or widen a lease. The host owns the id, timestamps, and
+    /// expiry; the caller supplies only the reviewed predicates, budgets, label,
+    /// and requested duration.
+    pub fn grant_lease(
+        &self,
+        conversation_id: &str,
+        label: &str,
+        duration_secs: i64,
+        predicates: LeasePredicates,
+        budgets: LeaseBudgets,
+    ) -> Result<CapabilityLease, String> {
+        if duration_secs <= 0 {
+            return Err("A capability lease needs a positive duration.".to_string());
+        }
+        let lease_id = uuid::Uuid::new_v4().to_string();
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let expires_at = timestamp_plus_seconds(conn, duration_secs)?;
+            let lease = CapabilityLease {
+                id: lease_id.clone(),
+                conversation_id: conversation_id.to_string(),
+                label: label.to_string(),
+                created_at: now,
+                expires_at,
+                revoked: false,
+                predicates: predicates.clone(),
+                budgets: budgets.clone(),
+            };
+            write_lease(conn, &lease)?;
+            Ok(lease)
+        })
+    }
+
+    /// Every lease bound to a conversation, newest first. Backs inspection and the
+    /// (slice-D) revocation UI.
+    pub fn list_leases(&self, conversation_id: &str) -> Result<Vec<CapabilityLease>, String> {
+        self.with_conn(|conn| read_leases(conn, conversation_id))
+    }
+
+    /// Mark a lease revoked. Idempotent: revoking an unknown or already-revoked
+    /// lease is a no-op that reports whether this call changed anything.
+    ///
+    /// The stored `lease_json` blob is the source of truth the matcher reads, so
+    /// revocation must flip the flag *inside the blob* — updating only the
+    /// `revoked` column would leave the matcher still honoring the lease.
+    pub fn revoke_lease(&self, lease_id: &str) -> Result<bool, String> {
+        self.with_conn(|conn| {
+            let json: Option<String> = conn
+                .query_row(
+                    "SELECT lease_json FROM capability_leases WHERE id = ?1",
+                    rusqlite::params![lease_id],
+                    |row| row.get(0),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let Some(json) = json else {
+                return Ok(false);
+            };
+            let mut lease: CapabilityLease = serde_json::from_str(&json)
+                .map_err(|e| format!("Capability lease was unreadable: {e}"))?;
+            if lease.revoked {
+                return Ok(false);
+            }
+            lease.revoked = true;
+            write_lease(conn, &lease)?;
+            Ok(true)
+        })
+    }
+
     /// Record a prompt outcome. Re-derives classification host-side so a renderer
     /// cannot persist a grant for a high-risk (one-shot) or trusted-read (silent)
     /// operation — only unclassified session decisions are durable.
@@ -511,14 +681,92 @@ impl ToolAuthorizationState {
         self.persist_decision(conversation_id, publisher_slug, tool_name, decision)
     }
 
-    /// Erase every stored decision. Backs the one-shot "erase all local
-    /// conversation data" flow; the next access lazily reopens an empty store.
+    /// Erase every stored decision and capability lease. Backs the one-shot
+    /// "erase all local conversation data" flow; the next access lazily reopens an
+    /// empty store. Returns the total number of rows removed across both tables.
     pub fn wipe(&self) -> Result<usize, String> {
         self.with_conn(|conn| {
-            conn.execute("DELETE FROM tool_decisions", [])
-                .map_err(|e| e.to_string())
+            let decisions = conn
+                .execute("DELETE FROM tool_decisions", [])
+                .map_err(|e| e.to_string())?;
+            let leases = conn
+                .execute("DELETE FROM capability_leases", [])
+                .map_err(|e| e.to_string())?;
+            Ok(decisions + leases)
         })
     }
+}
+
+/// SQLite's clock, formatted to match `created_at`/`updated_at` in the store, so
+/// lease lifetime comparisons use one time source rather than mixing Rust and DB
+/// clocks.
+fn current_timestamp(conn: &Connection) -> Result<String, String> {
+    conn.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// `now + duration_secs` in the same format. Used to stamp a lease's expiry
+/// host-side from a reviewed duration.
+fn timestamp_plus_seconds(conn: &Connection, duration_secs: i64) -> Result<String, String> {
+    conn.query_row(
+        "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now', ?1)",
+        rusqlite::params![format!("{duration_secs} seconds")],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn read_leases(conn: &Connection, conversation_id: &str) -> Result<Vec<CapabilityLease>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT lease_json FROM capability_leases \
+             WHERE conversation_id = ?1 ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![conversation_id], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let mut leases = Vec::new();
+    for row in rows {
+        let json = row.map_err(|e| e.to_string())?;
+        // A single corrupt row must not blind the gate to every other lease, but
+        // it also must not silently vanish — log and skip.
+        match serde_json::from_str::<CapabilityLease>(&json) {
+            Ok(lease) => leases.push(lease),
+            Err(err) => log::warn!("[tool-authorization] Skipping unreadable lease row: {err}"),
+        }
+    }
+    Ok(leases)
+}
+
+fn write_lease(conn: &Connection, lease: &CapabilityLease) -> Result<(), String> {
+    let json = serde_json::to_string(lease)
+        .map_err(|e| format!("Capability lease could not be encoded: {e}"))?;
+    conn.execute(
+        "INSERT INTO capability_leases \
+           (id, conversation_id, expires_at, revoked, lease_json, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+         ON CONFLICT(id) DO UPDATE SET \
+           expires_at = excluded.expires_at, \
+           revoked = excluded.revoked, \
+           lease_json = excluded.lease_json",
+        rusqlite::params![
+            lease.id,
+            lease.conversation_id,
+            lease.expires_at,
+            lease.revoked as i64,
+            json,
+            lease.created_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn init_schema(conn: &Connection) -> Result<(), String> {
@@ -531,6 +779,28 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
             updated_at      TEXT NOT NULL,
             PRIMARY KEY (conversation_id, publisher_slug, tool_name)
         )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    // Capability leases (#3193-B). The full lease is stored as JSON (the source
+    // of truth for predicates + mutable budget counters); the columns exist only
+    // to index by conversation and to prune by expiry/revocation without parsing
+    // every blob.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS capability_leases (
+            id              TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            expires_at      TEXT NOT NULL,
+            revoked         INTEGER NOT NULL DEFAULT 0,
+            lease_json      TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_capability_leases_conversation \
+         ON capability_leases(conversation_id)",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -547,6 +817,45 @@ mod tests {
         // Force the connection open against :memory: by touching the store.
         s.with_conn(|_| Ok(())).unwrap();
         s
+    }
+
+    // No lease context: the classification/decision-store tests exercise the
+    // path where no argument predicate applies.
+    fn ctx() -> OperationContext {
+        OperationContext::default()
+    }
+
+    fn cmd_ctx(command: &str) -> OperationContext {
+        OperationContext {
+            command: Some(command.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn target_ctx(target: &str) -> OperationContext {
+        OperationContext {
+            target: Some(target.to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn command_rules(programs: &[&str]) -> LeasePredicates {
+        LeasePredicates {
+            command_rules: programs
+                .iter()
+                .map(|p| capability_lease::CommandRule {
+                    program: p.to_string(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    fn call_budget(max: u64) -> LeaseBudgets {
+        LeaseBudgets {
+            max_calls: Some(max),
+            ..Default::default()
+        }
     }
 
     // ---- classification --------------------------------------------------
@@ -672,7 +981,7 @@ mod tests {
     fn trusted_read_allows_silently() {
         let s = state();
         let decision = s
-            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a")
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "allow");
         assert_eq!(decision.prompt_kind, None);
@@ -683,7 +992,7 @@ mod tests {
         let s = state();
         for _ in 0..2 {
             let decision = s
-                .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a")
+                .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx())
                 .unwrap();
             assert_eq!(decision.decision, "prompt");
             assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
@@ -700,7 +1009,7 @@ mod tests {
         )
         .unwrap();
         let decision = s
-            .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a")
+            .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "prompt", "still one-shot after a recorded approval");
     }
@@ -709,7 +1018,7 @@ mod tests {
     fn unclassified_prompts_once_then_reuses_the_grant() {
         let s = state();
         let first = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a")
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
         assert_eq!(first.decision, "prompt");
         assert_eq!(first.prompt_kind.as_deref(), Some("session"));
@@ -722,7 +1031,7 @@ mod tests {
             .unwrap();
 
         let second = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a")
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
         assert_eq!(second.decision, "allow");
     }
@@ -730,12 +1039,12 @@ mod tests {
     #[test]
     fn unclassified_denial_is_durable() {
         let s = state();
-        s.authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a")
+        s.authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
         s.record_decision(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", false)
             .unwrap();
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a")
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "deny");
     }
@@ -747,7 +1056,7 @@ mod tests {
             .unwrap();
         // A different conversation does not inherit the grant.
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-b")
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-b", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -756,7 +1065,7 @@ mod tests {
     fn a_newly_seen_publisher_is_never_silently_allowed() {
         let s = state();
         let decision = s
-            .authorize(ToolRoute::Gateway, "never-seen", "inspect_everything", "conv-a")
+            .authorize(ToolRoute::Gateway, "never-seen", "inspect_everything", "conv-a", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -768,7 +1077,7 @@ mod tests {
             .unwrap();
         assert_eq!(s.wipe().unwrap(), 1);
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a")
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -778,5 +1087,274 @@ mod tests {
         assert!(ToolRoute::parse("gateway").is_ok());
         assert!(ToolRoute::parse("web").is_ok());
         assert!(ToolRoute::parse("bogus").is_err());
+    }
+
+    // ---- capability-lease integration (real store + matcher + budgets) ---
+
+    /// The headline acceptance criterion: a 500-call coding task runs under one
+    /// approved lease with zero recurring prompts, and the budget is consumed.
+    #[test]
+    fn granted_command_lease_runs_a_500_call_task_silently() {
+        let s = state();
+        let lease = s
+            .grant_lease(
+                "conv-a",
+                "coding",
+                4 * 3600,
+                command_rules(&["cargo", "pnpm", "git"]),
+                call_budget(500),
+            )
+            .unwrap();
+
+        for i in 0..500 {
+            let command = match i % 3 {
+                0 => "cargo test --manifest-path src-tauri/Cargo.toml",
+                1 => "pnpm check",
+                _ => "git status --porcelain",
+            };
+            let decision = s
+                .authorize(
+                    ToolRoute::Shell,
+                    "seren",
+                    "execute_command",
+                    "conv-a",
+                    &cmd_ctx(command),
+                )
+                .unwrap();
+            assert_eq!(
+                decision.decision, "allow",
+                "call {i} ({command}) should run silently under the lease"
+            );
+        }
+
+        let updated = s
+            .list_leases("conv-a")
+            .unwrap()
+            .into_iter()
+            .find(|l| l.id == lease.id)
+            .unwrap();
+        assert_eq!(updated.budgets.calls_used, 500);
+
+        // The 501st call exhausts the budget: exactly one scope-escalation.
+        let decision = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("cargo build"),
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
+    /// A shell command outside the lease's command rules is not covered and
+    /// escalates once, rather than silently running.
+    #[test]
+    fn shell_command_outside_the_lease_escalates() {
+        let s = state();
+        s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
+            .unwrap();
+        let decision = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("curl https://example.com/pay"),
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
+    /// deny > allow: a lease exclusion denies a command its own command rule
+    /// would otherwise allow.
+    #[test]
+    fn lease_exclusion_denies_over_a_command_grant() {
+        let s = state();
+        let mut predicates = command_rules(&["git"]);
+        predicates.exclusions = vec![capability_lease::Exclusion {
+            program: Some("git".to_string()),
+            ..Default::default()
+        }];
+        s.grant_lease("conv-a", "coding", 3600, predicates, call_budget(50))
+            .unwrap();
+        let decision = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("git push origin main"),
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "deny");
+    }
+
+    /// Repeated publisher operations inside one resource/account constraint run
+    /// silently; a different account is out of scope and escalates.
+    #[test]
+    fn publisher_lease_covers_repeated_ops_within_one_target() {
+        let s = state();
+        let predicates = LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "attio".to_string(),
+                allow_high_risk: false,
+                target: Some("conn-123".to_string()),
+            }],
+            ..Default::default()
+        };
+        s.grant_lease("conv-a", "crm", 3600, predicates, call_budget(100))
+            .unwrap();
+
+        for tool in ["post_notes", "post_records", "patch_records_by_id"] {
+            let decision = s
+                .authorize(ToolRoute::Gateway, "attio", tool, "conv-a", &target_ctx("conn-123"))
+                .unwrap();
+            assert_eq!(decision.decision, "allow", "{tool} should be covered");
+        }
+
+        // A different connection/account is not covered — one escalation.
+        let decision = s
+            .authorize(ToolRoute::Gateway, "attio", "post_notes", "conv-a", &target_ctx("conn-999"))
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+    }
+
+    /// A high-risk publisher op is not silently covered by a lease that did not
+    /// opt into high-risk, even on the approved target.
+    #[test]
+    fn publisher_lease_without_high_risk_still_escalates_destructive_ops() {
+        let s = state();
+        let predicates = LeasePredicates {
+            publisher_ops: vec![capability_lease::PublisherRule {
+                publisher_slug: "attio".to_string(),
+                allow_high_risk: false,
+                target: Some("conn-123".to_string()),
+            }],
+            ..Default::default()
+        };
+        s.grant_lease("conv-a", "crm", 3600, predicates, call_budget(100))
+            .unwrap();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "attio",
+                "delete_records_by_id",
+                "conv-a",
+                &target_ctx("conn-123"),
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
+    /// Revoking a lease immediately stops its silent coverage; revocation is
+    /// idempotent.
+    #[test]
+    fn revoking_a_lease_stops_silent_coverage() {
+        let s = state();
+        let lease = s
+            .grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
+            .unwrap();
+        assert_eq!(
+            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+                .unwrap()
+                .decision,
+            "allow"
+        );
+        assert!(s.revoke_lease(&lease.id).unwrap());
+        assert_eq!(
+            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+                .unwrap()
+                .decision,
+            "prompt"
+        );
+        assert!(!s.revoke_lease(&lease.id).unwrap(), "second revoke is a no-op");
+    }
+
+    /// A lease granted for one conversation never covers another.
+    #[test]
+    fn lease_does_not_leak_across_conversations() {
+        let s = state();
+        s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
+            .unwrap();
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-b", &cmd_ctx("cargo build"))
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+    }
+
+    #[test]
+    fn grant_lease_rejects_nonpositive_duration() {
+        let s = state();
+        assert!(
+            s.grant_lease("conv-a", "x", 0, LeasePredicates::default(), LeaseBudgets::default())
+                .is_err()
+        );
+    }
+
+    /// A lease and its consumed budget survive the store being closed and
+    /// reopened on the same on-disk database — real file I/O, no in-memory shim.
+    #[test]
+    fn leases_persist_across_store_reopen_on_disk() {
+        let dir = std::env::temp_dir().join(format!("seren-authz-{}", uuid::Uuid::new_v4()));
+        let db = dir.join("tool_authorization.db");
+        {
+            let s = ToolAuthorizationState::new(db.clone());
+            s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
+                .unwrap();
+            assert_eq!(
+                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+                    .unwrap()
+                    .decision,
+                "allow"
+            );
+        }
+        {
+            // A fresh state reopens the same file, re-inits the schema, and honors
+            // the persisted lease and its already-charged budget.
+            let s = ToolAuthorizationState::new(db.clone());
+            let leases = s.list_leases("conv-a").unwrap();
+            assert_eq!(leases.len(), 1);
+            assert_eq!(leases[0].budgets.calls_used, 1, "budget spend persisted to disk");
+            assert_eq!(
+                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo test"))
+                    .unwrap()
+                    .decision,
+                "allow"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The renderer sends the operation context as camelCase; pin `costMicros`.
+    #[test]
+    fn operation_context_deserializes_camel_case() {
+        let context: OperationContext = serde_json::from_value(serde_json::json!({
+            "command": "cargo build",
+            "host": "example.com",
+            "target": "conn-1",
+            "costMicros": 5,
+        }))
+        .expect("camelCase context deserializes");
+        assert_eq!(context.command.as_deref(), Some("cargo build"));
+        assert_eq!(context.cost_micros, Some(5));
+    }
+
+    /// The erase-all flow removes leases too, not just per-tool decisions.
+    #[test]
+    fn wipe_clears_capability_leases() {
+        let s = state();
+        s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
+            .unwrap();
+        assert!(s.wipe().unwrap() >= 1);
+        assert!(s.list_leases("conv-a").unwrap().is_empty());
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
     }
 }

@@ -66,6 +66,47 @@ const DENY_DECISION: AuthorizationDecision = {
 };
 
 /**
+ * The small argument slice the host gate needs to evaluate a capability-lease
+ * predicate for this call. Keep in sync with `OperationContext` in
+ * `src-tauri/src/tool_authorization.rs`. Every field is optional: a call that
+ * omits one simply cannot match a predicate that requires it.
+ */
+interface OperationContext {
+  command?: string;
+  host?: string;
+  target?: string;
+  costMicros?: number;
+}
+
+/**
+ * Extract the lease-predicate context from a publisher-style call's arguments.
+ * The resource/account/connection constraint keys off `connection_id` — the
+ * OAuth account identity this codebase already resolves — and a web fetch keys
+ * off its URL host.
+ */
+function contextForPublisherRoute(
+  route: ToolRoute,
+  args: Record<string, unknown>,
+): OperationContext {
+  const context: OperationContext = {};
+  if (route === "web") {
+    const url = typeof args.url === "string" ? args.url : undefined;
+    if (url) {
+      try {
+        context.host = new URL(url).host;
+      } catch {
+        // A malformed URL yields no host; the call cannot match a host predicate.
+      }
+    }
+    return context;
+  }
+  if (typeof args.connection_id === "string" && args.connection_id.length > 0) {
+    context.target = args.connection_id;
+  }
+  return context;
+}
+
+/**
  * Ask the host gate to classify a model-originated call. Passing through the
  * gate never itself prompts the user; it returns allow/deny/prompt.
  */
@@ -74,6 +115,7 @@ async function consultAuthorizationGate(
   publisherSlug: string,
   toolName: string,
   conversationId: string,
+  context: OperationContext,
 ): Promise<AuthorizationDecision> {
   try {
     return await invoke<AuthorizationDecision>("authorize_tool_operation", {
@@ -81,6 +123,7 @@ async function consultAuthorizationGate(
       publisherSlug,
       toolName,
       conversationId,
+      context,
     });
   } catch (err) {
     console.error("[Tool Executor] Authorization gate unavailable:", err);
@@ -295,6 +338,7 @@ async function authorizeToolOperation(
     publisherSlug,
     toolName,
     sessionId,
+    contextForPublisherRoute(route, args),
   );
 
   if (decision.decision === "allow") {
@@ -337,6 +381,7 @@ async function authorizeToolOperation(
 async function authorizeSubprocess(
   route: "shell" | "skill",
   toolName: string,
+  command: string,
   conversationId: string | null,
   runApprovalUi: () => Promise<boolean>,
 ): Promise<boolean> {
@@ -345,6 +390,7 @@ async function authorizeSubprocess(
     "seren",
     toolName,
     sessionConversationId(conversationId),
+    { command },
   );
   if (decision.decision === "deny") {
     return false;
@@ -595,6 +641,7 @@ export async function executeTool(
         const approved = await authorizeSubprocess(
           "shell",
           "execute_command",
+          command,
           conversationId,
           () => requestShellApproval(command, timeoutSecs),
         );
@@ -650,9 +697,12 @@ export async function executeTool(
         }
         const timeoutSecs = (args.timeout_secs as number) ?? 30;
         const preview = `${cwd}> ${argv.map((item) => JSON.stringify(item)).join(" ")}`;
+        // The lease's command rules match the skill's leading program token, so
+        // pass the raw argv (not the cwd-prefixed preview) as the command.
         const approved = await authorizeSubprocess(
           "skill",
           "run_skill_script",
+          argv.join(" "),
           conversationId,
           () => requestShellApproval(preview, timeoutSecs),
         );
