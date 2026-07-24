@@ -2390,6 +2390,28 @@ pub(crate) fn clear_all_history_records(conn: &Connection) -> rusqlite::Result<V
     for id in &message_ids {
         enqueue_sync_tombstone(conn, "messages", id)?;
     }
+    // Purge the same conversation-derived auxiliary tables the per-conversation
+    // delete does (`delete_conversation_records`), or "Clear all history" leaves
+    // verbatim prompts (`input_history.content`, `orchestration_plans
+    // .original_prompt`), plan/session content, and eval/skill rows behind.
+    // Every conversation is being cleared, so the content-scoped tables are
+    // emptied wholesale; runtime sessions and their events stay scoped to
+    // thread-linked rows so standalone computer-use sessions (managed by the
+    // session commands) are untouched, matching the single-delete path.
+    conn.execute(
+        "DELETE FROM session_events
+         WHERE session_id IN (
+             SELECT id FROM runtime_sessions WHERE thread_id IS NOT NULL
+         )",
+        [],
+    )?;
+    conn.execute("DELETE FROM runtime_sessions WHERE thread_id IS NOT NULL", [])?;
+    conn.execute("DELETE FROM eval_signals", [])?;
+    conn.execute("DELETE FROM plan_subtasks", [])?;
+    conn.execute("DELETE FROM orchestration_plans", [])?;
+    conn.execute("DELETE FROM input_history", [])?;
+    conn.execute("DELETE FROM thread_skills", [])?;
+    conn.execute("DELETE FROM thread_skill_override_state", [])?;
     conn.execute("DELETE FROM message_events", [])?;
     conn.execute("DELETE FROM messages", [])?;
     conn.execute("DELETE FROM conversations", [])?;
@@ -2398,8 +2420,16 @@ pub(crate) fn clear_all_history_records(conn: &Connection) -> rusqlite::Result<V
 
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
-    let conversation_ids = run_db(app.clone(), clear_all_history_records).await?;
+    let conversation_ids = run_db(app.clone(), |conn| {
+        let ids = clear_all_history_records(conn)?;
+        // Reclaim and zero the freed pages so no cleared content lingers in the
+        // chat.db file, matching the per-conversation delete and erase-all paths.
+        vacuum_database(conn)?;
+        Ok(ids)
+    })
+    .await?;
     clear_conversation_index_best_effort(&app);
+    vacuum_conversation_index_best_effort(&app);
     // Cascade the cloud-memory retained-source erasure, matching the per-
     // conversation delete paths. Best-effort and never fatal: the local reset
     // has already committed.
@@ -2710,6 +2740,93 @@ mod tests {
         }
     }
 
+    // Guards the true-deletion parity between "Clear all history" and the
+    // per-conversation delete: `clear_all_history_records` must purge the same
+    // conversation-derived auxiliary tables, or verbatim prompts
+    // (`input_history.content`, `orchestration_plans.original_prompt`) and
+    // plan/session content silently survive the full reset.
+    #[test]
+    fn clear_all_history_purges_conversation_derived_auxiliary_tables() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind) VALUES ('c1', 't', 0, 'chat')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('m1', 'c1', 'user', 'secret prompt', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO input_history (conversation_id, timestamp, content)
+             VALUES ('c1', 0, 'verbatim typed secret')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at)
+             VALUES ('p1', 'c1', 'original secret prompt', 'active', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO plan_subtasks (id, plan_id, prompt, task_type, worker_type, model_id, status, created_at)
+             VALUES ('s1', 'p1', 'subtask secret', 'code', 'provider', 'm', 'pending', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO runtime_sessions (id, title, status, environment, thread_id, created_at, updated_at)
+             VALUES ('rs1', 'session secret', 'idle', 'browser', 'c1', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_events (id, session_id, event_type, title, content, status, created_at)
+             VALUES ('se1', 'rs1', 'action', 'event title', 'event secret', 'completed', 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO eval_signals (message_id, task_type, satisfaction, created_at)
+             VALUES ('m1', 'code', 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_skills (thread_id, project_root, skill_ref)
+             VALUES ('c1', '/work', 'skill-a')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO thread_skill_override_state (thread_id, project_root)
+             VALUES ('c1', '/work')",
+            [],
+        )
+        .unwrap();
+
+        clear_all_history_records(&conn).unwrap();
+
+        for table in [
+            "input_history",
+            "orchestration_plans",
+            "plan_subtasks",
+            "runtime_sessions",
+            "session_events",
+            "eval_signals",
+            "thread_skills",
+            "thread_skill_override_state",
+        ] {
+            let remaining: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(remaining, 0, "{table} must be empty after clear-all");
+        }
+    }
+
     #[test]
     fn deleting_agent_conversation_removes_its_cli_transcripts() {
         let conn = open();
@@ -2912,6 +3029,59 @@ mod tests {
                         .windows(CANARY.len())
                         .any(|window| window == CANARY.as_bytes()),
                     "deleted canary remained in {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    // Live no-mocks proof against a real on-disk `chat.db`: after "Clear all
+    // history", the verbatim `input_history.content` a user typed must not be
+    // recoverable from the database file or its WAL — the exact residue #3197
+    // targets. Runs the real `clear_all_history` reset path (records + VACUUM +
+    // WAL truncate).
+    #[test]
+    fn true_deletion_clear_all_history_erases_input_history_canary_from_chat_db_file() {
+        const CANARY: &str = "clear-all-canary-6d1f0a3e-2b7c-4e58-9a10-7c4d2e0b91ff";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("chat.db");
+        let wal_path = temp_dir.path().join("chat.db-wal");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            configure_connection(&conn).unwrap();
+            setup_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO input_history (conversation_id, timestamp, content)
+                 VALUES ('c1', 2, ?1)",
+                params![CANARY],
+            )
+            .unwrap();
+            // Land the canary in the main db file before the reset, mirroring a
+            // real session that has checkpointed prior turns.
+            crate::services::database::checkpoint_wal(
+                &conn,
+                crate::services::database::WalCheckpointMode::Truncate,
+            )
+            .unwrap();
+
+            clear_all_history_records(&conn).unwrap();
+            vacuum_database(&conn).unwrap();
+        }
+
+        for path in [&db_path, &wal_path] {
+            if path.exists() {
+                let bytes = std::fs::read(path).unwrap();
+                assert!(
+                    !bytes
+                        .windows(CANARY.len())
+                        .any(|window| window == CANARY.as_bytes()),
+                    "cleared input_history canary remained in {}",
                     path.display()
                 );
             }
