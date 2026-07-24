@@ -613,7 +613,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_shell::init());
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init());
 
     // Note: deep-link plugin disabled on Windows due to WiX bundler ICE03 registry errors
     // See: https://github.com/tauri-apps/tauri/issues/10453

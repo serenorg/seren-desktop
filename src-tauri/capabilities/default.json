@@ -17,6 +17,7 @@
     "process:default",
     "process:allow-restart",
     "log:default",
+    "notification:default",
     {
       "identifier": "opener:default",
       "allow": [
