@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::approval_continuation::{
     self, ContinuationRow, ContinuationScope, ContinuationState, ContinuationView,
@@ -114,16 +115,27 @@ pub struct AuthorizationDecision {
     pub operation_class: String,
     pub description: String,
     pub is_destructive: bool,
+    /// Host-minted dispatch handle, present only on "allow" (#3193-F). The
+    /// transports refuse to execute without it; the renderer can only ferry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    /// Opaque host-computed operation binding, present on "prompt" so the
+    /// renderer can echo it into the suspended continuation. Tampering with it
+    /// yields a handle that no transport will accept (fail-closed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding: Option<String>,
 }
 
 impl AuthorizationDecision {
-    fn allow(class: OperationClass) -> Self {
+    fn allow(class: OperationClass, handle: Option<String>) -> Self {
         Self {
             decision: "allow".to_string(),
             prompt_kind: None,
             operation_class: class.as_wire().to_string(),
             description: String::new(),
             is_destructive: false,
+            handle,
+            binding: None,
         }
     }
 
@@ -134,16 +146,131 @@ impl AuthorizationDecision {
             operation_class: class.as_wire().to_string(),
             description: String::new(),
             is_destructive: false,
+            handle: None,
+            binding: None,
         }
     }
 
-    fn prompt(class: OperationClass, kind: &str, description: String, is_destructive: bool) -> Self {
+    fn prompt(
+        class: OperationClass,
+        kind: &str,
+        description: String,
+        is_destructive: bool,
+        binding: Option<String>,
+    ) -> Self {
         Self {
             decision: "prompt".to_string(),
             prompt_kind: Some(kind.to_string()),
             operation_class: class.as_wire().to_string(),
             description,
             is_destructive,
+            handle: None,
+            binding,
+        }
+    }
+}
+
+// ============================================================================
+// Dispatch handles (#3193-F) — the enforcement seam that makes the gate
+// non-bypassable. Every side-effecting transport command refuses to execute
+// without a live handle minted by this store for that exact operation, so a
+// renderer path that skips the gate cannot reach a transport.
+// ============================================================================
+
+/// How long a minted handle stays redeemable. Long enough for the x402 payment
+/// UI round-trip between the first dispatch and its retry; short enough that a
+/// leaked handle is not a standing capability.
+const DISPATCH_HANDLE_TTL_SECS: i64 = 300;
+
+/// Redemptions per handle. Gateway operations legitimately re-dispatch after an
+/// x402 402 (signed-payment retry, or a SerenBucks retry) without re-consulting
+/// the gate, so one authorization covers the initial call plus those retries.
+/// Every other route is strictly one dispatch per authorization.
+fn handle_uses_for_route(route: ToolRoute) -> i64 {
+    match route {
+        ToolRoute::Gateway => 3,
+        _ => 1,
+    }
+}
+
+/// Gateway metadata keys excluded from the operation binding: they are added,
+/// moved, or stripped between the gate consultation and the wire dispatch
+/// (account selection, payment retries) without changing which operation the
+/// user authorized.
+const BINDING_EXCLUDED_KEYS: &[&str] = &["_x402_payment", "connection_id"];
+
+fn binding_digest(material: &str) -> String {
+    hex::encode(Sha256::digest(material.as_bytes()))
+}
+
+/// serde_json (without `preserve_order`) stores objects as BTreeMaps, so
+/// serializing a `Value` is already key-sorted and canonical for our purposes.
+/// Both the mint side and the verify side normalize with this same function, so
+/// no cross-language canonicalization is involved.
+fn normalized_args_json(args: &serde_json::Value) -> String {
+    match args {
+        serde_json::Value::Object(map) => {
+            let filtered: serde_json::Map<String, serde_json::Value> = map
+                .iter()
+                .filter(|(key, _)| !BINDING_EXCLUDED_KEYS.contains(&key.as_str()))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect();
+            serde_json::Value::Object(filtered).to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Operation binding for the publisher-style routes (gateway, built-in seren,
+/// local MCP): the exact normalized tool arguments.
+pub fn binding_for_publisher_args(args: &serde_json::Value) -> String {
+    binding_digest(&format!("args\u{0}{}", normalized_args_json(args)))
+}
+
+/// Operation binding for shell execution: the exact command line.
+pub fn binding_for_command(command: &str) -> String {
+    binding_digest(&format!("cmd\u{0}{command}"))
+}
+
+/// Operation binding for a skill script: the skill identity plus its exact argv
+/// (kept as an array so `["a", "b c"]` and `["a", "b", "c"]` stay distinct).
+pub fn binding_for_skill(skill_slug: &str, argv: &[String]) -> String {
+    let material = serde_json::json!({ "argv": argv, "skillSlug": skill_slug });
+    binding_digest(&format!("skill\u{0}{material}"))
+}
+
+/// Operation binding for a web fetch: the exact URL.
+pub fn binding_for_url(url: &str) -> String {
+    binding_digest(&format!("url\u{0}{url}"))
+}
+
+/// Compute the binding for a call at gate time from the renderer-supplied
+/// argument payload. `None` means the material needed to bind this route was
+/// not provided — no handle can be minted, and the dispatch will be refused.
+fn binding_for_operation(
+    route: ToolRoute,
+    context: &OperationContext,
+    call_args: Option<&serde_json::Value>,
+) -> Option<String> {
+    match route {
+        ToolRoute::Shell => context.command.as_deref().map(binding_for_command),
+        ToolRoute::Skill => {
+            let args = call_args?;
+            let skill_slug = args.get("skill_slug")?.as_str()?;
+            let argv: Vec<String> = args
+                .get("argv")?
+                .as_array()?
+                .iter()
+                .map(|item| item.as_str().map(str::to_string))
+                .collect::<Option<Vec<String>>>()?;
+            Some(binding_for_skill(skill_slug, &argv))
+        }
+        ToolRoute::Web => {
+            let url = call_args?.get("url")?.as_str()?;
+            Some(binding_for_url(url))
+        }
+        ToolRoute::Gateway | ToolRoute::Seren | ToolRoute::Mcp => {
+            call_args.map(binding_for_publisher_args)
         }
     }
 }
@@ -206,6 +333,11 @@ const TRUSTED_READ_OPERATIONS: &[(&str, &str)] = &[
     ("seren", "get_project"),
     ("seren", "search_projects"),
     ("seren", "get_status"),
+    // Gateway catalog discovery (#3193-F): pure metadata reads the app performs
+    // at connect time. They ride the same enforced MCP transport as model
+    // dispatch, so they authorize through the gate like everything else.
+    ("seren", "list_agent_publishers"),
+    ("seren", "list_mcp_tools"),
 ];
 
 /// Leading verb tokens that denote a side-effect-free read.
@@ -506,11 +638,15 @@ impl ToolAuthorizationState {
         tool_name: &str,
         conversation_id: &str,
         context: &OperationContext,
+        call_args: Option<&serde_json::Value>,
     ) -> Result<AuthorizationDecision, String> {
         let class = classify_for_route(route, publisher_slug, tool_name);
+        let binding = binding_for_operation(route, context, call_args);
 
         if class == OperationClass::TrustedRead {
-            return Ok(AuthorizationDecision::allow(class));
+            let handle =
+                self.mint_handle(conversation_id, route, publisher_slug, tool_name, &binding, None)?;
+            return Ok(AuthorizationDecision::allow(class, handle));
         }
 
         let request = OperationRequest {
@@ -525,7 +661,17 @@ impl ToolAuthorizationState {
         };
         match self.evaluate_and_charge_leases(conversation_id, &request)? {
             LeaseOutcome::Deny => return Ok(AuthorizationDecision::deny(class)),
-            LeaseOutcome::Allow(_) => return Ok(AuthorizationDecision::allow(class)),
+            LeaseOutcome::Allow(lease_id) => {
+                let handle = self.mint_handle(
+                    conversation_id,
+                    route,
+                    publisher_slug,
+                    tool_name,
+                    &binding,
+                    Some(&lease_id),
+                )?;
+                return Ok(AuthorizationDecision::allow(class, handle));
+            }
             LeaseOutcome::Escalate => {}
         }
 
@@ -536,13 +682,24 @@ impl ToolAuthorizationState {
                 "one-shot",
                 description,
                 is_destructive,
+                binding,
             ));
         }
 
         // Unclassified: honor any durable conversation-scoped decision.
         match self.stored_decision(conversation_id, publisher_slug, tool_name)? {
             Some(StoredDecision::Denied) => Ok(AuthorizationDecision::deny(class)),
-            Some(StoredDecision::Granted) => Ok(AuthorizationDecision::allow(class)),
+            Some(StoredDecision::Granted) => {
+                let handle = self.mint_handle(
+                    conversation_id,
+                    route,
+                    publisher_slug,
+                    tool_name,
+                    &binding,
+                    None,
+                )?;
+                Ok(AuthorizationDecision::allow(class, handle))
+            }
             None => {
                 let (description, is_destructive) =
                     prompt_metadata(class, publisher_slug, tool_name);
@@ -551,9 +708,170 @@ impl ToolAuthorizationState {
                     "session",
                     description,
                     is_destructive,
+                    binding,
                 ))
             }
         }
+    }
+
+    /// Mint a dispatch handle for an allowed operation. Returns `None` (allow
+    /// without a redeemable handle — the dispatch will be refused) when the
+    /// caller supplied no binding material for the route: an unbindable allow
+    /// must fail closed at the transport, never widen into "any args".
+    fn mint_handle(
+        &self,
+        conversation_id: &str,
+        route: ToolRoute,
+        publisher_slug: &str,
+        tool_name: &str,
+        binding: &Option<String>,
+        lease_id: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let Some(binding) = binding else {
+            return Ok(None);
+        };
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            mint_dispatch_handle(
+                conn,
+                conversation_id,
+                route,
+                publisher_slug,
+                tool_name,
+                binding,
+                lease_id,
+                &now,
+            )
+            .map(Some)
+        })
+    }
+
+    /// Verify and redeem a dispatch handle for the exact operation a transport
+    /// is about to execute. Fail-closed on every mismatch: unknown or expired
+    /// handle, spent handle, wrong route/publisher/tool, wrong argument binding,
+    /// or a lease-bound handle whose lease has since been revoked or lapsed.
+    ///
+    /// Runs entirely under the store's single connection lock, so the check and
+    /// the redemption are atomic — two racing dispatches cannot both spend the
+    /// last use of a handle.
+    pub fn consume_dispatch_handle(
+        &self,
+        handle_id: &str,
+        route: ToolRoute,
+        publisher_slug: &str,
+        tool_name: &str,
+        binding: &str,
+    ) -> Result<(), String> {
+        const REFUSED: &str =
+            "Dispatch refused: no valid host authorization for this operation.";
+        if handle_id.trim().is_empty() {
+            return Err(REFUSED.to_string());
+        }
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let row: Option<(String, String, String, String, Option<String>, i64, String)> = conn
+                .query_row(
+                    "SELECT route, publisher_slug, tool_name, binding, lease_id, \
+                            uses_remaining, expires_at \
+                     FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![handle_id],
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                            r.get(6)?,
+                        ))
+                    },
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let Some((
+                stored_route,
+                stored_publisher,
+                stored_tool,
+                stored_binding,
+                lease_id,
+                uses_remaining,
+                expires_at,
+            )) = row
+            else {
+                return Err(REFUSED.to_string());
+            };
+            if uses_remaining <= 0
+                || expires_at.as_str() <= now.as_str()
+                || stored_route != route.as_wire()
+                || stored_publisher != publisher_slug
+                || stored_tool != tool_name
+                || stored_binding != binding
+            {
+                return Err(REFUSED.to_string());
+            }
+            // A lease-bound handle is only as alive as its lease: revocation or
+            // expiry between authorize and dispatch must stop the dispatch.
+            if let Some(lease_id) = lease_id {
+                let lease_json: Option<String> = conn
+                    .query_row(
+                        "SELECT lease_json FROM capability_leases WHERE id = ?1",
+                        rusqlite::params![lease_id],
+                        |r| r.get(0),
+                    )
+                    .map(Some)
+                    .or_else(|err| match err {
+                        rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                        other => Err(other.to_string()),
+                    })?;
+                let live = lease_json
+                    .and_then(|json| serde_json::from_str::<CapabilityLease>(&json).ok())
+                    .map(|lease| !lease.revoked && lease.expires_at.as_str() > now.as_str())
+                    .unwrap_or(false);
+                if !live {
+                    return Err(REFUSED.to_string());
+                }
+            }
+            conn.execute(
+                "UPDATE dispatch_handles SET uses_remaining = uses_remaining - 1 WHERE id = ?1",
+                rusqlite::params![handle_id],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM dispatch_handles WHERE uses_remaining <= 0 OR expires_at <= ?1",
+                rusqlite::params![now],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+    }
+
+    /// Test-only mint so transport-level tests can exercise the real
+    /// verify/consume path without driving a full approval flow.
+    #[cfg(test)]
+    pub fn mint_dispatch_handle_for_test(
+        &self,
+        route: ToolRoute,
+        publisher_slug: &str,
+        tool_name: &str,
+        binding: &str,
+    ) -> Result<String, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            mint_dispatch_handle(
+                conn,
+                "test-conversation",
+                route,
+                publisher_slug,
+                tool_name,
+                binding,
+                None,
+                &now,
+            )
+        })
     }
 
     /// Read the active leases for a conversation, evaluate the call, and — when a
@@ -818,6 +1136,7 @@ impl ToolAuthorizationState {
                     changed: false,
                     state: row.state,
                     task_state: row.state.task_state(row.scope),
+                    dispatch_handle: None,
                 });
             }
             if row.expires_at.as_str() <= now.as_str() {
@@ -840,6 +1159,7 @@ impl ToolAuthorizationState {
                     changed,
                     state: ContinuationState::Expired,
                     task_state: ContinuationState::Expired.task_state(row.scope),
+                    dispatch_handle: None,
                 });
             }
             let new_state = decision.settled_state();
@@ -863,10 +1183,21 @@ impl ToolAuthorizationState {
                     &now,
                 );
             }
+            // A pending→approved settle is the post-approval mint point (#3193-F):
+            // the handle is bound to the continuation's registered operation, so a
+            // resolver cannot redeem an approval for different work. Idempotent
+            // replays and already-settled rows never mint — resolving is not a
+            // handle faucet.
+            let dispatch_handle = if changed && new_state == ContinuationState::Approved {
+                mint_handle_for_capability(conn, &row, &now)?
+            } else {
+                None
+            };
             Ok(ResolveOutcome {
                 changed,
                 state: new_state,
                 task_state: new_state.task_state(row.scope),
+                dispatch_handle,
             })
         })
     }
@@ -887,6 +1218,7 @@ impl ToolAuthorizationState {
                     changed: false,
                     state: row.state,
                     task_state: row.state.task_state(row.scope),
+                    dispatch_handle: None,
                 });
             }
             let changed = approval_continuation::settle_if_pending(
@@ -908,6 +1240,7 @@ impl ToolAuthorizationState {
                 changed,
                 state: ContinuationState::Expired,
                 task_state: ContinuationState::Expired.task_state(row.scope),
+                dispatch_handle: None,
             })
         })
     }
@@ -1028,9 +1361,82 @@ impl ToolAuthorizationState {
             let audit_rows = conn
                 .execute("DELETE FROM authorization_audit", [])
                 .map_err(|e| e.to_string())?;
-            Ok(decisions + leases + continuations + audit_rows)
+            let handles = conn
+                .execute("DELETE FROM dispatch_handles", [])
+                .map_err(|e| e.to_string())?;
+            Ok(decisions + leases + continuations + audit_rows + handles)
         })
     }
+}
+
+/// Insert one dispatch-handle row and return its host-minted id. Expired rows
+/// are swept opportunistically so the table stays bounded by live traffic.
+#[allow(clippy::too_many_arguments)]
+fn mint_dispatch_handle(
+    conn: &Connection,
+    conversation_id: &str,
+    route: ToolRoute,
+    publisher_slug: &str,
+    tool_name: &str,
+    binding: &str,
+    lease_id: Option<&str>,
+    now: &str,
+) -> Result<String, String> {
+    conn.execute(
+        "DELETE FROM dispatch_handles WHERE expires_at <= ?1",
+        rusqlite::params![now],
+    )
+    .map_err(|e| e.to_string())?;
+    let handle_id = uuid::Uuid::new_v4().to_string();
+    let expires_at = timestamp_plus_seconds(conn, DISPATCH_HANDLE_TTL_SECS)?;
+    conn.execute(
+        "INSERT INTO dispatch_handles \
+           (id, conversation_id, route, publisher_slug, tool_name, binding, \
+            lease_id, uses_remaining, expires_at, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            handle_id,
+            conversation_id,
+            route.as_wire(),
+            publisher_slug,
+            tool_name,
+            binding,
+            lease_id,
+            handle_uses_for_route(route),
+            expires_at,
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(handle_id)
+}
+
+/// Mint the post-approval handle for a resolved continuation, bound to the
+/// capability that was registered when the gate blocked the call. A capability
+/// registered without a binding cannot mint — the dispatch fails closed rather
+/// than run unbound.
+fn mint_handle_for_capability(
+    conn: &Connection,
+    row: &ContinuationRow,
+    now: &str,
+) -> Result<Option<String>, String> {
+    let Ok(route) = ToolRoute::parse(&row.requested.route) else {
+        return Ok(None);
+    };
+    let Some(binding) = row.requested.binding.as_deref() else {
+        return Ok(None);
+    };
+    mint_dispatch_handle(
+        conn,
+        &row.conversation_id,
+        route,
+        &row.requested.publisher_slug,
+        &row.requested.tool_name,
+        binding,
+        None,
+        now,
+    )
+    .map(Some)
 }
 
 /// Append one audit row, logging (never failing) on error: the audit trail lives
@@ -1195,6 +1601,24 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_capability_leases_conversation \
          ON capability_leases(conversation_id)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    // Dispatch handles (#3193-F): host-minted, short-lived proofs of a gate
+    // decision that every side-effecting transport requires before executing.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS dispatch_handles (
+            id              TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            route           TEXT NOT NULL,
+            publisher_slug  TEXT NOT NULL,
+            tool_name       TEXT NOT NULL,
+            binding         TEXT NOT NULL,
+            lease_id        TEXT,
+            uses_remaining  INTEGER NOT NULL,
+            expires_at      TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        )",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -1380,7 +1804,7 @@ mod tests {
     fn trusted_read_allows_silently() {
         let s = state();
         let decision = s
-            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "allow");
         assert_eq!(decision.prompt_kind, None);
@@ -1391,7 +1815,7 @@ mod tests {
         let s = state();
         for _ in 0..2 {
             let decision = s
-                .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx())
+                .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx(), None)
                 .unwrap();
             assert_eq!(decision.decision, "prompt");
             assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
@@ -1408,7 +1832,7 @@ mod tests {
         )
         .unwrap();
         let decision = s
-            .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "gmail", "delete_messages_by_message_id", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt", "still one-shot after a recorded approval");
     }
@@ -1417,7 +1841,7 @@ mod tests {
     fn unclassified_prompts_once_then_reuses_the_grant() {
         let s = state();
         let first = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(first.decision, "prompt");
         assert_eq!(first.prompt_kind.as_deref(), Some("session"));
@@ -1430,7 +1854,7 @@ mod tests {
             .unwrap();
 
         let second = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(second.decision, "allow");
     }
@@ -1438,12 +1862,12 @@ mod tests {
     #[test]
     fn unclassified_denial_is_durable() {
         let s = state();
-        s.authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+        s.authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         s.record_decision(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", false)
             .unwrap();
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "deny");
     }
@@ -1455,7 +1879,7 @@ mod tests {
             .unwrap();
         // A different conversation does not inherit the grant.
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-b", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-b", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1464,7 +1888,7 @@ mod tests {
     fn a_newly_seen_publisher_is_never_silently_allowed() {
         let s = state();
         let decision = s
-            .authorize(ToolRoute::Gateway, "never-seen", "inspect_everything", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "never-seen", "inspect_everything", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1477,7 +1901,7 @@ mod tests {
         // Two rows: the stored decision and its audit entry.
         assert_eq!(s.wipe().unwrap(), 2);
         let decision = s
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1519,6 +1943,7 @@ mod tests {
                     "execute_command",
                     "conv-a",
                     &cmd_ctx(command),
+                    None,
                 )
                 .unwrap();
             assert_eq!(
@@ -1543,6 +1968,7 @@ mod tests {
                 "execute_command",
                 "conv-a",
                 &cmd_ctx("cargo build"),
+                None,
             )
             .unwrap();
         assert_eq!(decision.decision, "prompt");
@@ -1563,6 +1989,7 @@ mod tests {
                 "execute_command",
                 "conv-a",
                 &cmd_ctx("curl https://example.com/pay"),
+                None,
             )
             .unwrap();
         assert_eq!(decision.decision, "prompt");
@@ -1588,6 +2015,7 @@ mod tests {
                 "execute_command",
                 "conv-a",
                 &cmd_ctx("git push origin main"),
+                None,
             )
             .unwrap();
         assert_eq!(decision.decision, "deny");
@@ -1611,14 +2039,14 @@ mod tests {
 
         for tool in ["post_notes", "post_records", "patch_records_by_id"] {
             let decision = s
-                .authorize(ToolRoute::Gateway, "attio", tool, "conv-a", &target_ctx("conn-123"))
+                .authorize(ToolRoute::Gateway, "attio", tool, "conv-a", &target_ctx("conn-123"), None)
                 .unwrap();
             assert_eq!(decision.decision, "allow", "{tool} should be covered");
         }
 
         // A different connection/account is not covered — one escalation.
         let decision = s
-            .authorize(ToolRoute::Gateway, "attio", "post_notes", "conv-a", &target_ctx("conn-999"))
+            .authorize(ToolRoute::Gateway, "attio", "post_notes", "conv-a", &target_ctx("conn-999"), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1645,6 +2073,7 @@ mod tests {
                 "delete_records_by_id",
                 "conv-a",
                 &target_ctx("conn-123"),
+                None,
             )
             .unwrap();
         assert_eq!(decision.decision, "prompt");
@@ -1660,14 +2089,14 @@ mod tests {
             .grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
             .unwrap();
         assert_eq!(
-            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
                 .unwrap()
                 .decision,
             "allow"
         );
         assert!(s.revoke_lease(&lease.id).unwrap());
         assert_eq!(
-            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
                 .unwrap()
                 .decision,
             "prompt"
@@ -1682,7 +2111,7 @@ mod tests {
         s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
             .unwrap();
         let decision = s
-            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-b", &cmd_ctx("cargo build"))
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-b", &cmd_ctx("cargo build"), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1707,7 +2136,7 @@ mod tests {
             s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(500))
                 .unwrap();
             assert_eq!(
-                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
                     .unwrap()
                     .decision,
                 "allow"
@@ -1721,7 +2150,7 @@ mod tests {
             assert_eq!(leases.len(), 1);
             assert_eq!(leases[0].budgets.calls_used, 1, "budget spend persisted to disk");
             assert_eq!(
-                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo test"))
+                s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo test"), None)
                     .unwrap()
                     .decision,
                 "allow"
@@ -1753,7 +2182,7 @@ mod tests {
         assert!(s.wipe().unwrap() >= 1);
         assert!(s.list_leases("conv-a").unwrap().is_empty());
         let decision = s
-            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
@@ -1784,7 +2213,7 @@ mod tests {
         // A brand-new state (no shared connection) at the same path.
         let second = ToolAuthorizationState::new(db_path);
         let decision = second
-            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx(), None)
             .unwrap();
         assert_eq!(
             decision.decision, "allow",
@@ -1805,6 +2234,7 @@ mod tests {
             command: None,
             host: None,
             target: None,
+            binding: None,
         }
     }
 
@@ -1819,6 +2249,7 @@ mod tests {
             command: Some(command.to_string()),
             host: None,
             target: None,
+            binding: None,
         }
     }
 
@@ -2082,7 +2513,7 @@ mod tests {
             .grant_lease("conv-a", "Coding lease", 3600, command_rules(&["cargo"]), call_budget(10))
             .unwrap();
         let decision = s
-            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
             .unwrap();
         assert_eq!(decision.decision, "allow");
         assert!(s.revoke_lease(&lease.id).unwrap());
@@ -2112,7 +2543,7 @@ mod tests {
         s.grant_lease("conv-a", "lease", 3600, command_rules(&["curl"]), call_budget(10))
             .unwrap();
         let secret_command = "curl -H 'Authorization: Bearer sk-live-SECRET' https://api.example.com";
-        s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx(secret_command))
+        s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx(secret_command), None)
             .unwrap();
 
         let entries = s.list_audit("conv-a", 100).unwrap();
@@ -2136,7 +2567,7 @@ mod tests {
         s.grant_lease("conv-a", "lease", 3600, predicates, call_budget(10))
             .unwrap();
         let decision = s
-            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("git push"))
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("git push"), None)
             .unwrap();
         assert_eq!(decision.decision, "deny");
         assert_eq!(audit_events(&s, "conv-a"), vec!["lease_denied", "lease_granted"]);
@@ -2238,5 +2669,339 @@ mod tests {
         assert!(!s.list_audit("conv-a", 10).unwrap().is_empty());
         s.wipe().unwrap();
         assert!(s.list_audit("conv-a", 10).unwrap().is_empty());
+    }
+
+    // ---- dispatch-handle enforcement (#3193-F) -----------------------------
+
+    fn gmail_read_args() -> serde_json::Value {
+        serde_json::json!({ "q": "from:example" })
+    }
+
+    /// A silent allow mints a handle the transport can redeem for that exact
+    /// operation; a gateway handle budgets the x402 retry pair, then exhausts.
+    #[test]
+    fn allow_mints_a_redeemable_handle_that_exhausts() {
+        let s = state();
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx(), Some(&args))
+            .unwrap();
+        assert_eq!(decision.decision, "allow");
+        let handle = decision.handle.expect("allow carries a dispatch handle");
+        let binding = binding_for_publisher_args(&args);
+
+        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+            .unwrap();
+        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+            .unwrap();
+        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+            .unwrap();
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+                .is_err(),
+            "a spent handle must be refused"
+        );
+    }
+
+    /// A transport invoked with no handle, a forged handle, or an expired
+    /// handle is refused — the bypass path this ticket exists to close.
+    #[test]
+    fn transports_refuse_missing_forged_and_expired_handles() {
+        let s = state();
+        let binding = binding_for_publisher_args(&gmail_read_args());
+        assert!(
+            s.consume_dispatch_handle("", ToolRoute::Gateway, "gmail", "get_messages", &binding)
+                .is_err(),
+            "no handle"
+        );
+        assert!(
+            s.consume_dispatch_handle(
+                "11111111-2222-3333-4444-555555555555",
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding
+            )
+            .is_err(),
+            "forged handle"
+        );
+
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx(), Some(&args))
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        // Force the handle's window closed.
+        s.with_conn(|conn| {
+            conn.execute(
+                "UPDATE dispatch_handles SET expires_at = '2000-01-01T00:00:00.000Z' WHERE id = ?1",
+                rusqlite::params![handle],
+            )
+            .map_err(|e| e.to_string())
+        })
+        .unwrap();
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+                .is_err(),
+            "expired handle"
+        );
+    }
+
+    /// A handle for one operation cannot be replayed for a different operation,
+    /// route, publisher, or argument payload.
+    #[test]
+    fn handle_is_bound_to_route_operation_and_args() {
+        let s = state();
+        let args = gmail_read_args();
+        let handle = s
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx(), Some(&args))
+            .unwrap()
+            .handle
+            .unwrap();
+        let binding = binding_for_publisher_args(&args);
+        let other_binding =
+            binding_for_publisher_args(&serde_json::json!({ "q": "from:someone-else" }));
+
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "delete_messages", &binding)
+                .is_err(),
+            "different operation"
+        );
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Mcp, "gmail", "get_messages", &binding)
+                .is_err(),
+            "different route"
+        );
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "attio", "get_messages", &binding)
+                .is_err(),
+            "different publisher"
+        );
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &other_binding
+            )
+            .is_err(),
+            "different args"
+        );
+        // The exact operation still redeems.
+        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
+            .unwrap();
+    }
+
+    /// The operation binding ignores dispatch metadata (`connection_id`,
+    /// `_x402_payment`) that legitimately changes between the gate consultation
+    /// and the wire dispatch, and nothing else.
+    #[test]
+    fn binding_normalization_excludes_only_dispatch_metadata() {
+        let base = serde_json::json!({ "q": "x" });
+        let with_meta = serde_json::json!({
+            "q": "x",
+            "connection_id": "conn-1",
+            "_x402_payment": "header",
+        });
+        let different = serde_json::json!({ "q": "y" });
+        assert_eq!(
+            binding_for_publisher_args(&base),
+            binding_for_publisher_args(&with_meta)
+        );
+        assert_ne!(
+            binding_for_publisher_args(&base),
+            binding_for_publisher_args(&different)
+        );
+    }
+
+    /// Non-gateway routes are strictly one dispatch per authorization.
+    #[test]
+    fn non_gateway_handles_are_single_use() {
+        let s = state();
+        s.grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(10))
+            .unwrap();
+        let handle = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("cargo build"),
+                None,
+            )
+            .unwrap()
+            .handle
+            .unwrap();
+        let binding = binding_for_command("cargo build");
+        s.consume_dispatch_handle(&handle, ToolRoute::Shell, "seren", "execute_command", &binding)
+            .unwrap();
+        assert!(
+            s.consume_dispatch_handle(&handle, ToolRoute::Shell, "seren", "execute_command", &binding)
+                .is_err()
+        );
+    }
+
+    /// A lease-bound handle dies with its lease: revocation between authorize
+    /// and dispatch stops the dispatch.
+    #[test]
+    fn lease_bound_handle_is_refused_after_revocation() {
+        let s = state();
+        let lease = s
+            .grant_lease("conv-a", "coding", 3600, command_rules(&["cargo"]), call_budget(10))
+            .unwrap();
+        let handle = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("cargo build"),
+                None,
+            )
+            .unwrap()
+            .handle
+            .unwrap();
+        assert!(s.revoke_lease(&lease.id).unwrap());
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                &binding_for_command("cargo build")
+            )
+            .is_err(),
+            "a revoked lease must invalidate its outstanding handles"
+        );
+    }
+
+    /// The prompt decision carries the host-computed binding; the approved
+    /// continuation mints a handle bound to exactly that operation, exactly
+    /// once — a replayed resolve is not a handle faucet.
+    #[test]
+    fn approved_continuation_mints_the_post_approval_handle_once() {
+        let s = state();
+        let args = serde_json::json!({ "to": "a@example.com" });
+        let decision = s
+            .authorize(ToolRoute::Gateway, "gmail", "post_send", "conv-a", &ctx(), Some(&args))
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        let binding = decision.binding.expect("prompt carries the operation binding");
+        assert_eq!(binding, binding_for_publisher_args(&args));
+
+        let mut cap = send_cap();
+        cap.binding = Some(binding.clone());
+        let r = s
+            .register_continuation("conv-a", cap, ContinuationScope::Linear, 300)
+            .unwrap();
+        let outcome = s
+            .resolve_continuation(&r.approval_id, &r.resume_token, ResolveDecision::Approve)
+            .unwrap();
+        assert!(outcome.changed);
+        let handle = outcome
+            .dispatch_handle
+            .expect("pending→approved settle mints the dispatch handle");
+        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "post_send", &binding)
+            .unwrap();
+
+        // Idempotent replay of the resolve mints nothing.
+        let replay = s
+            .resolve_continuation(&r.approval_id, &r.resume_token, ResolveDecision::Approve)
+            .unwrap();
+        assert!(!replay.changed);
+        assert!(replay.dispatch_handle.is_none());
+    }
+
+    /// Deny/skip settles never mint; a capability registered without a binding
+    /// cannot mint either (the dispatch fails closed instead).
+    #[test]
+    fn non_approve_settles_and_unbound_capabilities_mint_nothing() {
+        let s = state();
+        let denied = s
+            .register_continuation("conv-a", shell_cap("git push"), ContinuationScope::Linear, 300)
+            .unwrap();
+        let outcome = s
+            .resolve_continuation(&denied.approval_id, &denied.resume_token, ResolveDecision::Deny)
+            .unwrap();
+        assert!(outcome.dispatch_handle.is_none());
+
+        // send_cap() has no binding: approval settles but cannot mint.
+        let unbound = s
+            .register_continuation("conv-a", send_cap(), ContinuationScope::Linear, 300)
+            .unwrap();
+        let outcome = s
+            .resolve_continuation(&unbound.approval_id, &unbound.resume_token, ResolveDecision::Approve)
+            .unwrap();
+        assert!(outcome.changed);
+        assert!(outcome.dispatch_handle.is_none());
+    }
+
+    /// Distinct argument payloads for the same tool are distinct pending
+    /// requests — a differently-argued retry must not inherit a continuation
+    /// whose post-approval handle it can never redeem.
+    #[test]
+    fn continuation_dedup_keys_on_the_operation_binding() {
+        let s = state();
+        let mut first = send_cap();
+        first.binding = Some("binding-a".to_string());
+        let mut second = send_cap();
+        second.binding = Some("binding-b".to_string());
+
+        let a = s
+            .register_continuation("conv-a", first.clone(), ContinuationScope::Linear, 300)
+            .unwrap();
+        let b = s
+            .register_continuation("conv-a", second, ContinuationScope::Linear, 300)
+            .unwrap();
+        assert!(!b.deduplicated, "different args are a different request");
+        assert_ne!(a.approval_id, b.approval_id);
+
+        // The same args still dedup.
+        let retry = s
+            .register_continuation("conv-a", first, ContinuationScope::Linear, 300)
+            .unwrap();
+        assert!(retry.deduplicated);
+        assert_eq!(retry.approval_id, a.approval_id);
+    }
+
+    /// Gateway catalog discovery reads are trusted and mint silently — the
+    /// enforced MCP transport must not break gateway initialization.
+    #[test]
+    fn gateway_catalog_reads_mint_silently() {
+        let s = state();
+        for (tool, args) in [
+            ("list_agent_publishers", serde_json::json!({})),
+            ("list_mcp_tools", serde_json::json!({ "publisher": "gmail" })),
+        ] {
+            let decision = s
+                .authorize(ToolRoute::Seren, "seren", tool, "gateway-catalog", &ctx(), Some(&args))
+                .unwrap();
+            assert_eq!(decision.decision, "allow", "{tool} should be a trusted read");
+            assert!(decision.handle.is_some(), "{tool} should carry a handle");
+        }
+    }
+
+    /// Wipe clears outstanding handles: after erase-all nothing is redeemable.
+    #[test]
+    fn wipe_clears_dispatch_handles() {
+        let s = state();
+        let args = gmail_read_args();
+        let handle = s
+            .authorize(ToolRoute::Gateway, "gmail", "get_messages", "conv-a", &ctx(), Some(&args))
+            .unwrap()
+            .handle
+            .unwrap();
+        s.wipe().unwrap();
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding_for_publisher_args(&args)
+            )
+            .is_err()
+        );
     }
 }

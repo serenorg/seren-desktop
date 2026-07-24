@@ -725,14 +725,28 @@ struct ResourcesListResponse {
     resources: Vec<McpResource>,
 }
 
-/// Call a tool on an MCP server
+/// Call a tool on an MCP server.
+///
+/// #3193-F: executing a tool is a side effect, so this transport refuses to run
+/// without a live host-minted dispatch handle for this exact server, tool, and
+/// argument payload. The handle is redeemed before the child process sees the
+/// call — a renderer path that skipped the authorization gate cannot get here.
 #[tauri::command]
 pub async fn mcp_call_tool(
     state: State<'_, McpState>,
+    authorization: State<'_, crate::tool_authorization::ToolAuthorizationState>,
     server_name: String,
     tool_name: String,
     arguments: serde_json::Value,
+    auth_handle: Option<String>,
 ) -> Result<McpToolResult, String> {
+    authorization.consume_dispatch_handle(
+        auth_handle.as_deref().unwrap_or_default(),
+        crate::tool_authorization::ToolRoute::Mcp,
+        &server_name,
+        &tool_name,
+        &crate::tool_authorization::binding_for_publisher_args(&arguments),
+    )?;
     let slot = lookup_slot(&state, &server_name)?;
     let params = serde_json::json!({
         "name": tool_name,
@@ -915,14 +929,79 @@ pub async fn mcp_list_tools_http(
     Ok(tools)
 }
 
-/// Call a tool on an HTTP MCP server
+/// The gate-facing identity of one HTTP MCP dispatch: which route/publisher/
+/// tool the renderer must have authorized, and the argument payload the
+/// operation binding covers. Mirrors how the renderer consults the gate:
+/// `call_publisher` and native `mcp__{publisher}__{tool}` names authorize as
+/// the wrapped gateway operation, everything else as a built-in seren tool.
+pub(crate) fn http_dispatch_identity(
+    tool_name: &str,
+    arguments: &serde_json::Value,
+) -> (
+    crate::tool_authorization::ToolRoute,
+    String,
+    String,
+    serde_json::Value,
+) {
+    use crate::tool_authorization::ToolRoute;
+    if tool_name == "call_publisher" {
+        let publisher = arguments
+            .get("publisher")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let tool = arguments
+            .get("tool")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let tool_args = arguments
+            .get("tool_args")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        return (ToolRoute::Gateway, publisher, tool, tool_args);
+    }
+    if let Some(rest) = tool_name.strip_prefix("mcp__") {
+        if let Some((publisher, tool)) = rest.split_once("__") {
+            return (
+                ToolRoute::Gateway,
+                publisher.to_string(),
+                tool.to_string(),
+                arguments.clone(),
+            );
+        }
+    }
+    (
+        ToolRoute::Seren,
+        "seren".to_string(),
+        tool_name.to_string(),
+        arguments.clone(),
+    )
+}
+
+/// Call a tool on an HTTP MCP server.
+///
+/// #3193-F: like the stdio transport, this refuses to execute without a live
+/// dispatch handle. The handle is verified against the *effective* operation —
+/// a `call_publisher` envelope is unwrapped to the publisher tool it carries,
+/// so wrapping a call cannot dodge the binding.
 #[tauri::command]
 pub async fn mcp_call_tool_http(
     state: State<'_, HttpMcpState>,
+    authorization: State<'_, crate::tool_authorization::ToolAuthorizationState>,
     server_name: String,
     tool_name: String,
     arguments: serde_json::Value,
+    auth_handle: Option<String>,
 ) -> Result<McpToolResult, String> {
+    let (route, publisher, tool, bound_args) = http_dispatch_identity(&tool_name, &arguments);
+    authorization.consume_dispatch_handle(
+        auth_handle.as_deref().unwrap_or_default(),
+        route,
+        &publisher,
+        &tool,
+        &crate::tool_authorization::binding_for_publisher_args(&bound_args),
+    )?;
     let clients = state.clients.read().await;
     let client = clients
         .get(&server_name)
@@ -976,6 +1055,51 @@ pub async fn mcp_list_connected_http(
 // rather than hanging. A regression on either `spawn_blocking` or
 // `tokio::time::timeout` would fail this test.
 // ============================================================================
+
+#[cfg(test)]
+mod dispatch_identity_tests {
+    use super::http_dispatch_identity;
+    use crate::tool_authorization::ToolRoute;
+
+    /// The transport verifies handles against the *effective* operation, so
+    /// the identity parser must mirror how the renderer consults the gate for
+    /// each wire shape (#3193-F).
+    #[test]
+    fn call_publisher_envelopes_unwrap_to_the_carried_operation() {
+        let args = serde_json::json!({
+            "publisher": "gmail",
+            "tool": "post_send",
+            "tool_args": { "to": "a@example.com" },
+            "_x402_payment": "header",
+        });
+        let (route, publisher, tool, bound) = http_dispatch_identity("call_publisher", &args);
+        assert_eq!(route, ToolRoute::Gateway);
+        assert_eq!(publisher, "gmail");
+        assert_eq!(tool, "post_send");
+        assert_eq!(bound, serde_json::json!({ "to": "a@example.com" }));
+    }
+
+    #[test]
+    fn native_mcp_names_parse_to_their_publisher_operation() {
+        let args = serde_json::json!({ "tz": "UTC" });
+        let (route, publisher, tool, bound) =
+            http_dispatch_identity("mcp__mcp-time__get_current_time", &args);
+        assert_eq!(route, ToolRoute::Gateway);
+        assert_eq!(publisher, "mcp-time");
+        assert_eq!(tool, "get_current_time");
+        assert_eq!(bound, args);
+    }
+
+    #[test]
+    fn builtin_tools_identify_as_seren_route() {
+        let args = serde_json::json!({ "publisher": "gmail" });
+        let (route, publisher, tool, bound) = http_dispatch_identity("list_mcp_tools", &args);
+        assert_eq!(route, ToolRoute::Seren);
+        assert_eq!(publisher, "seren");
+        assert_eq!(tool, "list_mcp_tools");
+        assert_eq!(bound, args);
+    }
+}
 
 #[cfg(test)]
 #[cfg(unix)]

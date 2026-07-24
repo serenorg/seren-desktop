@@ -21,8 +21,11 @@ const mocks = vi.hoisted(() => ({
       | "unclassified",
     description: "",
     isDestructive: false,
+    handle: "handle-allow" as string | null,
+    binding: "binding-1" as string | null,
   },
   authorizeError: false,
+  registerError: false,
   callGatewayTool: vi.fn(),
   callMcpTool: vi.fn(),
   callSerenTool: vi.fn(),
@@ -47,6 +50,13 @@ vi.mock("@/lib/mcp/client", () => ({
 
 vi.mock("@/services/publisher-oauth", () => ({
   computeAgentOAuthRouting: mocks.computeAgentOAuthRouting,
+}));
+
+// The allow-without-handle guard reports through the support pipeline; keep it
+// a no-op here so the fire-and-forget capture cannot leak into Node (which has
+// no localStorage) as an unhandled rejection.
+vi.mock("@/lib/support/hook", () => ({
+  reportError: vi.fn(),
 }));
 
 vi.mock("@/stores/conversation.store", () => ({
@@ -178,12 +188,15 @@ describe("tool executor authorization gate", () => {
     mocks.shellApprovalId = "";
     mocks.shellApprovalResponse = true;
     mocks.authorizeError = false;
+    mocks.registerError = false;
     mocks.authorizeDecision = {
       decision: "allow",
       promptKind: null,
       operationClass: "trusted-read",
       description: "",
       isDestructive: false,
+      handle: "handle-allow",
+      binding: "binding-1",
     };
     mocks.computeAgentOAuthRouting.mockResolvedValue({
       publishers: {},
@@ -197,12 +210,47 @@ describe("tool executor authorization gate", () => {
     });
     mocks.callSerenTool.mockResolvedValue({ result: "ok", is_error: false });
 
-    mocks.invoke.mockImplementation(async (cmd: string) => {
+    mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "authorize_tool_operation") {
         if (mocks.authorizeError) throw new Error("gate unavailable");
         return mocks.authorizeDecision;
       }
       if (cmd === "record_tool_operation_decision") return undefined;
+      if (cmd === "register_approval_continuation") {
+        if (mocks.registerError) throw new Error("host unavailable");
+        return {
+          approvalId: "approval-1",
+          resumeToken: "resume-1",
+          blockedScope: "linear",
+          taskState: "waiting_for_approval",
+          deduplicated: false,
+          modelResult: { status: "approval_pending" },
+        };
+      }
+      if (cmd === "resolve_approval_continuation") {
+        const decision = (args as { decision: string }).decision;
+        if (decision === "approve") {
+          // The pending→approved settle is the post-approval mint (#3193-F).
+          return {
+            changed: true,
+            state: "approved",
+            taskState: "running",
+            dispatchHandle: "handle-approved",
+          };
+        }
+        return {
+          changed: true,
+          state: decision === "skip" ? "skipped" : "denied",
+          taskState: "running",
+        };
+      }
+      if (cmd === "expire_approval_continuation") {
+        return {
+          changed: true,
+          state: "expired",
+          taskState: "approval_expired",
+        };
+      }
       if (cmd === "web_fetch") {
         return {
           content: "web-ok",
@@ -396,16 +444,56 @@ describe("tool executor authorization gate", () => {
     const { executeTool } = await import("@/lib/tools/executor");
     mocks.authorizeDecision.decision = "allow";
 
-    await executeTool(serenCall("call_publisher"), "conv-a");
+    await executeTool(serenCall("run_sql"), "conv-a");
 
     expect(authorizeCalls()[0]).toMatchObject({
       route: "seren",
       publisherSlug: "seren",
-      toolName: "call_publisher",
+      toolName: "run_sql",
     });
-    expect(mocks.callSerenTool).toHaveBeenCalledWith("call_publisher", {
-      value: "test",
+    expect(mocks.callSerenTool).toHaveBeenCalledWith(
+      "run_sql",
+      { value: "test" },
+      "handle-allow",
+    );
+  });
+
+  it("authorizes seren__call_publisher as its wrapped publisher operation", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision.decision = "allow";
+
+    await executeTool(
+      {
+        id: "seren-call-publisher",
+        type: "function",
+        function: {
+          name: "seren__call_publisher",
+          arguments: JSON.stringify({
+            publisher: "gmail",
+            tool: "post_send",
+            tool_args: { to: "a@example.com" },
+          }),
+        },
+      },
+      "conv-a",
+    );
+
+    // The gate must classify the REAL operation (gmail/post_send), not the
+    // generic call_publisher envelope, so a high-risk publisher call cannot
+    // ride an unclassified-call_publisher session grant. The transport
+    // unwraps the same envelope, so the handle binding matches.
+    expect(authorizeCalls()[0]).toMatchObject({
+      route: "gateway",
+      publisherSlug: "gmail",
+      toolName: "post_send",
     });
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith(
+      "gmail",
+      "post_send",
+      { to: "a@example.com" },
+      "handle-allow",
+    );
+    expect(mocks.callSerenTool).not.toHaveBeenCalled();
   });
 
   it("routes local MCP dispatch through the gate under the mcp route", async () => {
@@ -499,6 +587,8 @@ describe("tool executor authorization gate", () => {
       operationClass: "high-risk",
       description: "High-risk operation on seren/run_skill_script",
       isDestructive: false,
+      handle: null,
+      binding: "binding-1",
     };
 
     const result = await executeTool(skillCall(), "conv-a");
@@ -509,5 +599,101 @@ describe("tool executor authorization gate", () => {
       toolName: "run_skill_script",
     });
     expect(shellPromptCount()).toBe(1);
+  });
+
+  // ---- dispatch-handle enforcement (#3193-F) ------------------------------
+
+  it("threads the host-minted handle into a silently allowed dispatch", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision.decision = "allow";
+
+    await executeTool(webFetchCall(), "conv-a");
+
+    const webCall = mocks.invoke.mock.calls.find(([cmd]) => cmd === "web_fetch");
+    expect(webCall?.[1]).toMatchObject({ authHandle: "handle-allow" });
+  });
+
+  it("dispatches an approved prompt with the handle minted at resolution", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision = {
+      decision: "prompt",
+      promptKind: "one-shot",
+      operationClass: "high-risk",
+      description: "High-risk operation on seren/execute_command",
+      isDestructive: false,
+      handle: null,
+      binding: "binding-1",
+    };
+
+    const result = await executeTool(shellCall(), "conv-a");
+
+    expect(result.is_error).toBe(false);
+    const shellDispatch = mocks.invoke.mock.calls.find(
+      ([cmd]) => cmd === "execute_shell_command_streaming",
+    );
+    expect(shellDispatch?.[1]).toMatchObject({
+      authHandle: "handle-approved",
+    });
+  });
+
+  it("fails closed when the host allows but mints no dispatch handle", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision.decision = "allow";
+    mocks.authorizeDecision.handle = null;
+
+    const result = await executeTool(
+      gatewayCall("gmail", "get_messages"),
+      "conv-a",
+    );
+
+    expect(result.is_error).toBe(true);
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the suspended continuation cannot be registered", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision = {
+      decision: "prompt",
+      promptKind: "session",
+      operationClass: "unclassified",
+      description: "Unclassified operation",
+      isDestructive: false,
+      handle: null,
+      binding: "binding-1",
+    };
+    mocks.registerError = true;
+
+    const result = await executeTool(
+      gatewayCall("new-publisher", "inspect_records"),
+      "conv-a",
+    );
+
+    // No continuation → no post-approval handle is possible → the action is
+    // refused without even prompting, rather than executing unbound.
+    expect(result.is_error).toBe(true);
+    expect(gatewayPromptCount()).toBe(0);
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("echoes the gate's operation binding into the registered continuation", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.authorizeDecision = {
+      decision: "prompt",
+      promptKind: "session",
+      operationClass: "unclassified",
+      description: "Unclassified operation",
+      isDestructive: false,
+      handle: null,
+      binding: "binding-xyz",
+    };
+
+    await executeTool(gatewayCall("new-publisher", "inspect_records"), "conv-a");
+
+    const register = mocks.invoke.mock.calls.find(
+      ([cmd]) => cmd === "register_approval_continuation",
+    );
+    expect(register?.[1]).toMatchObject({
+      requested: expect.objectContaining({ binding: "binding-xyz" }),
+    });
   });
 });

@@ -89,6 +89,53 @@ fn normalize_path(path: &str) -> String {
     }
 }
 
+/// Renderer-supplied dispatch-handle header (#3193-F). Always stripped before
+/// the request leaves the app; consumed only for publisher tool dispatch.
+const AUTH_HANDLE_HEADER: &str = "x-seren-auth-handle";
+
+/// Detect the publisher tool-dispatch surface:
+/// `/publishers/{slug}/_mcp/tools/{tool}`. Returns the decoded publisher slug
+/// and tool name. Every other Gateway path (auth, billing, chat, catalog) is
+/// app-level API traffic, not model tool dispatch, and passes through.
+fn publisher_dispatch_target(url: &Url) -> Option<(String, String)> {
+    let segments: Vec<&str> = url.path_segments()?.filter(|s| !s.is_empty()).collect();
+    match segments.as_slice() {
+        ["publishers", slug, "_mcp", "tools", tool] => Some((
+            urlencoding::decode(slug).ok()?.into_owned(),
+            urlencoding::decode(tool).ok()?.into_owned(),
+        )),
+        _ => None,
+    }
+}
+
+/// #3193-F: a publisher tool dispatch through the HTTP bridge must redeem a
+/// live host-minted handle for the exact publisher, tool, and body payload —
+/// the same rule the MCP transport enforces, so neither wire shape can be used
+/// to skip the authorization gate.
+fn enforce_publisher_dispatch(
+    app: &AppHandle,
+    url: &Url,
+    body: Option<&str>,
+    auth_handle: Option<&str>,
+) -> Result<(), String> {
+    let Some((publisher, tool)) = publisher_dispatch_target(url) else {
+        return Ok(());
+    };
+    let body_args: serde_json::Value = match body {
+        Some(raw) if !raw.trim().is_empty() => serde_json::from_str(raw)
+            .map_err(|_| "Dispatch refused: publisher tool body was not valid JSON.".to_string())?,
+        _ => serde_json::json!({}),
+    };
+    app.state::<crate::tool_authorization::ToolAuthorizationState>()
+        .consume_dispatch_handle(
+            auth_handle.unwrap_or_default(),
+            crate::tool_authorization::ToolRoute::Gateway,
+            &publisher,
+            &tool,
+            &crate::tool_authorization::binding_for_publisher_args(&body_args),
+        )
+}
+
 fn should_skip_stored_auth(path: &str) -> bool {
     matches!(
         normalize_path(path).as_str(),
@@ -120,9 +167,11 @@ fn build_header_map(raw_headers: &HashMap<String, String>) -> Result<HeaderMap, 
 
     for (name, value) in raw_headers {
         let lower = name.to_ascii_lowercase();
+        // The dispatch handle is app-internal proof for the Rust gate — it must
+        // never leave the process on the wire.
         if matches!(
             lower.as_str(),
-            "host" | "origin" | "content-length" | "connection"
+            "host" | "origin" | "content-length" | "connection" | AUTH_HANDLE_HEADER
         ) {
             continue;
         }
@@ -202,6 +251,12 @@ pub async fn gateway_http_start(
         .method
         .parse::<Method>()
         .map_err(|e| format!("Invalid HTTP method '{}': {}", request.method, e))?;
+    let auth_handle = request
+        .headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(AUTH_HANDLE_HEADER))
+        .map(|(_, value)| value.clone());
+    enforce_publisher_dispatch(&app, &url, request.body.as_deref(), auth_handle.as_deref())?;
     let headers = build_header_map(&request.headers)?;
     let body = request.body.clone();
 
@@ -346,6 +401,49 @@ mod tests {
 
         let refresh = Url::parse("https://api.serendb.com/auth/refresh").unwrap();
         assert!(!should_use_stored_auth(&refresh, &no_auth_headers));
+    }
+
+    /// The dispatch handle is app-internal proof — it must be stripped before
+    /// the request goes on the wire, whatever its casing.
+    #[test]
+    fn auth_handle_header_never_reaches_the_wire() {
+        let mut raw = HashMap::new();
+        raw.insert("X-Seren-Auth-Handle".to_string(), "handle-1".to_string());
+        raw.insert("accept".to_string(), "application/json".to_string());
+        let headers = build_header_map(&raw).unwrap();
+        assert!(!headers.contains_key(AUTH_HANDLE_HEADER));
+        assert!(headers.contains_key("accept"));
+    }
+
+    /// #3193-F: only the publisher tool-dispatch surface demands a dispatch
+    /// handle; every other Gateway path is app-level API traffic.
+    #[test]
+    fn publisher_dispatch_target_matches_only_the_tool_dispatch_surface() {
+        let dispatch =
+            Url::parse("https://api.serendb.com/publishers/gmail/_mcp/tools/post_send").unwrap();
+        assert_eq!(
+            publisher_dispatch_target(&dispatch),
+            Some(("gmail".to_string(), "post_send".to_string()))
+        );
+
+        let encoded = Url::parse(
+            "https://api.serendb.com/publishers/my%2Dpub/_mcp/tools/get%5Fmessages",
+        )
+        .unwrap();
+        assert_eq!(
+            publisher_dispatch_target(&encoded),
+            Some(("my-pub".to_string(), "get_messages".to_string()))
+        );
+
+        for other in [
+            "https://api.serendb.com/auth/login",
+            "https://api.serendb.com/publishers/gmail",
+            "https://api.serendb.com/publishers/seren-skills/skills",
+            "https://api.serendb.com/publishers/gmail/_mcp/tools",
+            "https://api.serendb.com/publishers/gmail/_mcp/tools/post_send/extra",
+        ] {
+            assert_eq!(publisher_dispatch_target(&Url::parse(other).unwrap()), None, "{other}");
+        }
     }
 
     #[test]

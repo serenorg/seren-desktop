@@ -18,14 +18,40 @@ pub struct WebFetchResult {
 
 /// Fetch content from a public URL and convert HTML to markdown.
 ///
+/// #3193-F: web fetch is open-world data egress, so the renderer-invokable
+/// command refuses to run without a live host-minted dispatch handle for this
+/// exact URL. Host-side callers (the orchestrator's own gated tool loop) use
+/// [`fetch_web_content`] directly.
+#[tauri::command]
+pub async fn web_fetch(
+    authorization: tauri::State<'_, crate::tool_authorization::ToolAuthorizationState>,
+    url: String,
+    timeout_ms: Option<u64>,
+    auth_handle: Option<String>,
+) -> Result<WebFetchResult, String> {
+    authorization.consume_dispatch_handle(
+        auth_handle.as_deref().unwrap_or_default(),
+        crate::tool_authorization::ToolRoute::Web,
+        "seren",
+        "web_fetch",
+        &crate::tool_authorization::binding_for_url(&url),
+    )?;
+    fetch_web_content(url, timeout_ms).await
+}
+
+/// Transport-free fetch used by the command above (after handle redemption)
+/// and by host-side tool loops that gate their own calls.
+///
 /// # Arguments
 /// * `url` - The URL to fetch (must be http or https)
 /// * `timeout_ms` - Request timeout in milliseconds (default: 30000)
 ///
 /// # Returns
 /// * `WebFetchResult` with content, content_type, final url, and status code
-#[tauri::command]
-pub async fn web_fetch(url: String, timeout_ms: Option<u64>) -> Result<WebFetchResult, String> {
+pub async fn fetch_web_content(
+    url: String,
+    timeout_ms: Option<u64>,
+) -> Result<WebFetchResult, String> {
     // Validate URL
     let parsed_url = url::Url::parse(&url).map_err(|e| format!("Invalid URL: {}", e))?;
 

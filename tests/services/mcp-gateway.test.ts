@@ -5,6 +5,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const gatewayFetchMock = vi.hoisted(() => vi.fn());
 
+// The gateway catalog reads authorize through the host gate before dispatch
+// (#3193-F); return a live allow+handle so discovery proceeds.
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (cmd: string) => {
+    if (cmd === "authorize_tool_operation") {
+      return { decision: "allow", handle: "handle-catalog" };
+    }
+    return undefined;
+  }),
+}));
+
 // Mock tauri-bridge to avoid localStorage dependency in Node.
 vi.mock("@/lib/tauri-bridge", () => ({
   getSerenApiKey: vi.fn().mockResolvedValue("test-api-key"),
@@ -258,10 +269,14 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     const result = await callGatewayTool("test", "test-tool", {});
 
     // Should call directly with the original MCP name, NOT through call_publisher
-    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
-      name: "mcp__test__test-tool",
-      arguments: {},
-    });
+    expect(callToolMock).toHaveBeenCalledWith(
+      "seren-gateway",
+      {
+        name: "mcp__test__test-tool",
+        arguments: {},
+      },
+      { authHandle: undefined },
+    );
     expect(result.is_error).toBe(false);
   });
 
@@ -328,14 +343,18 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     });
 
     // Should dispatch through call_publisher, not direct MCP call
-    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
-      name: "call_publisher",
-      arguments: {
-        publisher: "kraken",
-        tool: "get_balance",
-        tool_args: { currency: "USD" },
+    expect(callToolMock).toHaveBeenCalledWith(
+      "seren-gateway",
+      {
+        name: "call_publisher",
+        arguments: {
+          publisher: "kraken",
+          tool: "get_balance",
+          tool_args: { currency: "USD" },
+        },
       },
-    });
+      { authHandle: undefined },
+    );
     expect(result.is_error).toBe(false);
   });
 
@@ -466,10 +485,14 @@ describe("MCP Gateway Native Tool Routing (#1329)", () => {
     });
 
     // Native call should NOT include _x402_payment in arguments
-    expect(callToolMock).toHaveBeenCalledWith("seren-gateway", {
-      name: "mcp__test__test-tool",
-      arguments: { some_arg: "value" },
-    });
+    expect(callToolMock).toHaveBeenCalledWith(
+      "seren-gateway",
+      {
+        name: "mcp__test__test-tool",
+        arguments: { some_arg: "value" },
+      },
+      { authHandle: undefined },
+    );
   });
 });
 
