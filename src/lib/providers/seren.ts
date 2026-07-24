@@ -63,7 +63,7 @@ function handleInsufficientBalanceError(errorText: string): void {
 }
 
 /**
- * Normalize old model IDs to current OpenRouter format.
+ * Normalize old model IDs to the canonical vendor/model slug format.
  * Handles migration from date-suffixed IDs to clean IDs.
  */
 function normalizeModelId(modelId: string): string {
@@ -133,7 +133,7 @@ const DEFAULT_MODELS: ProviderModel[] = [
   },
 ];
 
-async function getGatewayHeaders(
+export async function getGatewayHeaders(
   url: string,
   includeJsonContentType = false,
 ): Promise<Record<string, string>> {
