@@ -867,6 +867,7 @@ mod tests {
                 "memory_timeline",
                 "consolidate",
                 "configure_publishers",
+                "delete_memories_by_source",
             ]
         );
     }
