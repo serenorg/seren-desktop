@@ -73,6 +73,7 @@ mod provider_runtime;
 mod secret_broker;
 mod shell;
 mod skills;
+pub mod standing_policy;
 mod support;
 mod sync;
 mod terminal;
@@ -1147,6 +1148,10 @@ pub fn run() {
             commands::tool_authorization::grant_capability_lease,
             commands::tool_authorization::list_capability_leases,
             commands::tool_authorization::revoke_capability_lease,
+            commands::tool_authorization::list_standing_policies,
+            commands::tool_authorization::create_standing_policy,
+            commands::tool_authorization::update_standing_policy,
+            commands::tool_authorization::delete_standing_policy,
             commands::tool_authorization::register_approval_continuation,
             commands::tool_authorization::resolve_approval_continuation,
             commands::tool_authorization::expire_approval_continuation,

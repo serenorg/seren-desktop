@@ -49,6 +49,9 @@ export interface CapabilityLease {
   createdAt: string;
   expiresAt: string;
   revoked: boolean;
+  /** The standing policy this lease was auto-materialized from, or null/absent
+   * for a human-granted lease (#3193-E). */
+  sourcePolicyId?: string | null;
   predicates: LeasePredicates;
   budgets: LeaseBudgets;
 }
@@ -123,6 +126,66 @@ export interface ProposedBundle {
   durationSecs: number;
   predicates: LeasePredicates;
   budgets: LeaseBudgets;
+}
+
+/** Mirrors `StandingPolicy` in `src-tauri/src/standing_policy.rs`. */
+export interface StandingPolicy {
+  id: string;
+  label: string;
+  enabled: boolean;
+  maxDurationSecs: number;
+  predicates: LeasePredicates;
+  budgets: LeaseBudgets;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors `StandingPolicyInput` in `src-tauri/src/standing_policy.rs`. */
+export interface StandingPolicyInput {
+  label: string;
+  enabled: boolean;
+  maxDurationSecs: number;
+  predicates: LeasePredicates;
+  budgets: LeaseBudgets;
+}
+
+/**
+ * Every standing policy, newest first. Standing policies are the owner-defined,
+ * non-conversation-scoped pre-authorizations that auto-materialize a bounded
+ * lease for a matching unattended/long-running task (#3193-E).
+ */
+export async function listStandingPolicies(): Promise<StandingPolicy[]> {
+  return invoke<StandingPolicy[]>("list_standing_policies");
+}
+
+/**
+ * Create an owner-authored standing policy. Only ever invoked from the owner
+ * settings surface — there is no model tool or dispatch path that reaches this,
+ * so model output can never create or widen a standing policy.
+ */
+export async function createStandingPolicy(
+  input: StandingPolicyInput,
+): Promise<StandingPolicy> {
+  return invoke<StandingPolicy>("create_standing_policy", { input });
+}
+
+/**
+ * Update a standing policy in place (edit its envelope or toggle `enabled`).
+ * Resolves to the updated policy, or `null` if the id is unknown.
+ */
+export async function updateStandingPolicy(
+  policyId: string,
+  input: StandingPolicyInput,
+): Promise<StandingPolicy | null> {
+  return invoke<StandingPolicy | null>("update_standing_policy", {
+    policyId,
+    input,
+  });
+}
+
+/** Delete a standing policy. Idempotent — resolves to whether one was removed. */
+export async function deleteStandingPolicy(policyId: string): Promise<boolean> {
+  return invoke<boolean>("delete_standing_policy", { policyId });
 }
 
 /** Every capability lease bound to a conversation, newest first. */

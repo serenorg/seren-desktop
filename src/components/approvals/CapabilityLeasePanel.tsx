@@ -22,6 +22,7 @@ interface CapabilityLeasePanelProps {
 
 const AUDIT_EVENT_LABELS: Record<string, string> = {
   lease_granted: "Lease granted",
+  lease_auto_granted: "Lease auto-granted from policy",
   lease_used: "Ran under lease",
   lease_denied: "Denied by lease exclusion",
   lease_expired: "Lease expired",

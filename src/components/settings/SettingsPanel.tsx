@@ -72,6 +72,7 @@ import { OAuthLogins } from "./OAuthLogins";
 import { ProviderSettings } from "./ProviderSettings";
 import { RecordingsSettings } from "./RecordingsSettings";
 import { SearchableModelSelect } from "./SearchableModelSelect";
+import { StandingPoliciesSettings } from "./StandingPoliciesSettings";
 import { ToolsetsSettings } from "./ToolsetsSettings";
 
 type SettingsSection =
@@ -1719,6 +1720,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </div>
               </label>
             </div>
+
+            <StandingPoliciesSettings />
           </section>
         </Show>
 

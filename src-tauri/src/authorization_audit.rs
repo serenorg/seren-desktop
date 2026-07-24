@@ -14,6 +14,9 @@ use crate::tool_authorization::ToolRoute;
 pub enum AuditEvent {
     /// A user-approved capability lease was persisted.
     LeaseGranted,
+    /// A lease was auto-materialized from an owner-defined standing policy at
+    /// task start, with no human present (#3193-E).
+    LeaseAutoGranted,
     /// A covered call ran silently under a lease (its budget was charged).
     LeaseUsed,
     /// A lease exclusion denied a call outright.
@@ -38,6 +41,7 @@ impl AuditEvent {
     pub fn as_wire(self) -> &'static str {
         match self {
             Self::LeaseGranted => "lease_granted",
+            Self::LeaseAutoGranted => "lease_auto_granted",
             Self::LeaseUsed => "lease_used",
             Self::LeaseDenied => "lease_denied",
             Self::LeaseExpired => "lease_expired",
@@ -94,6 +98,21 @@ impl AuditContext {
         Self {
             subject_id: Some(lease.id.clone()),
             detail: Some(lease.label.clone()),
+            ..Default::default()
+        }
+    }
+
+    /// Context for an auto-granted lease (#3193-E): the lease id, its reviewed
+    /// label, and the standing policy it was materialized from, so the trail can
+    /// say "auto-granted from standing policy <id>". Credential-safe: the policy
+    /// id and label were both authored by the owner.
+    pub fn for_auto_lease(lease: &CapabilityLease, policy_id: &str) -> Self {
+        Self {
+            subject_id: Some(lease.id.clone()),
+            detail: Some(format!(
+                "{} — auto-granted from standing policy {policy_id}",
+                lease.label
+            )),
             ..Default::default()
         }
     }
