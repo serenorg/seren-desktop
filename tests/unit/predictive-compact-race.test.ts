@@ -5,6 +5,7 @@ import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
 const agentStoreSource = readSource("src/stores/agent.store.ts");
+const compactionSource = readSource("src/lib/agent/compaction.ts");
 
 describe("#1749 — sendPrompt enqueues instead of dispatching when predictive compact is in flight", () => {
   it("guard fires when predictiveCompactInFlight=true, no standby yet, and usage >= autoCompactThreshold", () => {
@@ -126,12 +127,12 @@ describe("#1749 — defaultContextWindowFor recognises 1M Claude variants at spa
   });
 
   it("the helper maps known 1M Claude IDs to 1_000_000 and unknowns to 200_000", () => {
-    const helperStart = agentStoreSource.indexOf(
+    const helperStart = compactionSource.indexOf(
       "function defaultContextWindowFor(",
     );
     expect(helperStart, "defaultContextWindowFor must exist").toBeGreaterThan(0);
-    const helperEnd = agentStoreSource.indexOf("\n}\n", helperStart);
-    const helperBody = agentStoreSource.slice(helperStart, helperEnd);
+    const helperEnd = compactionSource.indexOf("\n}\n", helperStart);
+    const helperBody = compactionSource.slice(helperStart, helperEnd);
 
     // Codex / Gemini cases must still return their existing defaults.
     expect(helperBody).toContain('agentType === "codex"');
@@ -141,8 +142,8 @@ describe("#1749 — defaultContextWindowFor recognises 1M Claude variants at spa
     // Claude 1M models must be enumerated explicitly so a brand-new install
     // hits the right window on the very first turn (before the CLI's
     // meta.contextWindow has had a chance to upsert).
-    expect(agentStoreSource).toContain('"claude-opus-4-7"');
-    expect(agentStoreSource).toContain('"claude-sonnet-4-6"');
+    expect(compactionSource).toContain('"claude-opus-4-7"');
+    expect(compactionSource).toContain('"claude-sonnet-4-6"');
     // Default for anything unknown is still 200_000.
     expect(helperBody).toContain("200_000");
   });
@@ -152,11 +153,11 @@ describe("#1749 — defaultContextWindowFor recognises 1M Claude variants at spa
     // (`claude-opus-4-7[1m]`); both the bare ID and the bracketed form
     // must hit the 1M branch so a fresh session does not start at 200K
     // and trigger premature auto-compaction.
-    const helperStart = agentStoreSource.indexOf(
+    const helperStart = compactionSource.indexOf(
       "function defaultContextWindowFor(",
     );
-    const helperEnd = agentStoreSource.indexOf("\n}\n", helperStart);
-    const helperBody = agentStoreSource.slice(helperStart, helperEnd);
+    const helperEnd = compactionSource.indexOf("\n}\n", helperStart);
+    const helperBody = compactionSource.slice(helperStart, helperEnd);
     expect(helperBody).toContain("\\[1m\\]");
   });
 });

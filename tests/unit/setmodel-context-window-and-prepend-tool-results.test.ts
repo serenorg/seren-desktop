@@ -10,18 +10,26 @@ const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const compactionSource = readFileSync(
+  resolve("src/lib/agent/compaction.ts"),
+  "utf-8",
+);
 
 /**
  * Slice a fixed-size window forward from a unique anchor. The two fixes in
  * #1858 each live in a tightly localized region, so a windowed slice keeps
  * the assertions immune to drift in unrelated code below.
  */
-function regionAfter(anchor: string, len: number): string {
-  const start = agentStoreSource.indexOf(anchor);
+function regionAfter(
+  anchor: string,
+  len: number,
+  source: string = agentStoreSource,
+): string {
+  const start = source.indexOf(anchor);
   if (start < 0) {
-    throw new Error(`anchor not found in agent.store.ts: ${anchor}`);
+    throw new Error(`anchor not found: ${anchor}`);
   }
-  return agentStoreSource.slice(start, start + len);
+  return source.slice(start, start + len);
 }
 
 describe("#1858 Defect 1 — setModel updates contextWindowSize on mid-session model swap", () => {
@@ -77,7 +85,7 @@ describe("#1858 Defect 2 — passive prepend preserves tool-result content", () 
   // prepend formatting region only — not the toCompact serialization nor the
   // post-prepend spawn flows below.
   const prependRegion = () =>
-    regionAfter("function buildAgentCompactionPrepend", 2500);
+    regionAfter("function buildAgentCompactionPrepend", 2500, compactionSource);
 
   it("prepend builder includes m.type === \"tool\" alongside user/assistant", () => {
     // The filter must allow tool messages through. Pre-fix shape was a literal

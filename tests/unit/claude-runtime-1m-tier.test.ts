@@ -20,8 +20,8 @@ const {
   _resolveSpawnShell: resolveSpawnShell,
 } = await import(/* @vite-ignore */ modulePath);
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
+const compactionSource = readFileSync(
+  resolve("src/lib/agent/compaction.ts"),
   "utf-8",
 );
 
@@ -173,7 +173,7 @@ describe("augmentWithLegacyOpus — picker exposes 1M-tier variants", () => {
     ];
     expect(oneMBareIds).toEqual(expectedOneMBareIds);
     expect(
-      extractQuotedSetValues(agentStoreSource, "CLAUDE_1M_TIER_CAPABLE_MODELS"),
+      extractQuotedSetValues(compactionSource, "CLAUDE_1M_TIER_CAPABLE_MODELS"),
     ).toEqual(expectedOneMBareIds);
   });
 

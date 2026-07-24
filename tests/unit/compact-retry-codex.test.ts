@@ -10,6 +10,10 @@ const agentStoreSource = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const compactionSource = readFileSync(
+  resolve("src/lib/agent/compaction.ts"),
+  "utf-8",
+);
 
 function functionBody(anchor: string): string {
   const start = agentStoreSource.indexOf(anchor);
@@ -25,7 +29,7 @@ function functionBody(anchor: string): string {
 
 describe("#1757 — compactAgentConversation returns the new sessionId", () => {
   it("declares the CompactAgentResult shape with newSessionId on the type", () => {
-    expect(agentStoreSource).toMatch(
+    expect(compactionSource).toMatch(
       /type CompactAgentResult\s*=\s*\{[\s\S]*?outcome:\s*Exclude<CompactionOutcome,\s*"retried">[\s\S]*?newSessionId\?:\s*string[\s\S]*?\}/,
     );
   });
