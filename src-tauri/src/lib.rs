@@ -1148,6 +1148,7 @@ pub fn run() {
             commands::chat::get_messages,
             commands::chat::clear_conversation_history,
             commands::chat::clear_all_history,
+            commands::chat::erase_all_conversation_data,
             // Model context-window cache
             commands::model_context_cache::get_model_context_window,
             commands::model_context_cache::record_model_context_window,

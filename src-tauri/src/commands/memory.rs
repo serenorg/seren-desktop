@@ -95,6 +95,35 @@ impl MemoryState {
         Ok(())
     }
 
+    /// Erase the entire local memory cache from disk. Drops the open connection
+    /// first so the file handles are released, then removes `memory_cache.db`
+    /// and its `-wal`/`-shm` companions. The next cache access lazily reopens an
+    /// empty database via `ensure_cache`. Used by the erase-all-data flow.
+    pub fn wipe_local_cache(&self) -> Result<(), String> {
+        {
+            let mut guard = self.cache.lock().map_err(|e| e.to_string())?;
+            *guard = None;
+        }
+        let file_name = self
+            .cache_path
+            .file_name()
+            .map(|name| name.to_os_string())
+            .unwrap_or_default();
+        for suffix in ["", "-wal", "-shm"] {
+            let mut sibling = file_name.clone();
+            sibling.push(suffix);
+            let path = self.cache_path.with_file_name(&sibling);
+            match std::fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => {
+                    return Err(format!("failed to remove {}: {err}", path.display()));
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn call_memory_tool(
         &self,
         app: &tauri::AppHandle,
@@ -767,6 +796,35 @@ pub async fn memory_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wipe_local_cache_removes_db_and_sidecar_files() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let cache_path = tmp.path().join("memory_cache.db");
+        let state = MemoryState::new("https://memory.example".to_string(), cache_path.clone());
+
+        // Open a real cache so the primary DB file exists on disk, then stage
+        // the WAL/SHM sidecars the removal loop must also clear.
+        state.ensure_cache().expect("open cache");
+        assert!(cache_path.exists(), "cache db should be created");
+        let wal = tmp.path().join("memory_cache.db-wal");
+        let shm = tmp.path().join("memory_cache.db-shm");
+        std::fs::write(&wal, b"wal").unwrap();
+        std::fs::write(&shm, b"shm").unwrap();
+
+        state.wipe_local_cache().expect("wipe");
+
+        assert!(!cache_path.exists(), "db removed");
+        assert!(!wal.exists(), "wal removed");
+        assert!(!shm.exists(), "shm removed");
+
+        // A wipe with nothing on disk is a no-op, not an error.
+        state.wipe_local_cache().expect("idempotent wipe");
+
+        // The cache lazily reopens empty after a wipe.
+        state.ensure_cache().expect("reopen cache");
+        assert!(cache_path.exists(), "cache db recreated on next use");
+    }
 
     #[test]
     fn exposes_all_live_memory_mcp_tools() {

@@ -1157,6 +1157,26 @@ export async function clearAllHistory(): Promise<void> {
   await invoke("clear_all_history");
 }
 
+/** Outcome of erasing one conversation-data target in the erase-all flow. */
+export interface EraseTargetReport {
+  target: string;
+  status: "ok" | "failed" | "delegated" | "unsupported";
+  detail?: string | null;
+}
+
+/**
+ * Erase every local conversation-data target (chat.db, conversation index,
+ * memory cache, and CLI transcripts) and return a per-target success/failure
+ * report. Remote and blocked targets are reported, not performed.
+ */
+export async function eraseAllConversationData(): Promise<EraseTargetReport[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    throw new Error("Message operations require Tauri runtime");
+  }
+  return invoke<EraseTargetReport[]>("erase_all_conversation_data");
+}
+
 // ============================================================================
 // Runtime Session Operations
 // ============================================================================

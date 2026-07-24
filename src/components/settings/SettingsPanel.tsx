@@ -12,6 +12,10 @@ import {
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { isWindowsPlatform } from "@/lib/platform";
+import {
+  type EraseTargetReport,
+  eraseAllConversationData,
+} from "@/lib/tauri-bridge";
 import { type BuildInfo, getBuildInfo } from "@/services/buildInfo";
 import {
   getClaudeMemoryStatus,
@@ -122,6 +126,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
   const [historySyncSummary, setHistorySyncSummary] =
     createSignal<HistorySyncSummary | null>(null);
   const [historySyncWipeConfirm, setHistorySyncWipeConfirm] = createSignal("");
+  const [eraseAllConfirm, setEraseAllConfirm] = createSignal("");
+  const [eraseAllBusy, setEraseAllBusy] = createSignal(false);
+  const [eraseAllReports, setEraseAllReports] = createSignal<
+    EraseTargetReport[] | null
+  >(null);
   const [agentSandboxStatus, setAgentSandboxStatus] =
     createSignal<AgentSandboxStatus | null>(null);
   const [agentSandboxStatusError, setAgentSandboxStatusError] = createSignal<
@@ -284,6 +293,27 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
       console.error("[HistorySync] remote wipe failed", err);
     } finally {
       setHistorySyncBusy(false);
+    }
+  };
+
+  const handleEraseAllData = async () => {
+    setEraseAllBusy(true);
+    setEraseAllReports(null);
+    // Stop scheduled sync ticks so nothing re-uploads mid-erase.
+    handleBooleanChange("historySyncEnabled", false);
+    stopHistorySync();
+    try {
+      const reports = await eraseAllConversationData();
+      setEraseAllReports(reports);
+      setEraseAllConfirm("");
+      setHistorySyncSummary(null);
+    } catch (err) {
+      setEraseAllReports([
+        { target: "erase_all", status: "failed", detail: String(err) },
+      ]);
+      console.error("[EraseAll] erase all conversation data failed", err);
+    } finally {
+      setEraseAllBusy(false);
     }
   };
 
@@ -2420,6 +2450,73 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 {historySyncMessage()}
               </p>
             </Show>
+
+            <div class="py-3 border-b border-border">
+              <div class="flex items-start justify-between gap-4">
+                <div class="flex flex-col gap-0.5 flex-1">
+                  <span class="text-[0.95rem] font-medium text-foreground">
+                    Erase All Local Conversation Data
+                  </span>
+                  <span class="text-[0.8rem] text-muted-foreground">
+                    Type{" "}
+                    <code class="px-1 py-0.5 rounded bg-border/40 text-[0.78rem]">
+                      ERASE
+                    </code>{" "}
+                    to permanently delete local chat history, the search index,
+                    the memory cache, and CLI session transcripts. Remote and
+                    cloud-memory copies are not removed here — see the report.
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={eraseAllConfirm()}
+                    onInput={(e) => setEraseAllConfirm(e.currentTarget.value)}
+                    placeholder="ERASE"
+                    class="w-[14rem] px-2.5 py-1.5 rounded-md border border-border bg-surface text-[0.82rem] text-foreground outline-none focus:border-accent"
+                  />
+                  <button
+                    type="button"
+                    disabled={eraseAllBusy() || eraseAllConfirm() !== "ERASE"}
+                    class="px-3 py-1.5 text-[0.8rem] rounded-md border border-destructive/60 bg-destructive/10 text-destructive hover:bg-destructive/15 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleEraseAllData}
+                  >
+                    Erase
+                  </button>
+                </div>
+              </div>
+
+              <Show when={eraseAllReports()}>
+                <ul class="m-0 mt-3 flex flex-col gap-1 list-none p-0">
+                  <For each={eraseAllReports() ?? []}>
+                    {(report) => (
+                      <li class="flex items-baseline gap-2 text-[0.78rem]">
+                        <span
+                          class="font-medium shrink-0"
+                          classList={{
+                            "text-emerald-500": report.status === "ok",
+                            "text-destructive": report.status === "failed",
+                            "text-muted-foreground":
+                              report.status === "delegated" ||
+                              report.status === "unsupported",
+                          }}
+                        >
+                          {report.status.toUpperCase()}
+                        </span>
+                        <span class="text-foreground shrink-0">
+                          {report.target}
+                        </span>
+                        <Show when={report.detail}>
+                          <span class="text-muted-foreground">
+                            — {report.detail}
+                          </span>
+                        </Show>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </Show>
+            </div>
           </section>
         </Show>
 

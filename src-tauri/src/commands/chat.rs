@@ -8,10 +8,11 @@ use crate::services::database::{
     DbPool, PersistedMessage, WalCheckpointMode, checkpoint_wal, enqueue_sync_tombstone, init_db,
     mark_sync_upsert, save_message_record, stamp_existing_privileged_messages,
 };
+use crate::commands::memory::MemoryState;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 fn load_indexable_message_meta(
     conn: &Connection,
@@ -2224,6 +2225,128 @@ pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
     .await?;
     clear_conversation_index_best_effort(&app);
     Ok(())
+}
+
+/// Outcome of erasing one conversation-data target in the erase-all flow.
+/// `status` is one of `ok`, `failed`, `delegated`, or `unsupported`.
+#[derive(Serialize)]
+pub struct EraseTargetReport {
+    pub target: String,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
+impl EraseTargetReport {
+    fn new(target: &str, status: &str, detail: Option<String>) -> Self {
+        Self {
+            target: target.to_string(),
+            status: status.to_string(),
+            detail,
+        }
+    }
+}
+
+/// Erase every local conversation-data target in one flow and return a
+/// per-target success/failure report. Each target is best-effort and isolated:
+/// a failure in one is recorded and the remaining targets still run.
+///
+/// Remote targets this flow does not perform are reported honestly rather than
+/// omitted — `remote_history_schema` and `claude_agent_preferences` are
+/// delegated to their own controls, and `cloud_memories` is unsupported because
+/// the memory service exposes no source/bulk delete (tracked in #3198).
+#[tauri::command]
+pub async fn erase_all_conversation_data(
+    app: AppHandle,
+    memory_state: State<'_, MemoryState>,
+) -> Result<Vec<EraseTargetReport>, String> {
+    let mut reports = Vec::new();
+
+    // Local chat.db: capture each agent conversation's transcript identity
+    // before the rows are deleted, then run the thorough per-conversation
+    // delete for every conversation, followed by VACUUM + WAL truncate.
+    let chat_result = run_db(app.clone(), move |conn| {
+        let conversation_ids = conn
+            .prepare("SELECT id FROM conversations")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
+        delete_conversation_records(conn, &conversation_ids)?;
+        vacuum_database(conn)?;
+        Ok((conversation_ids.len(), targets))
+    })
+    .await;
+
+    let transcript_targets = match chat_result {
+        Ok((count, targets)) => {
+            reports.push(EraseTargetReport::new(
+                "local_chat_db",
+                "ok",
+                Some(format!("{count} conversation(s) removed; VACUUM + WAL truncate")),
+            ));
+            targets
+        }
+        Err(err) => {
+            reports.push(EraseTargetReport::new("local_chat_db", "failed", Some(err)));
+            Vec::new()
+        }
+    };
+
+    // Conversation index: clear all chunks and reclaim the freed pages.
+    let index_result = open_index_db(&app).and_then(|conn| {
+        conversation_index::clear_all_chunks(&conn)?;
+        vacuum_database(&conn)?;
+        Ok(())
+    });
+    match index_result {
+        Ok(()) => reports.push(EraseTargetReport::new("conversation_index", "ok", None)),
+        Err(err) => reports.push(EraseTargetReport::new(
+            "conversation_index",
+            "failed",
+            Some(err.to_string()),
+        )),
+    }
+
+    // CLI transcripts: best-effort file removal (failures are logged per file).
+    let transcript_count = transcript_targets.len();
+    delete_agent_transcripts_best_effort(&transcript_targets);
+    reports.push(EraseTargetReport::new(
+        "cli_transcripts",
+        "ok",
+        Some(format!(
+            "{transcript_count} agent session transcript(s) targeted"
+        )),
+    ));
+
+    // Local cloud-memory cache: drop the connection and remove the files.
+    match memory_state.wipe_local_cache() {
+        Ok(()) => reports.push(EraseTargetReport::new("memory_cache_db", "ok", None)),
+        Err(err) => reports.push(EraseTargetReport::new(
+            "memory_cache_db",
+            "failed",
+            Some(err),
+        )),
+    }
+
+    // Remote / blocked targets — reported so "erase all" is not misleading.
+    reports.push(EraseTargetReport::new(
+        "remote_history_schema",
+        "delegated",
+        Some(
+            "Use \"Wipe Remote Copy\" — needs the SerenDB project/branch and a typed database-name confirmation.".to_string(),
+        ),
+    ));
+    reports.push(EraseTargetReport::new(
+        "cloud_memories",
+        "unsupported",
+        Some("The memory service exposes no source or bulk delete (tracked in #3198).".to_string()),
+    ));
+    reports.push(EraseTargetReport::new(
+        "claude_agent_preferences",
+        "delegated",
+        Some("Remote SerenDB memory preferences are cleared through the Claude memory tools.".to_string()),
+    ));
+
+    Ok(reports)
 }
 
 // ============================================================================
