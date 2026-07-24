@@ -29,6 +29,16 @@ interface GatewayApprovalResult {
   /** True when the approval UI lapsed without a decision, so the block is an
    * explicit expiry rather than a user denial. */
   timedOut?: boolean;
+  /** True when the user chose "skip this action": the task continues without
+   * it, distinct from a denial and never persisted as one. */
+  skipped?: boolean;
+}
+
+/** Links an approval prompt to its host continuation and thread so the inline
+ * card and global inbox can identify (and settle) the exact suspended action. */
+interface ApprovalLink {
+  threadId: string | null;
+  continuationId?: string;
 }
 
 interface GatewayConnectionArgsResult {
@@ -39,6 +49,8 @@ interface GatewayConnectionArgsResult {
 interface GatewayApprovalPrompt {
   description?: string;
   isDestructive?: boolean;
+  /** Host classification wire token (trusted-read/high-risk/unclassified). */
+  operationClass?: string;
 }
 
 /**
@@ -411,6 +423,7 @@ async function requestGatewayApproval(
   args: Record<string, unknown>,
   conversationId: string | null,
   prompt?: GatewayApprovalPrompt,
+  link?: ApprovalLink,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `gateway-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -426,9 +439,14 @@ async function requestGatewayApproval(
       publisherSlug,
       toolName,
       args,
-      threadId: conversationId ?? conversationStore.activeConversationId,
+      threadId:
+        link?.threadId ??
+        conversationId ??
+        conversationStore.activeConversationId,
       description: prompt?.description ?? "Execute operation",
       isDestructive: prompt?.isDestructive ?? false,
+      operationClass: prompt?.operationClass,
+      continuationId: link?.continuationId,
     });
   } catch (err) {
     console.error("[Tool Executor] Failed to emit approval request:", err);
@@ -444,21 +462,24 @@ async function requestGatewayApproval(
       resolve({ approved: false, timedOut: true });
     }, GATEWAY_APPROVAL_TIMEOUT_MS);
 
-    listen<{ id: string; approved: boolean; connectionId?: string | null }>(
-      "gateway-tool-approval-response",
-      (event) => {
-        if (event.payload.id !== approvalId) return;
-        console.log(
-          `[Tool Executor] Received approval response: ${event.payload.approved}`,
-        );
-        clearTimeout(timeout);
-        unlisten?.();
-        resolve({
-          approved: event.payload.approved,
-          connectionId: event.payload.connectionId ?? null,
-        });
-      },
-    )
+    listen<{
+      id: string;
+      approved: boolean;
+      connectionId?: string | null;
+      skipped?: boolean;
+    }>("gateway-tool-approval-response", (event) => {
+      if (event.payload.id !== approvalId) return;
+      console.log(
+        `[Tool Executor] Received approval response: ${event.payload.approved}`,
+      );
+      clearTimeout(timeout);
+      unlisten?.();
+      resolve({
+        approved: event.payload.approved,
+        connectionId: event.payload.connectionId ?? null,
+        skipped: event.payload.skipped ?? false,
+      });
+    })
       .then((fn) => {
         unlisten = fn;
       })
@@ -534,13 +555,16 @@ async function authorizeToolOperation(
     {
       description: decision.description,
       isDestructive: decision.isDestructive,
+      operationClass: decision.operationClass,
     },
+    { threadId: sessionId, continuationId: registered?.approvalId },
   );
 
-  // Only an explicit choice is durable. An approval-UI timeout is an expiry, not
-  // a denial: persisting it would auto-deny the operation on the next attempt, so
-  // the decision store is left untouched and a later call re-prompts.
-  if (!approval.timedOut) {
+  // Only an explicit approve/deny is durable. A timeout is an expiry and a skip
+  // is a one-time "continue without this action" — persisting either would
+  // auto-deny the operation on the next attempt, so the decision store is left
+  // untouched and a later call re-prompts.
+  if (!approval.timedOut && !approval.skipped) {
     await recordAuthorizationDecision(
       route,
       publisherSlug,
@@ -557,11 +581,15 @@ async function authorizeToolOperation(
     return { approved: true, connectionId: approval.connectionId };
   }
 
-  const kind: BlockedKind = approval.timedOut ? "expired" : "denied";
+  const kind: BlockedKind = approval.timedOut
+    ? "expired"
+    : approval.skipped
+      ? "skipped"
+      : "denied";
   if (registered) {
     await settleApprovalContinuation(
       registered,
-      approval.timedOut ? "expire" : "deny",
+      approval.timedOut ? "expire" : approval.skipped ? "skip" : "deny",
     );
   }
   return {
@@ -588,7 +616,7 @@ async function authorizeSubprocess(
   command: string,
   conversationId: string | null,
   toolCallId: string,
-  runApprovalUi: () => Promise<GatewayApprovalResult>,
+  runApprovalUi: (link: ApprovalLink) => Promise<GatewayApprovalResult>,
 ): Promise<ToolAuthorization> {
   const sessionId = sessionConversationId(conversationId);
   const context: OperationContext = { command };
@@ -621,7 +649,10 @@ async function authorizeSubprocess(
     context,
     sessionId,
   );
-  const outcome = await runApprovalUi();
+  const outcome = await runApprovalUi({
+    threadId: sessionId,
+    continuationId: registered?.approvalId,
+  });
 
   if (outcome.approved) {
     if (registered) {
@@ -630,11 +661,15 @@ async function authorizeSubprocess(
     return { approved: true };
   }
 
-  const kind: BlockedKind = outcome.timedOut ? "expired" : "denied";
+  const kind: BlockedKind = outcome.timedOut
+    ? "expired"
+    : outcome.skipped
+      ? "skipped"
+      : "denied";
   if (registered) {
     await settleApprovalContinuation(
       registered,
-      outcome.timedOut ? "expire" : "deny",
+      outcome.timedOut ? "expire" : outcome.skipped ? "skip" : "deny",
     );
   }
   return {
@@ -687,6 +722,7 @@ async function resolveGatewayOAuthConnectionArgs(
 async function requestShellApproval(
   command: string,
   timeoutSecs: number,
+  link?: ApprovalLink,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `shell-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -699,6 +735,8 @@ async function requestShellApproval(
       approvalId,
       command,
       timeoutSecs,
+      threadId: link?.threadId ?? conversationStore.activeConversationId,
+      continuationId: link?.continuationId,
     });
   } catch (err) {
     console.error(
@@ -716,7 +754,7 @@ async function requestShellApproval(
       resolve({ approved: false, timedOut: true });
     }, SHELL_APPROVAL_TIMEOUT_MS);
 
-    listen<{ id: string; approved: boolean }>(
+    listen<{ id: string; approved: boolean; skipped?: boolean }>(
       "shell-command-approval-response",
       (event) => {
         if (event.payload.id !== approvalId) return;
@@ -725,7 +763,10 @@ async function requestShellApproval(
         );
         clearTimeout(timeout);
         unlisten?.();
-        resolve({ approved: event.payload.approved });
+        resolve({
+          approved: event.payload.approved,
+          skipped: event.payload.skipped ?? false,
+        });
       },
     )
       .then((fn) => {
@@ -885,7 +926,7 @@ export async function executeTool(
           command,
           conversationId,
           toolCall.id,
-          () => requestShellApproval(command, timeoutSecs),
+          (link) => requestShellApproval(command, timeoutSecs, link),
         );
         if (!auth.approved) {
           return auth.toolResult;
@@ -943,7 +984,7 @@ export async function executeTool(
           argv.join(" "),
           conversationId,
           toolCall.id,
-          () => requestShellApproval(preview, timeoutSecs),
+          (link) => requestShellApproval(preview, timeoutSecs, link),
         );
         if (!auth.approved) {
           return auth.toolResult;

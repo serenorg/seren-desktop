@@ -117,6 +117,15 @@ function App() {
       void updaterStore.initUpdater();
     }
 
+    // Global approval-inbox state: live prompt events + the host gate's pending
+    // continuations (badge, inline cards, background notification).
+    if (runtime.capabilities.localMcp) {
+      const { initializeApprovalsStore } = await import(
+        "@/stores/approvals.store"
+      );
+      void initializeApprovalsStore();
+    }
+
     // Load all settings including app settings (chatDefaultModel, etc.) and MCP settings
     await loadAllSettings();
     await loadPrivacySettings();

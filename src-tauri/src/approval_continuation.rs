@@ -409,18 +409,7 @@ pub fn read_continuations(
         "SELECT {SELECT_COLUMNS} FROM approval_continuations \
          WHERE conversation_id = ?1 ORDER BY created_at ASC"
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(rusqlite::params![conversation_id], row_from_sql)
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for row in rows {
-        match row {
-            Ok(row) => out.push(row),
-            Err(err) => log::warn!("[approval-continuation] Skipping unreadable row: {err}"),
-        }
-    }
-    Ok(out)
+    collect_rows(conn, &sql, rusqlite::params![conversation_id])
 }
 
 pub fn find_by_id(conn: &Connection, approval_id: &str) -> Result<Option<ContinuationRow>, String> {
@@ -504,19 +493,71 @@ pub fn settle_if_pending(
 
 /// Expire every pending row for a conversation whose window has closed. Explicit
 /// and persisted: a lapsed action becomes `Expired`, never a generic failure and
-/// never a silently-live pending block. Returns how many rows expired.
+/// never a silently-live pending block. Returns the rows this call expired so the
+/// caller can audit each lapse (#3193-D).
 pub fn expire_overdue(
     conn: &Connection,
     conversation_id: &str,
     now: &str,
-) -> Result<usize, String> {
+) -> Result<Vec<ContinuationRow>, String> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM approval_continuations \
+         WHERE conversation_id = ?1 AND state = 'pending' AND expires_at <= ?2"
+    );
+    let overdue = collect_rows(conn, &sql, rusqlite::params![conversation_id, now])?;
     conn.execute(
         "UPDATE approval_continuations \
          SET state = 'expired', resolved_at = ?2 \
          WHERE conversation_id = ?1 AND state = 'pending' AND expires_at <= ?2",
         rusqlite::params![conversation_id, now],
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(overdue)
+}
+
+/// `expire_overdue` across every conversation — backs the global approval inbox,
+/// which must reflect true live state without knowing conversation ids up front.
+pub fn expire_overdue_all(conn: &Connection, now: &str) -> Result<Vec<ContinuationRow>, String> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM approval_continuations \
+         WHERE state = 'pending' AND expires_at <= ?1"
+    );
+    let overdue = collect_rows(conn, &sql, rusqlite::params![now])?;
+    conn.execute(
+        "UPDATE approval_continuations \
+         SET state = 'expired', resolved_at = ?1 \
+         WHERE state = 'pending' AND expires_at <= ?1",
+        rusqlite::params![now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(overdue)
+}
+
+/// Every live pending row across all conversations, oldest first — the global
+/// approval-inbox listing. Callers expire overdue rows first.
+pub fn read_pending_all(conn: &Connection) -> Result<Vec<ContinuationRow>, String> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM approval_continuations \
+         WHERE state = 'pending' ORDER BY created_at ASC"
+    );
+    collect_rows(conn, &sql, [])
+}
+
+fn collect_rows(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<ContinuationRow>, String> {
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(params, row_from_sql).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        match row {
+            Ok(row) => out.push(row),
+            Err(err) => log::warn!("[approval-continuation] Skipping unreadable row: {err}"),
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

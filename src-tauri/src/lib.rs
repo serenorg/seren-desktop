@@ -49,6 +49,7 @@ pub mod sandbox;
 pub mod approval_continuation;
 pub mod audio;
 mod auth;
+pub mod authorization_audit;
 pub mod capability_lease;
 pub mod credential_broker;
 pub mod credential_lease;
@@ -1100,6 +1101,8 @@ pub fn run() {
             commands::tool_authorization::task_execution_state,
             commands::tool_authorization::approval_resolution_summary,
             commands::tool_authorization::list_approval_continuations,
+            commands::tool_authorization::list_pending_approvals,
+            commands::tool_authorization::list_authorization_audit,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,

@@ -19,6 +19,8 @@ import {
   untrack,
 } from "solid-js";
 import { createStore } from "solid-js/store";
+import { ApprovalRequestCard } from "@/components/approvals/ApprovalRequestCard";
+import { ThreadApprovalStatus } from "@/components/approvals/ThreadApprovalStatus";
 import { SignIn } from "@/components/auth/SignIn";
 import { VoiceInputButton } from "@/components/chat/VoiceInputButton";
 import { ResizableTextarea } from "@/components/common/ResizableTextarea";
@@ -104,6 +106,7 @@ import {
 } from "@/services/organization-policy";
 import { assertPrivilegedConversationProvider } from "@/services/providers";
 import { skills } from "@/services/skills";
+import { pendingForConversation } from "@/stores/approvals.store";
 import { authStore, checkAuth } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -1995,6 +1998,16 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               </Show>
             </article>
           </Show>
+
+          {/* Authorization-blocked actions surface at the suspension point —
+              the tail of the timeline, where execution is actually paused. */}
+          <Show when={conversationId()}>
+            {(id) => (
+              <For each={pendingForConversation(id())}>
+                {(view) => <ApprovalRequestCard view={view} />}
+              </For>
+            )}
+          </Show>
         </div>
 
         <Show when={contextPreview()}>
@@ -2019,6 +2032,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               </pre>
             </div>
           )}
+        </Show>
+
+        <Show when={conversationId()}>
+          {(id) => <ThreadApprovalStatus conversationId={id()} />}
         </Show>
 
         <div class="shrink-0 border-t border-surface-2 bg-surface-1">

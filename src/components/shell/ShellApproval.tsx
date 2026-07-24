@@ -9,11 +9,25 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { ApprovalActions } from "@/components/approvals/ApprovalActions";
+import { cancelOrchestration } from "@/services/orchestrator";
+import { grantCapabilityLease } from "@/services/tool-authorization";
+import { conversationStore } from "@/stores/conversation.store";
 
 interface ShellApprovalRequest {
   approvalId: string;
   command: string;
   timeoutSecs: number;
+  threadId?: string | null;
+}
+
+/** Leading executable token, path-stripped and lowercased — the same key the
+ * gate's command-rule predicates match on (`command_program` in Rust). */
+function commandProgram(command: string): string | null {
+  const first = command.trim().split(/\s+/)[0];
+  if (!first) return null;
+  const program = first.split(/[/\\]/).pop()?.toLowerCase() ?? "";
+  return program.length > 0 ? program : null;
 }
 
 export const ShellApproval: Component = () => {
@@ -33,47 +47,123 @@ export const ShellApproval: Component = () => {
       },
     );
 
+    // The same request can be decided from another surface (the inline
+    // timeline card or the inbox). Dismiss this dialog when its request is
+    // settled elsewhere, so a stale prompt never lingers over a decided action.
+    const unlistenResolved = await listen<{ id: string }>(
+      "shell-command-approval-response",
+      (event) => {
+        const req = request();
+        if (req && event.payload.id === req.approvalId) {
+          setRequest(null);
+          setIsProcessing(false);
+        }
+      },
+    );
+
     onCleanup(() => {
       unlisten();
+      unlistenResolved();
     });
   });
 
-  const handleApprove = async () => {
+  /** Emit the decision and dismiss; idempotent against double clicks. */
+  const settle = async (outcome: {
+    approved: boolean;
+    skipped?: boolean;
+  }): Promise<boolean> => {
     const req = request();
-    if (!req || isProcessing()) return;
+    if (!req || isProcessing()) return false;
 
     setIsProcessing(true);
-    console.log("[ShellApproval] Approving command:", req.approvalId);
-
     try {
       await emit("shell-command-approval-response", {
         id: req.approvalId,
-        approved: true,
+        approved: outcome.approved,
+        skipped: outcome.skipped ?? false,
       });
       setRequest(null);
+      return true;
     } catch (err) {
-      console.error("[ShellApproval] Failed to emit approval:", err);
+      console.error("[ShellApproval] Failed to emit decision:", err);
       setIsProcessing(false);
+      return false;
     }
   };
 
+  const handleApprove = async () => {
+    console.log("[ShellApproval] Approving command:", request()?.approvalId);
+    await settle({ approved: true });
+  };
+
   const handleDeny = async () => {
+    console.log("[ShellApproval] Denying command:", request()?.approvalId);
+    await settle({ approved: false });
+  };
+
+  const handleSkip = async () => {
+    console.log("[ShellApproval] Skipping command:", request()?.approvalId);
+    await settle({ approved: false, skipped: true });
+  };
+
+  const handleStopTask = async () => {
     const req = request();
+    const threadId = req?.threadId ?? conversationStore.activeConversationId;
+    console.log("[ShellApproval] Stopping task for:", req?.approvalId);
+    const settled = await settle({ approved: false });
+    if (settled && threadId) {
+      try {
+        await cancelOrchestration(threadId);
+      } catch (err) {
+        console.error("[ShellApproval] Failed to stop task:", err);
+      }
+    }
+  };
+
+  const leaseProgram = () => {
+    const req = request();
+    return req ? commandProgram(req.command) : null;
+  };
+
+  const leaseSummary = () => {
+    const program = leaseProgram();
+    return program ? `"${program}" commands` : "this command";
+  };
+
+  /**
+   * Grant a reviewed command-rule lease for this task (keyed on the leading
+   * program, matching the gate), then approve this call. A failed grant still
+   * approves once — the conservative subset of the user's intent.
+   */
+  const handleApproveForTask = async (
+    durationSecs: number,
+    maxCalls: number,
+  ) => {
+    const req = request();
+    const program = leaseProgram();
     if (!req || isProcessing()) return;
 
-    setIsProcessing(true);
-    console.log("[ShellApproval] Denying command:", req.approvalId);
-
-    try {
-      await emit("shell-command-approval-response", {
-        id: req.approvalId,
-        approved: false,
-      });
-      setRequest(null);
-    } catch (err) {
-      console.error("[ShellApproval] Failed to emit denial:", err);
-      setIsProcessing(false);
+    if (program) {
+      const conversationId =
+        req.threadId ??
+        conversationStore.activeConversationId ??
+        "session-without-conversation";
+      try {
+        await grantCapabilityLease(
+          conversationId,
+          `Task lease: "${program}" commands`,
+          durationSecs,
+          { commandRules: [{ program }] },
+          { maxCalls },
+        );
+      } catch (err) {
+        console.error(
+          "[ShellApproval] Failed to grant task lease; approving once:",
+          err,
+        );
+      }
     }
+    await handleApprove();
   };
 
   return (
@@ -112,24 +202,18 @@ export const ShellApproval: Component = () => {
               </div>
             </div>
 
-            <div class="px-6 py-4 border-t border-border flex gap-3 justify-end">
-              <button
-                type="button"
-                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-surface-1 hover:border-muted-foreground"
-                onClick={handleDeny}
-                disabled={isProcessing()}
-              >
-                Deny
-              </button>
-              <button
-                type="button"
-                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-white hover:bg-primary-hover hover:shadow-[0_2px_8px_var(--primary-muted)]"
-                onClick={handleApprove}
-                disabled={isProcessing()}
-              >
-                {isProcessing() ? "Processing..." : "Approve"}
-              </button>
-            </div>
+            <ApprovalActions
+              isProcessing={isProcessing()}
+              approveOnceLabel={
+                isProcessing() ? "Processing..." : "Approve once"
+              }
+              leaseSummary={leaseSummary()}
+              onApproveOnce={handleApprove}
+              onApproveForTask={handleApproveForTask}
+              onDeny={handleDeny}
+              onSkip={handleSkip}
+              onStopTask={handleStopTask}
+            />
           </div>
         </div>
       )}

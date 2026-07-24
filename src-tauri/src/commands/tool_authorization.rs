@@ -7,6 +7,7 @@ use crate::approval_continuation::{
     ContinuationScope, ContinuationView, RegisteredContinuation, RequestedCapability,
     ResolutionSummary, ResolveDecision, ResolveOutcome,
 };
+use crate::authorization_audit::AuditEntry;
 use crate::capability_lease::{
     BundleRequest, CapabilityLease, LeaseBudgets, LeasePredicates, ProposedBundle, derive_bundle,
 };
@@ -171,4 +172,25 @@ pub fn list_approval_continuations(
     conversation_id: String,
 ) -> Result<Vec<ContinuationView>, String> {
     state.list_continuations(&conversation_id)
+}
+
+/// Every live pending approval across all conversations — the global approval
+/// inbox and its badge, which stay visible after navigating away from a thread.
+#[tauri::command]
+pub fn list_pending_approvals(
+    state: State<'_, ToolAuthorizationState>,
+) -> Result<Vec<ContinuationView>, String> {
+    state.list_pending_continuations_all()
+}
+
+/// The newest audit rows for a conversation: lease create/use/deny/expiry/revoke,
+/// approval request/decision outcomes, and durable session decisions. Rows never
+/// contain credentials or full command arguments.
+#[tauri::command]
+pub fn list_authorization_audit(
+    state: State<'_, ToolAuthorizationState>,
+    conversation_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<AuditEntry>, String> {
+    state.list_audit(&conversation_id, limit.unwrap_or(200).min(1000))
 }

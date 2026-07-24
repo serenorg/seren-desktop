@@ -11,6 +11,7 @@ use crate::approval_continuation::{
     self, ContinuationRow, ContinuationScope, ContinuationState, ContinuationView,
     RegisteredContinuation, RequestedCapability, ResolutionSummary, ResolveDecision, ResolveOutcome,
 };
+use crate::authorization_audit::{self, AuditContext, AuditEntry, AuditEvent};
 use crate::capability_lease::{
     self, CapabilityLease, LeaseBudgets, LeaseOutcome, LeasePredicates, OperationRequest,
 };
@@ -566,6 +567,7 @@ impl ToolAuthorizationState {
     ) -> Result<LeaseOutcome, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
+            record_lease_expiries_audited(conn, conversation_id, &now);
             let leases = read_leases(conn, conversation_id)?;
             let outcome = capability_lease::evaluate_for_conversation(
                 &leases,
@@ -573,17 +575,38 @@ impl ToolAuthorizationState {
                 conversation_id,
                 &now,
             );
-            if let LeaseOutcome::Allow(lease_id) = &outcome
-                && let Some(mut lease) = leases.into_iter().find(|lease| &lease.id == lease_id)
-            {
-                lease.budgets.calls_used = lease.budgets.calls_used.saturating_add(1);
-                if request.cost_micros > 0 {
-                    lease.budgets.spend_used_micros = lease
-                        .budgets
-                        .spend_used_micros
-                        .saturating_add(request.cost_micros);
+            match &outcome {
+                LeaseOutcome::Allow(lease_id) => {
+                    if let Some(mut lease) =
+                        leases.into_iter().find(|lease| &lease.id == lease_id)
+                    {
+                        lease.budgets.calls_used = lease.budgets.calls_used.saturating_add(1);
+                        if request.cost_micros > 0 {
+                            lease.budgets.spend_used_micros = lease
+                                .budgets
+                                .spend_used_micros
+                                .saturating_add(request.cost_micros);
+                        }
+                        write_lease(conn, &lease)?;
+                        audit(
+                            conn,
+                            conversation_id,
+                            AuditEvent::LeaseUsed,
+                            &AuditContext::for_request(request, Some(lease_id)),
+                            &now,
+                        );
+                    }
                 }
-                write_lease(conn, &lease)?;
+                LeaseOutcome::Deny => audit(
+                    conn,
+                    conversation_id,
+                    AuditEvent::LeaseDenied,
+                    &AuditContext::for_request(request, None),
+                    &now,
+                ),
+                // An escalation is audited when its continuation is registered,
+                // not here — the gate may escalate without a prompt ever showing.
+                LeaseOutcome::Escalate => {}
             }
             Ok(outcome)
         })
@@ -613,13 +636,20 @@ impl ToolAuthorizationState {
                 id: lease_id.clone(),
                 conversation_id: conversation_id.to_string(),
                 label: label.to_string(),
-                created_at: now,
+                created_at: now.clone(),
                 expires_at,
                 revoked: false,
                 predicates: predicates.clone(),
                 budgets: budgets.clone(),
             };
             write_lease(conn, &lease)?;
+            audit(
+                conn,
+                conversation_id,
+                AuditEvent::LeaseGranted,
+                &AuditContext::for_lease(&lease),
+                &now,
+            );
             Ok(lease)
         })
     }
@@ -627,7 +657,11 @@ impl ToolAuthorizationState {
     /// Every lease bound to a conversation, newest first. Backs inspection and the
     /// (slice-D) revocation UI.
     pub fn list_leases(&self, conversation_id: &str) -> Result<Vec<CapabilityLease>, String> {
-        self.with_conn(|conn| read_leases(conn, conversation_id))
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            record_lease_expiries_audited(conn, conversation_id, &now);
+            read_leases(conn, conversation_id)
+        })
     }
 
     /// Mark a lease revoked. Idempotent: revoking an unknown or already-revoked
@@ -659,6 +693,14 @@ impl ToolAuthorizationState {
             }
             lease.revoked = true;
             write_lease(conn, &lease)?;
+            let now = current_timestamp(conn)?;
+            audit(
+                conn,
+                &lease.conversation_id,
+                AuditEvent::LeaseRevoked,
+                &AuditContext::for_lease(&lease),
+                &now,
+            );
             Ok(true)
         })
     }
@@ -683,7 +725,23 @@ impl ToolAuthorizationState {
         } else {
             StoredDecision::Denied
         };
-        self.persist_decision(conversation_id, publisher_slug, tool_name, decision)
+        self.persist_decision(conversation_id, publisher_slug, tool_name, decision)?;
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let event = if approved {
+                AuditEvent::DecisionGranted
+            } else {
+                AuditEvent::DecisionDenied
+            };
+            audit(
+                conn,
+                conversation_id,
+                event,
+                &AuditContext::for_decision(route, publisher_slug, tool_name),
+                &now,
+            );
+            Ok(())
+        })
     }
 
     /// Register a suspended continuation for an authorization-blocked action, so a
@@ -704,7 +762,7 @@ impl ToolAuthorizationState {
     ) -> Result<RegisteredContinuation, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
-            approval_continuation::expire_overdue(conn, conversation_id, &now)?;
+            expire_overdue_audited(conn, conversation_id, &now);
             let fingerprint = approval_continuation::fingerprint(&requested);
             if let Some(existing) = approval_continuation::find_pending_by_fingerprint(
                 conn,
@@ -722,11 +780,20 @@ impl ToolAuthorizationState {
                 scope,
                 state: ContinuationState::Pending,
                 requested,
-                created_at: now,
+                created_at: now.clone(),
                 expires_at: timestamp_plus_seconds(conn, ttl_secs.max(1))?,
                 resolved_at: None,
             };
             approval_continuation::insert_continuation(conn, &row)?;
+            // A deduped retry reuses the pending record above and is deliberately
+            // not re-audited — one suspended request, one audit row.
+            audit(
+                conn,
+                conversation_id,
+                AuditEvent::ApprovalRequested,
+                &audit_context_for_row(&row),
+                &now,
+            );
             Ok(row.registered(false))
         })
     }
@@ -760,6 +827,15 @@ impl ToolAuthorizationState {
                     ContinuationState::Expired,
                     &now,
                 )?;
+                if changed {
+                    audit(
+                        conn,
+                        &row.conversation_id,
+                        AuditEvent::ApprovalExpired,
+                        &audit_context_for_row(&row),
+                        &now,
+                    );
+                }
                 return Ok(ResolveOutcome {
                     changed,
                     state: ContinuationState::Expired,
@@ -769,6 +845,24 @@ impl ToolAuthorizationState {
             let new_state = decision.settled_state();
             let changed =
                 approval_continuation::settle_if_pending(conn, approval_id, new_state, &now)?;
+            if changed {
+                let event = match new_state {
+                    ContinuationState::Approved => AuditEvent::ApprovalApproved,
+                    ContinuationState::Denied => AuditEvent::ApprovalDenied,
+                    ContinuationState::Skipped => AuditEvent::ApprovalSkipped,
+                    // settled_state never yields these; keep the mapping total.
+                    ContinuationState::Pending | ContinuationState::Expired => {
+                        AuditEvent::ApprovalExpired
+                    }
+                };
+                audit(
+                    conn,
+                    &row.conversation_id,
+                    event,
+                    &audit_context_for_row(&row),
+                    &now,
+                );
+            }
             Ok(ResolveOutcome {
                 changed,
                 state: new_state,
@@ -801,6 +895,15 @@ impl ToolAuthorizationState {
                 ContinuationState::Expired,
                 &now,
             )?;
+            if changed {
+                audit(
+                    conn,
+                    &row.conversation_id,
+                    AuditEvent::ApprovalExpired,
+                    &audit_context_for_row(&row),
+                    &now,
+                );
+            }
             Ok(ResolveOutcome {
                 changed,
                 state: ContinuationState::Expired,
@@ -835,7 +938,7 @@ impl ToolAuthorizationState {
     ) -> Result<TaskExecutionState, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
-            approval_continuation::expire_overdue(conn, conversation_id, &now)?;
+            expire_overdue_audited(conn, conversation_id, &now);
             let rows = approval_continuation::read_continuations(conn, conversation_id)?;
             Ok(approval_continuation::aggregate_task_state(&rows))
         })
@@ -847,7 +950,7 @@ impl ToolAuthorizationState {
     pub fn resolution_summary(&self, conversation_id: &str) -> Result<ResolutionSummary, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
-            approval_continuation::expire_overdue(conn, conversation_id, &now)?;
+            expire_overdue_audited(conn, conversation_id, &now);
             let rows = approval_continuation::read_continuations(conn, conversation_id)?;
             Ok(approval_continuation::summarize(&rows))
         })
@@ -862,16 +965,55 @@ impl ToolAuthorizationState {
     ) -> Result<Vec<ContinuationView>, String> {
         self.with_conn(|conn| {
             let now = current_timestamp(conn)?;
-            approval_continuation::expire_overdue(conn, conversation_id, &now)?;
+            expire_overdue_audited(conn, conversation_id, &now);
             let rows = approval_continuation::read_continuations(conn, conversation_id)?;
             Ok(rows.iter().map(ContinuationRow::view).collect())
         })
     }
 
-    /// Erase every stored decision, capability lease, and suspended continuation.
-    /// Backs the one-shot "erase all local conversation data" flow; the next access
-    /// lazily reopens an empty store. Returns the total number of rows removed
-    /// across all tables.
+    /// Every live pending continuation across all conversations, oldest first —
+    /// the global approval inbox. Overdue rows are expired (and audited) first so
+    /// the inbox never shows a lapsed request as actionable.
+    pub fn list_pending_continuations_all(&self) -> Result<Vec<ContinuationView>, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            match approval_continuation::expire_overdue_all(conn, &now) {
+                Ok(expired) => {
+                    for row in &expired {
+                        audit(
+                            conn,
+                            &row.conversation_id,
+                            AuditEvent::ApprovalExpired,
+                            &audit_context_for_row(row),
+                            &now,
+                        );
+                    }
+                }
+                Err(err) => {
+                    log::warn!("[tool-authorization] Failed to expire overdue approvals: {err}")
+                }
+            }
+            let rows = approval_continuation::read_pending_all(conn)?;
+            Ok(rows.iter().map(ContinuationRow::view).collect())
+        })
+    }
+
+    /// The newest audit rows for a conversation (lease lifecycle, approval
+    /// outcomes, durable decisions). Lease expiries are refreshed first so an
+    /// expired-but-unobserved lease still shows its expiry event.
+    pub fn list_audit(&self, conversation_id: &str, limit: u32) -> Result<Vec<AuditEntry>, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            record_lease_expiries_audited(conn, conversation_id, &now);
+            expire_overdue_audited(conn, conversation_id, &now);
+            authorization_audit::read_entries(conn, conversation_id, limit)
+        })
+    }
+
+    /// Erase every stored decision, capability lease, suspended continuation, and
+    /// audit row. Backs the one-shot "erase all local conversation data" flow; the
+    /// next access lazily reopens an empty store. Returns the total number of rows
+    /// removed across all tables.
     pub fn wipe(&self) -> Result<usize, String> {
         self.with_conn(|conn| {
             let decisions = conn
@@ -883,8 +1025,69 @@ impl ToolAuthorizationState {
             let continuations = conn
                 .execute("DELETE FROM approval_continuations", [])
                 .map_err(|e| e.to_string())?;
-            Ok(decisions + leases + continuations)
+            let audit_rows = conn
+                .execute("DELETE FROM authorization_audit", [])
+                .map_err(|e| e.to_string())?;
+            Ok(decisions + leases + continuations + audit_rows)
         })
+    }
+}
+
+/// Append one audit row, logging (never failing) on error: the audit trail lives
+/// in the same database as the state it describes, so the only failure modes are
+/// store-wide ones — and an authorization decision that was already persisted
+/// must not be un-done by a failed audit insert.
+fn audit(
+    conn: &Connection,
+    conversation_id: &str,
+    event: AuditEvent,
+    context: &AuditContext,
+    now: &str,
+) {
+    if let Err(err) = authorization_audit::record(conn, conversation_id, event, context, now) {
+        log::warn!(
+            "[tool-authorization] Failed to record audit event {}: {err}",
+            event.as_wire()
+        );
+    }
+}
+
+/// The audit identity of a continuation: ids and route/operation only. The full
+/// capability (including any command text) stays in the continuation record —
+/// the audit trail does not duplicate it.
+fn audit_context_for_row(row: &ContinuationRow) -> AuditContext {
+    AuditContext::for_approval(
+        &row.approval_id,
+        &row.requested.route,
+        &row.requested.publisher_slug,
+        &row.requested.tool_name,
+    )
+}
+
+/// Expire a conversation's overdue pending continuations and audit each lapse.
+/// Log-and-continue: a read path must not fail because expiry bookkeeping did.
+fn expire_overdue_audited(conn: &Connection, conversation_id: &str, now: &str) {
+    match approval_continuation::expire_overdue(conn, conversation_id, now) {
+        Ok(expired) => {
+            for row in &expired {
+                audit(
+                    conn,
+                    &row.conversation_id,
+                    AuditEvent::ApprovalExpired,
+                    &audit_context_for_row(row),
+                    now,
+                );
+            }
+        }
+        Err(err) => log::warn!("[tool-authorization] Failed to expire overdue approvals: {err}"),
+    }
+}
+
+/// Record `lease_expired` audit rows for newly lapsed leases. Log-and-continue on
+/// the same rationale as `audit`.
+fn record_lease_expiries_audited(conn: &Connection, conversation_id: &str, now: &str) {
+    if let Err(err) = authorization_audit::record_lease_expiries(conn, conversation_id, now) {
+        log::warn!("[tool-authorization] Failed to record lease expiries: {err}");
     }
 }
 
@@ -998,6 +1201,8 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
     // Suspended continuations (#3193-C): the host-owned blocked-action records that
     // make an authorization block visible and resumable instead of a hung tool call.
     approval_continuation::init_schema(conn)?;
+    // Audit trail (#3193-D): lease lifecycle, approval outcomes, durable decisions.
+    authorization_audit::init_schema(conn)?;
     Ok(())
 }
 
@@ -1269,7 +1474,8 @@ mod tests {
         let s = state();
         s.record_decision(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", true)
             .unwrap();
-        assert_eq!(s.wipe().unwrap(), 1);
+        // Two rows: the stored decision and its audit entry.
+        assert_eq!(s.wipe().unwrap(), 2);
         let decision = s
             .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
             .unwrap();
@@ -1855,5 +2061,182 @@ mod tests {
             s.task_execution_state("conv-a").unwrap(),
             TaskExecutionState::Running
         );
+    }
+
+    // ---- audit trail (#3193-D) -------------------------------------------
+
+    fn audit_events(s: &ToolAuthorizationState, conversation_id: &str) -> Vec<String> {
+        s.list_audit(conversation_id, 100)
+            .unwrap()
+            .into_iter()
+            .map(|entry| entry.event)
+            .collect()
+    }
+
+    /// The lease lifecycle is fully auditable: grant, silent use, and revoke each
+    /// leave exactly one row, newest first.
+    #[test]
+    fn lease_grant_use_and_revoke_are_audited() {
+        let s = state();
+        let lease = s
+            .grant_lease("conv-a", "Coding lease", 3600, command_rules(&["cargo"]), call_budget(10))
+            .unwrap();
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"))
+            .unwrap();
+        assert_eq!(decision.decision, "allow");
+        assert!(s.revoke_lease(&lease.id).unwrap());
+
+        assert_eq!(
+            audit_events(&s, "conv-a"),
+            vec!["lease_revoked", "lease_used", "lease_granted"],
+        );
+
+        // Idempotent replay of the revoke adds nothing.
+        assert!(!s.revoke_lease(&lease.id).unwrap());
+        assert_eq!(audit_events(&s, "conv-a").len(), 3);
+
+        // Rows carry identity, not arguments.
+        let entries = s.list_audit("conv-a", 100).unwrap();
+        let used = entries.iter().find(|e| e.event == "lease_used").unwrap();
+        assert_eq!(used.subject_id.as_deref(), Some(lease.id.as_str()));
+        assert_eq!(used.route.as_deref(), Some("shell"));
+        assert_eq!(used.detail.as_deref(), Some("cargo"));
+    }
+
+    /// Credential safety: a shell command's arguments (which may contain secrets)
+    /// never reach the audit table — only the leading program token does.
+    #[test]
+    fn audit_rows_never_store_command_arguments() {
+        let s = state();
+        s.grant_lease("conv-a", "lease", 3600, command_rules(&["curl"]), call_budget(10))
+            .unwrap();
+        let secret_command = "curl -H 'Authorization: Bearer sk-live-SECRET' https://api.example.com";
+        s.authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx(secret_command))
+            .unwrap();
+
+        let entries = s.list_audit("conv-a", 100).unwrap();
+        assert!(entries.iter().any(|e| e.event == "lease_used"));
+        for entry in &entries {
+            let row = serde_json::to_string(entry).unwrap();
+            assert!(!row.contains("SECRET"), "audit row leaked command arguments: {row}");
+            assert!(!row.contains("Bearer"), "audit row leaked command arguments: {row}");
+        }
+    }
+
+    /// A lease-exclusion deny is audited as such.
+    #[test]
+    fn lease_exclusion_deny_is_audited() {
+        let s = state();
+        let mut predicates = command_rules(&["git"]);
+        predicates.exclusions = vec![capability_lease::Exclusion {
+            program: Some("git".to_string()),
+            ..Default::default()
+        }];
+        s.grant_lease("conv-a", "lease", 3600, predicates, call_budget(10))
+            .unwrap();
+        let decision = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("git push"))
+            .unwrap();
+        assert_eq!(decision.decision, "deny");
+        assert_eq!(audit_events(&s, "conv-a"), vec!["lease_denied", "lease_granted"]);
+    }
+
+    /// One suspended request logs once — a deduped retry does not re-audit — and
+    /// its resolution logs exactly once more, even on idempotent replay.
+    #[test]
+    fn approval_lifecycle_is_audited_exactly_once() {
+        let s = state();
+        let r = s
+            .register_continuation("conv-a", shell_cap("cargo build"), ContinuationScope::Linear, 300)
+            .unwrap();
+        // Dedup reuse must not add a second requested row.
+        s.register_continuation("conv-a", shell_cap("cargo test"), ContinuationScope::Linear, 300)
+            .unwrap();
+        assert_eq!(audit_events(&s, "conv-a"), vec!["approval_requested"]);
+
+        s.resolve_continuation(&r.approval_id, &r.resume_token, ResolveDecision::Deny)
+            .unwrap();
+        // Idempotent replay adds nothing.
+        s.resolve_continuation(&r.approval_id, &r.resume_token, ResolveDecision::Deny)
+            .unwrap();
+        assert_eq!(
+            audit_events(&s, "conv-a"),
+            vec!["approval_denied", "approval_requested"],
+        );
+        let denied = &s.list_audit("conv-a", 100).unwrap()[0];
+        assert_eq!(denied.subject_id.as_deref(), Some(r.approval_id.as_str()));
+    }
+
+    /// A durable session decision is audited; a high-risk prompt outcome (which
+    /// never persists) is not.
+    #[test]
+    fn durable_decisions_are_audited_and_one_shots_are_not() {
+        let s = state();
+        s.record_decision(ToolRoute::Gateway, "attio", "post_notes", "conv-a", true)
+            .unwrap();
+        // High-risk outcomes are one-shot: no durable decision, no decision audit.
+        s.record_decision(ToolRoute::Gateway, "gmail", "post_send", "conv-a", true)
+            .unwrap();
+        assert_eq!(audit_events(&s, "conv-a"), vec!["decision_granted"]);
+    }
+
+    /// A lapsed lease gets exactly one `lease_expired` row, on first observation.
+    #[test]
+    fn lease_expiry_is_audited_once() {
+        let s = state();
+        let lease = s
+            .grant_lease("conv-a", "lease", 3600, command_rules(&["cargo"]), call_budget(10))
+            .unwrap();
+        // Force the window closed by rewriting the stored expiry into the past.
+        s.with_conn(|conn| {
+            let mut expired = lease.clone();
+            expired.expires_at = "2000-01-01T00:00:00.000Z".to_string();
+            write_lease(conn, &expired)
+        })
+        .unwrap();
+
+        s.list_leases("conv-a").unwrap();
+        s.list_leases("conv-a").unwrap();
+        let events = audit_events(&s, "conv-a");
+        assert_eq!(
+            events.iter().filter(|e| e.as_str() == "lease_expired").count(),
+            1,
+            "expiry must be recorded exactly once: {events:?}"
+        );
+    }
+
+    /// The global pending listing spans conversations and drops settled rows —
+    /// the badge that stays visible after navigating away.
+    #[test]
+    fn pending_approvals_span_conversations() {
+        let s = state();
+        let a = s
+            .register_continuation("conv-a", send_cap(), ContinuationScope::Linear, 300)
+            .unwrap();
+        s.register_continuation("conv-b", shell_cap("git push"), ContinuationScope::Linear, 300)
+            .unwrap();
+
+        let pending = s.list_pending_continuations_all().unwrap();
+        assert_eq!(pending.len(), 2);
+        let tasks: Vec<&str> = pending.iter().map(|view| view.task_id.as_str()).collect();
+        assert!(tasks.contains(&"conv-a") && tasks.contains(&"conv-b"));
+
+        s.resolve_continuation(&a.approval_id, &a.resume_token, ResolveDecision::Approve)
+            .unwrap();
+        let pending = s.list_pending_continuations_all().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].task_id, "conv-b");
+    }
+
+    /// The erase-all flow removes the audit trail with everything else.
+    #[test]
+    fn wipe_clears_audit_rows() {
+        let s = state();
+        s.grant_lease("conv-a", "lease", 3600, command_rules(&["cargo"]), call_budget(10))
+            .unwrap();
+        assert!(!s.list_audit("conv-a", 10).unwrap().is_empty());
+        s.wipe().unwrap();
+        assert!(s.list_audit("conv-a", 10).unwrap().is_empty());
     }
 }
