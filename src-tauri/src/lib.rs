@@ -27,6 +27,7 @@ pub mod commands {
     pub mod recording;
     pub mod sandbox;
     pub mod session;
+    pub mod tool_authorization;
     pub mod transcript_search;
     pub mod updater;
     pub mod web;
@@ -72,6 +73,7 @@ mod skills;
 mod support;
 mod sync;
 mod terminal;
+pub mod tool_authorization;
 mod tray;
 mod validation;
 mod wallet;
@@ -996,6 +998,13 @@ pub fn run() {
                     "https://memory.serendb.com".to_string(),
                     cache_path,
                 ));
+
+                // Host-owned tool authorization decision store. Colocated with
+                // slice B's capability-lease store in one database (#3193-A).
+                let authorization_path = data_dir.join("tool_authorization.db");
+                app.manage(tool_authorization::ToolAuthorizationState::new(
+                    authorization_path,
+                ));
             }
 
             tauri::async_runtime::spawn(commands::happy_bridge::auto_start_if_enabled(
@@ -1077,6 +1086,8 @@ pub fn run() {
             commands::credential_lease::credential_lease_create,
             commands::credential_lease::credential_lease_revoke,
             commands::credential_lease::credential_lease_revoke_all,
+            commands::tool_authorization::authorize_tool_operation,
+            commands::tool_authorization::record_tool_operation_decision,
             // Meeting Mode persistence commands
             commands::audio::create_meeting,
             commands::audio::get_meeting,

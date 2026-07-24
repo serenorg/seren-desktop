@@ -62,6 +62,20 @@ describe("tool executor OAuth account routing", () => {
       result: "ok",
       is_error: false,
     });
+    // These tests exercise OAuth account routing, not classification: let the
+    // host gate allow the Gmail read so the routing logic under test runs.
+    mocks.invoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "authorize_tool_operation") {
+        return {
+          decision: "allow",
+          promptKind: null,
+          operationClass: "trusted-read",
+          description: "",
+          isDestructive: false,
+        };
+      }
+      return undefined;
+    });
   });
 
   it("attaches the active chat OAuth connection before dispatching a Gateway publisher tool", async () => {

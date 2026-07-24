@@ -2294,6 +2294,7 @@ impl EraseTargetReport {
 pub async fn erase_all_conversation_data(
     app: AppHandle,
     memory_state: State<'_, MemoryState>,
+    authorization_state: State<'_, crate::tool_authorization::ToolAuthorizationState>,
 ) -> Result<Vec<EraseTargetReport>, String> {
     let mut reports = Vec::new();
 
@@ -2358,6 +2359,20 @@ pub async fn erase_all_conversation_data(
         Ok(()) => reports.push(EraseTargetReport::new("memory_cache_db", "ok", None)),
         Err(err) => reports.push(EraseTargetReport::new(
             "memory_cache_db",
+            "failed",
+            Some(err),
+        )),
+    }
+
+    // Tool authorization decisions: conversation-scoped grants/denials.
+    match authorization_state.wipe() {
+        Ok(count) => reports.push(EraseTargetReport::new(
+            "tool_authorization_db",
+            "ok",
+            Some(format!("{count} decision(s) removed")),
+        )),
+        Err(err) => reports.push(EraseTargetReport::new(
+            "tool_authorization_db",
             "failed",
             Some(err),
         )),
