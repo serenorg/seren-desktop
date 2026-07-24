@@ -85,13 +85,13 @@ describe("tool executor OAuth account routing", () => {
       id: "tool-call-1",
       type: "function",
       function: {
-        name: "gateway__gmail__messages",
+        name: "gateway__gmail__get_messages",
         arguments: JSON.stringify({ q: "from:example" }),
       },
     });
 
     expect(result.is_error).toBe(false);
-    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "messages", {
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "get_messages", {
       q: "from:example",
       connection_id: "conn-google-personal",
     });
@@ -123,7 +123,7 @@ describe("tool executor OAuth account routing", () => {
         id: "tool-call-owning",
         type: "function",
         function: {
-          name: "gateway__gmail__messages",
+          name: "gateway__gmail__get_messages",
           arguments: JSON.stringify({ q: "from:example" }),
         },
       },
@@ -131,7 +131,7 @@ describe("tool executor OAuth account routing", () => {
     );
 
     expect(result.is_error).toBe(false);
-    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "messages", {
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith("gmail", "get_messages", {
       q: "from:example",
       connection_id: "conn-google-personal",
     });
@@ -152,7 +152,7 @@ describe("tool executor OAuth account routing", () => {
       id: "tool-call-2",
       type: "function",
       function: {
-        name: "gateway__gmail__messages",
+        name: "gateway__gmail__get_messages",
         arguments: JSON.stringify({ q: "from:example" }),
       },
     });
@@ -174,7 +174,7 @@ describe("tool executor OAuth account routing", () => {
       id: "tool-call-unavailable",
       type: "function",
       function: {
-        name: "gateway__gmail__messages",
+        name: "gateway__gmail__get_messages",
         arguments: JSON.stringify({ q: "safe-read" }),
       },
     });
@@ -215,7 +215,7 @@ describe("tool executor OAuth account routing", () => {
         id: "tool-call-paid",
         type: "function",
         function: {
-          name: "gateway__gmail__messages",
+          name: "gateway__gmail__get_messages",
           arguments: JSON.stringify({ q: "safe-read" }),
         },
       },
@@ -226,7 +226,7 @@ describe("tool executor OAuth account routing", () => {
     expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
       1,
       "gmail",
-      "messages",
+      "get_messages",
       {
         q: "safe-read",
         connection_id: "conn-google-personal",
@@ -235,7 +235,7 @@ describe("tool executor OAuth account routing", () => {
     expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
       2,
       "gmail",
-      "messages",
+      "get_messages",
       {
         q: "safe-read",
         connection_id: "conn-google-personal",
