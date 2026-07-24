@@ -65,7 +65,6 @@ reqwest = { version = "0.13", features = ["blocking", "json", "stream"] }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 postgres-native-tls = "0.5"
 native-tls = "0.2"
-seren-memory-sdk = { git = "https://github.com/serenorg/seren-memory-sdk.git", branch = "main" }
 seren-secrets-crypto = { git = "https://github.com/serenorg/seren-secrets.git", tag = "v0.4.0" }
 rmcp = { version = "1.2", features = [
     "client",

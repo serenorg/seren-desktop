@@ -459,9 +459,7 @@ created if missing.",
         // so document-generation tasks (invoices, reports) stamp a correct date
         // even when history has been trimmed by RLM. The system prompt itself
         // is never trimmed, so this context cannot be dropped.
-        let today_utc = seren_memory_sdk::chrono::Utc::now()
-            .format("%Y-%m-%d")
-            .to_string();
+        let today_utc = jiff::Timestamp::now().strftime("%Y-%m-%d").to_string();
         let mut system_parts = vec![
             format!(
                 "Current date (UTC): {}. Use this date for any timestamp, \
@@ -3547,9 +3545,7 @@ mod tests {
         let body = worker.build_request_body("Hi", &[], &routing, "", &[], &[], None);
         let system_msg = body["messages"][0]["content"].as_str().unwrap();
 
-        let current_year = seren_memory_sdk::chrono::Utc::now()
-            .format("%Y")
-            .to_string();
+        let current_year = jiff::Timestamp::now().strftime("%Y").to_string();
         assert!(
             system_msg.contains("Current date (UTC):"),
             "system prompt must pin a current-date line"

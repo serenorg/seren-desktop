@@ -40,6 +40,7 @@ import {
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
+import { privacyStore } from "@/stores/privacy.store";
 import { providerStore } from "@/stores/provider.store";
 import {
   getActiveToolsetPublishers,
@@ -551,8 +552,18 @@ export async function* streamMessageWithTools(
     console.warn("[Chat] Failed to retrieve skills content:", error);
   }
 
-  // Inject memory context if enabled and authenticated
-  if (settingsStore.get("memoryEnabled") && authStore.isAuthenticated) {
+  // Inject memory context if enabled and authenticated. A conversation
+  // excluded from memory - including every privileged matter - must not
+  // receive recalled context either, matching the orchestrator and agent
+  // paths. Otherwise memories from other conversations leak into a thread the
+  // operator has walled off.
+  const memoryConversationId =
+    memorySource?.conversationId ?? conversationStore.activeConversationId;
+  if (
+    settingsStore.get("memoryEnabled") &&
+    authStore.isAuthenticated &&
+    !privacyStore.isMemoryExcluded(memoryConversationId)
+  ) {
     try {
       const memoryContext = await bootstrapMemoryContext();
       if (memoryContext) {

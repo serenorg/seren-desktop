@@ -1,11 +1,11 @@
 // ABOUTME: Verifies excluded conversations stop memory capture at the frontend choke point.
-// ABOUTME: Protects the no-cache/no-sync invariant without invoking the backend command.
+// ABOUTME: Protects the no-capture invariant without calling the memory API.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invokeMock, authStoreMock, projectStoreMock, settingsGetMock } =
+const { processConversationMock, authStoreMock, projectStoreMock, settingsGetMock } =
   vi.hoisted(() => ({
-    invokeMock: vi.fn(),
+    processConversationMock: vi.fn(),
     authStoreMock: {
       isAuthenticated: true,
       user: { id: "user-1" },
@@ -16,8 +16,8 @@ const { invokeMock, authStoreMock, projectStoreMock, settingsGetMock } =
     settingsGetMock: vi.fn((key: string) => key === "memoryEnabled"),
   }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: invokeMock,
+vi.mock("@/api/seren-memory", () => ({
+  processConversation: processConversationMock,
 }));
 
 vi.mock("@/stores/auth.store", () => ({
@@ -46,7 +46,7 @@ describe("conversation memory exclusions", () => {
     });
   });
 
-  it("does not invoke memory_process_conversation for an excluded conversation", async () => {
+  it("does not call process_conversation for an excluded conversation", async () => {
     await expect(
       processConversationMemory({
         conversationId: "excluded-conversation",
@@ -54,9 +54,6 @@ describe("conversation memory exclusions", () => {
       }),
     ).resolves.toBeNull();
 
-    expect(invokeMock).not.toHaveBeenCalledWith(
-      "memory_process_conversation",
-      expect.anything(),
-    );
+    expect(processConversationMock).not.toHaveBeenCalled();
   });
 });

@@ -29,7 +29,6 @@ import { shortcuts } from "@/lib/shortcuts";
 import { captureUnknownError, reportError } from "@/lib/support/hook";
 import { Phase3Playground } from "@/playground/Phase3Playground";
 import { initAutoTopUp } from "@/services/autoTopUp";
-import { startMemorySyncLoop, stopMemorySyncLoop } from "@/services/memory";
 import { resetUserSessionState } from "@/services/session-state";
 import { telemetry } from "@/services/telemetry";
 import { agentStore } from "@/stores/agent.store";
@@ -232,8 +231,6 @@ function App() {
         cleanupAutoTopUp = initAutoTopUp();
         checkDailyClaim();
         startDailyClaimPolling();
-        // Drain locally-cached memories immediately and on a periodic interval.
-        startMemorySyncLoop();
         void threadStore.refresh();
         // Re-initialize the agent runtime side-channel listeners after a
         // re-login: `resetUserSessionState()` disposes them on logout so
@@ -260,7 +257,6 @@ function App() {
           cleanupAutoTopUp = null;
         }
         stopAutoRefresh();
-        stopMemorySyncLoop();
         resetUserSessionState();
       });
     }

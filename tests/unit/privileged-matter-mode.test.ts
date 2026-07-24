@@ -3,13 +3,18 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { invokeMock, setConversationPrivilegedMock } = vi.hoisted(() => ({
+const { invokeMock, processConversationMock, setConversationPrivilegedMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
+  processConversationMock: vi.fn(),
   setConversationPrivilegedMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
+}));
+
+vi.mock("@/api/seren-memory", () => ({
+  processConversation: processConversationMock,
 }));
 
 vi.mock("@/lib/tauri-bridge", () => ({
@@ -70,7 +75,7 @@ describe("Privileged Matter Mode", () => {
     );
   });
 
-  it("does not invoke process_conversation for a privileged conversation", async () => {
+  it("does not call process_conversation for a privileged conversation", async () => {
     await expect(
       processAssistantResponseMemory("Privileged response", {
         conversationId,
@@ -79,9 +84,6 @@ describe("Privileged Matter Mode", () => {
       }),
     ).resolves.toBeNull();
 
-    expect(invokeMock).not.toHaveBeenCalledWith(
-      "memory_process_conversation",
-      expect.anything(),
-    );
+    expect(processConversationMock).not.toHaveBeenCalled();
   });
 });

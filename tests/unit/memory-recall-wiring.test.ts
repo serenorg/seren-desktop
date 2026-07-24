@@ -1,5 +1,5 @@
-// ABOUTME: Source-level guards for memory recall, error learning, and consolidation wiring.
-// ABOUTME: Verifies all authenticated prompt and startup integration points remain connected.
+// ABOUTME: Source-level guards for memory recall and error-learning wiring.
+// ABOUTME: Verifies prompt integrations remain connected and lifecycle jobs stay server-owned.
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -26,9 +26,27 @@ describe("memory recall wiring", () => {
     );
   });
 
-  it("consolidates memories after authenticated sync", () => {
+  it("gates every memory injection point on the conversation privacy flags", () => {
+    // isMemoryExcluded covers both the per-conversation opt-out and Privileged
+    // Matter Mode. A path that recalls without checking it replays memories
+    // from other conversations into a thread the operator walled off.
+    for (const path of [
+      "src/services/chat.ts",
+      "src/services/orchestrator.ts",
+      "src/stores/agent.store.ts",
+    ]) {
+      expect(readSource(path), path).toContain(
+        "privacyStore.isMemoryExcluded(",
+      );
+    }
+  });
+
+  it("leaves memory consolidation and synchronization server-owned", () => {
     const memorySource = readSource("src/services/memory.ts");
-    expect(memorySource).toContain("startMemorySyncLoop");
-    expect(memorySource).toContain("consolidateMemories({})");
+    const appSource = readSource("src/App.tsx");
+    expect(memorySource).not.toContain("MEMORY_SYNC_INTERVAL_MS");
+    expect(memorySource).not.toContain("consolidateJob(");
+    expect(memorySource).not.toContain("syncStatus(");
+    expect(appSource).not.toContain("startMemorySyncLoop");
   });
 });

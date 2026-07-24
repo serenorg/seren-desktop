@@ -7974,7 +7974,6 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "seren-memory-sdk",
  "seren-secrets-crypto",
  "serenity",
  "sha2 0.10.9",
@@ -8015,23 +8014,6 @@ dependencies = [
  "windows 0.62.2",
  "xcap",
  "zeroize",
-]
-
-[[package]]
-name = "seren-memory-sdk"
-version = "0.1.0"
-source = "git+https://github.com/serenorg/seren-memory-sdk.git?branch=main#b256cbc618667d8e480fbf1c84d90af07af85fc1"
-dependencies = [
- "chrono",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "sqlite-vec",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]

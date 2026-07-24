@@ -792,8 +792,9 @@ pub fn claude_project_dir_for_memory_file(path: &Path) -> Option<PathBuf> {
 /// target database" errors because the SQL endpoint authenticates via API
 /// key and the OAuth token has insufficient scope for it.
 ///
-/// We do NOT depend on `seren-memory-sdk` — that's the user-memory store,
-/// a different SerenDB surface entirely.
+/// This SQL client accesses SerenDB through `/publishers/seren-db/query` using
+/// a SerenDB API key. User memory uses the Seren Memory publisher service with
+/// OAuth bearer authentication.
 #[derive(Debug, Clone)]
 pub struct SerenDbSqlClient {
     http: reqwest::Client,
@@ -900,8 +901,8 @@ pub enum ProcessOutcome {
 ///
 /// This is the single unit of work for the interceptor — the tokio event
 /// loop calls it, the startup migration calls it, and the integration test
-/// calls it. It does NOT touch the user-memory store (`memory_remember` /
-/// `seren-memory-sdk`) — Claude memory is a separate SerenDB project.
+/// calls it. It does not touch the user-memory REST API because Claude
+/// memory is a separate SerenDB project.
 pub async fn process_memory_file(
     path: &Path,
     client: &SerenDbSqlClient,

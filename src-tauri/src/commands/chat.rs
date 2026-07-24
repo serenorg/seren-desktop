@@ -8,11 +8,13 @@ use crate::services::database::{
     DbPool, PersistedMessage, WalCheckpointMode, checkpoint_wal, enqueue_sync_tombstone, init_db,
     mark_sync_upsert, save_message_record, stamp_existing_privileged_messages,
 };
-use crate::commands::memory::MemoryState;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager, State};
+
+const MEMORY_DELETE_BY_SOURCE_URL: &str =
+    "https://api.serendb.com/publishers/seren-memory/memories/by-source";
 
 fn load_indexable_message_meta(
     conn: &Connection,
@@ -240,10 +242,43 @@ pub(crate) fn conversation_source_uri(conversation_id: &str) -> String {
 }
 
 /// Summed audit counts returned by the cloud-memory source erasure.
-#[derive(Default)]
+#[derive(Default, Deserialize)]
 pub(crate) struct MemorySourceEraseCounts {
     pub sources_deleted: i64,
     pub memories_deleted: i64,
+}
+
+#[derive(Deserialize)]
+struct MemorySourceEraseResponse {
+    data: MemorySourceEraseCounts,
+}
+
+async fn erase_memory_source(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    source_uri: &str,
+) -> Result<MemorySourceEraseCounts, String> {
+    let response = crate::auth::authenticated_request(app, client, |client, token| {
+        client
+            .delete(MEMORY_DELETE_BY_SOURCE_URL)
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "source_uri": source_uri }))
+    })
+    .await?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "memory source erase failed ({}): {}",
+            status.as_u16(),
+            body
+        ));
+    }
+    response
+        .json::<MemorySourceEraseResponse>()
+        .await
+        .map(|response| response.data)
+        .map_err(|error| format!("invalid memory source erase response: {error}"))
 }
 
 /// Permanently erase the retained cloud-memory sources (and their derived
@@ -259,26 +294,17 @@ async fn erase_memory_sources(
     if conversation_ids.is_empty() {
         return counts;
     }
-    let memory_state = app.state::<MemoryState>();
+    let client = reqwest::Client::new();
     for id in conversation_ids {
         let source_uri = conversation_source_uri(id);
-        match memory_state
-            .delete_conversation_sources(app, &source_uri)
-            .await
-        {
-            Ok(value) => {
-                counts.sources_deleted += value
-                    .get("sources_deleted")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
-                counts.memories_deleted += value
-                    .get("memories_deleted")
-                    .and_then(serde_json::Value::as_i64)
-                    .unwrap_or(0);
+        match erase_memory_source(app, &client, &source_uri).await {
+            Ok(outcome) => {
+                counts.sources_deleted += outcome.sources_deleted;
+                counts.memories_deleted += outcome.memories_deleted;
             }
-            Err(err) => log::warn!(
-                "[Delete] Cloud-memory source erase failed for conversation {id}: {err}"
-            ),
+            Err(err) => {
+                log::warn!("[Delete] Cloud-memory source erase failed for conversation {id}: {err}")
+            }
         }
     }
     counts
@@ -2363,7 +2389,6 @@ impl EraseTargetReport {
 #[tauri::command]
 pub async fn erase_all_conversation_data(
     app: AppHandle,
-    memory_state: State<'_, MemoryState>,
     authorization_state: State<'_, crate::tool_authorization::ToolAuthorizationState>,
 ) -> Result<Vec<EraseTargetReport>, String> {
     let mut reports = Vec::new();
@@ -2430,16 +2455,6 @@ pub async fn erase_all_conversation_data(
             "{transcript_count} agent session transcript(s) targeted"
         )),
     ));
-
-    // Local cloud-memory cache: drop the connection and remove the files.
-    match memory_state.wipe_local_cache() {
-        Ok(()) => reports.push(EraseTargetReport::new("memory_cache_db", "ok", None)),
-        Err(err) => reports.push(EraseTargetReport::new(
-            "memory_cache_db",
-            "failed",
-            Some(err),
-        )),
-    }
 
     // Tool authorization: conversation-scoped grants/denials and capability leases.
     match authorization_state.wipe() {
@@ -2516,6 +2531,7 @@ mod tests {
     use super::{
         AgentArchiveOrigin, AgentConversation, AgentTranscriptTarget, DERIVED_KIND_CASE_SQL,
         ExpectedHappyRestoration, HappyRestorationCandidate, HappyRestorationLookup,
+        MemorySourceEraseResponse,
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
         claim_happy_provider_session_owner_with_provenance_in_db, collect_agent_transcript_targets,
@@ -2524,7 +2540,8 @@ mod tests {
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
         lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
         lookup_happy_session_id_by_conversation_in_db, migrate_happy_restoration_relay_in_db,
-        remove_agent_transcripts, set_agent_conversation_session_id_in_db,
+        remove_agent_transcripts,
+        set_agent_conversation_session_id_in_db,
         upsert_agent_conversation_in_db, vacuum_database,
     };
     use crate::services::database::{configure_connection, setup_schema};
@@ -2550,6 +2567,19 @@ mod tests {
             conversation_source_uri("abc-123"),
             "seren://desktop/conversations/abc-123"
         );
+    }
+
+    #[test]
+    fn memory_source_erase_response_unwraps_gateway_data() {
+        let response: MemorySourceEraseResponse = serde_json::from_value(serde_json::json!({
+            "data": {
+                "sources_deleted": 2,
+                "memories_deleted": 5
+            }
+        }))
+        .expect("valid delete-by-source response");
+        assert_eq!(response.data.sources_deleted, 2);
+        assert_eq!(response.data.memories_deleted, 5);
     }
 
     #[test]

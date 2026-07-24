@@ -358,12 +358,15 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setMemoryActionStatus(null);
     try {
       await forgetMemory(memoryId);
+      // The memory is gone from the store, so it must not remain cited as
+      // either recalled or captured on this answer.
       updateMemoryNotice(
         message,
         "Forgot that remembered detail.",
         (memory) => ({
           ...memory,
           used: memory.used.filter((detail) => detail.id !== memoryId),
+          captured: memory.captured?.filter((detail) => detail.id !== memoryId),
         }),
       );
     } catch (error) {
@@ -383,7 +386,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setMemoryActionBusy(true);
     setMemoryActionStatus(null);
     try {
-      await suppressMemoryForAnswer(memoryId, message.id);
+      suppressMemoryForAnswer(memoryId, message.id);
       updateMemoryNotice(
         message,
         "This answer will not use that detail.",
@@ -438,7 +441,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     setMemoryActionBusy(true);
     setMemoryActionStatus(null);
     try {
-      const notice = await correctAnswerMemory({
+      const { notice, droppedMemoryId } = await correctAnswerMemory({
         messageId: message.id,
         correction,
         memories: [
@@ -448,7 +451,19 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
         errorContent: message.error ?? undefined,
         fixContent: message.content,
       });
-      updateMemoryNotice(message, notice, (memory) => memory);
+      updateMemoryNotice(message, notice, (memory) =>
+        droppedMemoryId
+          ? {
+              ...memory,
+              used: memory.used.filter(
+                (detail) => detail.id !== droppedMemoryId,
+              ),
+              captured: memory.captured?.filter(
+                (detail) => detail.id !== droppedMemoryId,
+              ),
+            }
+          : memory,
+      );
       setCorrectionMessageId(null);
       setCorrectionDraft("");
     } catch (error) {

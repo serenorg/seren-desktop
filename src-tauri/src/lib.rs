@@ -20,7 +20,6 @@ pub mod commands {
     pub mod happy_bridge;
     pub mod history_sync;
     pub mod indexing;
-    pub mod memory;
     pub mod model_context_cache;
     pub mod orchestrator;
     pub mod provider_runtime;
@@ -548,6 +547,32 @@ fn os_version() -> String {
     }
 }
 
+/// Delete the SQLite cache left behind by the retired on-device memory bridge.
+///
+/// Memory is server-owned: nothing reads, writes, or synchronizes this file
+/// anymore, and the erase-all-data flow no longer covers it. Left in place it
+/// would keep plaintext memory content in the app data directory indefinitely
+/// on any install upgraded from an older build. Removal is best-effort - a
+/// failure here must never block startup - and idempotent, so later launches
+/// are no-ops once the files are gone.
+fn remove_legacy_memory_cache(data_dir: &std::path::Path) {
+    for name in [
+        "memory_cache.db",
+        "memory_cache.db-wal",
+        "memory_cache.db-shm",
+    ] {
+        let path = data_dir.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => info!("Removed legacy memory cache file {}", path.display()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => log::warn!(
+                "Failed to remove legacy memory cache file {}: {err}",
+                path.display()
+            ),
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[allow(unused_mut)]
@@ -1053,19 +1078,13 @@ pub fn run() {
             }
             app.manage(terminal::TerminalState::default());
 
-            // Initialize memory state for cloud + local cache operations.
-            // Token is read fresh from the auth store on each request.
             {
                 let data_dir = app
                     .path()
                     .app_data_dir()
                     .expect("failed to get app data dir");
-                let cache_path = data_dir.join("memory_cache.db");
 
-                app.manage(commands::memory::MemoryState::new(
-                    "https://memory.serendb.com".to_string(),
-                    cache_path,
-                ));
+                remove_legacy_memory_cache(&data_dir);
 
                 // Host-owned tool authorization decision store. Colocated with
                 // slice B's capability-lease store in one database (#3193-A).
@@ -1398,24 +1417,6 @@ pub fn run() {
             commands::orchestrator::cancel_orchestration,
             commands::orchestrator::submit_tool_result,
             commands::orchestrator::submit_eval_signal,
-            // Memory commands
-            commands::memory::memory_bootstrap,
-            commands::memory::memory_session_bootstrap,
-            commands::memory::memory_remember,
-            commands::memory::memory_create_memory,
-            commands::memory::memory_recall,
-            commands::memory::memory_process_conversation,
-            commands::memory::memory_learn_from_error,
-            commands::memory::memory_list_memories,
-            commands::memory::memory_get_memory,
-            commands::memory::memory_update_memory,
-            commands::memory::memory_forget,
-            commands::memory::memory_delete_memory,
-            commands::memory::memory_get_memory_graph,
-            commands::memory::memory_timeline,
-            commands::memory::memory_consolidate,
-            commands::memory::memory_configure_publishers,
-            commands::memory::memory_sync,
             // Claude Code auto-memory interceptor commands
             commands::claude_memory::claude_memory_start,
             commands::claude_memory::claude_memory_stop,
@@ -1499,7 +1500,32 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{InterviewLaunchPayload, parse_interview_launch_url};
+    use super::{InterviewLaunchPayload, parse_interview_launch_url, remove_legacy_memory_cache};
+
+    #[test]
+    fn legacy_memory_cache_is_removed_with_its_sidecar_files() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let files = [
+            tmp.path().join("memory_cache.db"),
+            tmp.path().join("memory_cache.db-wal"),
+            tmp.path().join("memory_cache.db-shm"),
+        ];
+        for file in &files {
+            std::fs::write(file, b"legacy").expect("seed legacy cache file");
+        }
+        let unrelated = tmp.path().join("tool_authorization.db");
+        std::fs::write(&unrelated, b"keep").expect("seed unrelated file");
+
+        remove_legacy_memory_cache(tmp.path());
+
+        for file in &files {
+            assert!(!file.exists(), "{} should be removed", file.display());
+        }
+        assert!(unrelated.exists(), "unrelated databases must be left alone");
+
+        // A second launch finds nothing to delete and must still succeed.
+        remove_legacy_memory_cache(tmp.path());
+    }
 
     /// Regression guard for #3147.
     ///

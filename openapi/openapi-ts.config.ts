@@ -9,6 +9,7 @@ export default defineConfig({
     "./openapi/openapi-seren-agent.json",
     "./openapi/openapi-seren-skills.json",
     "./openapi/openapi-seren-bounty.json",
+    "./openapi/openapi-seren-memory.json",
   ],
   output: [
     {
@@ -31,6 +32,9 @@ export default defineConfig({
     },
     {
       path: "src/api/generated/seren-bounty",
+    },
+    {
+      path: "src/api/generated/seren-memory",
     },
   ],
   plugins: [

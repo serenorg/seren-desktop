@@ -1,10 +1,10 @@
 // ABOUTME: Verifies verbatim source retention is opt-in at the memory capture choke point.
-// ABOUTME: Keeps conversation-level memory exclusion ahead of all memory-service invokes.
+// ABOUTME: Keeps conversation-level memory exclusion ahead of all memory API calls.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
-  invokeMock,
+  processConversationMock,
   authStoreMock,
   projectStoreMock,
   sourceRetentionState,
@@ -12,7 +12,7 @@ const {
 } = vi.hoisted(() => {
   const sourceRetentionState = { enabled: false };
   return {
-    invokeMock: vi.fn(),
+    processConversationMock: vi.fn(),
     authStoreMock: {
       isAuthenticated: true,
       user: { id: "user-1" },
@@ -31,8 +31,8 @@ const {
   };
 });
 
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: invokeMock,
+vi.mock("@/api/seren-memory", () => ({
+  processConversation: processConversationMock,
 }));
 
 vi.mock("@/stores/auth.store", () => ({
@@ -72,7 +72,10 @@ describe("conversation source URI", () => {
 describe("verbatim source retention", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    invokeMock.mockResolvedValue({ extracted_count: 0 });
+    processConversationMock.mockResolvedValue({
+      data: { data: {} },
+      error: undefined,
+    });
     sourceRetentionState.enabled = false;
     privacyStore.setConversationPrivacy("source-retention-off", {
       excludeMemory: false,
@@ -95,11 +98,12 @@ describe("verbatim source retention", () => {
       sourceExternalId: "desktop:conversation:off",
     });
 
-    expect(invokeMock).toHaveBeenCalledWith(
-      "memory_process_conversation",
+    expect(processConversationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        retainSource: false,
-        sourceExternalId: "desktop:conversation:off",
+        body: expect.objectContaining({
+          retain_source: false,
+          source_external_id: "desktop:conversation:off",
+        }),
       }),
     );
   });
@@ -113,11 +117,12 @@ describe("verbatim source retention", () => {
       sourceExternalId: "desktop:conversation:on",
     });
 
-    expect(invokeMock).toHaveBeenCalledWith(
-      "memory_process_conversation",
+    expect(processConversationMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        retainSource: true,
-        sourceExternalId: "desktop:conversation:on",
+        body: expect.objectContaining({
+          retain_source: true,
+          source_external_id: "desktop:conversation:on",
+        }),
       }),
     );
   });
@@ -137,9 +142,6 @@ describe("verbatim source retention", () => {
       }),
     ).resolves.toBeNull();
 
-    expect(invokeMock).not.toHaveBeenCalledWith(
-      "memory_process_conversation",
-      expect.anything(),
-    );
+    expect(processConversationMock).not.toHaveBeenCalled();
   });
 });
