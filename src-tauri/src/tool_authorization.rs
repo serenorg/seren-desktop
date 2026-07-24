@@ -1331,6 +1331,32 @@ impl ToolAuthorizationState {
         })
     }
 
+    /// Expire every pending continuation across all conversations, host-authoritative
+    /// (no resume token, like the TTL sweep in `list_pending_continuations_all`).
+    /// Called when the renderer is lost to a reload: the single webview that held
+    /// every host-minted resume token is gone, so a surviving pending block can
+    /// never be settled from the new page. Expiring it clears the stale
+    /// `waiting_for_approval` state at once instead of leaving it dangling until its
+    /// TTL. Fail-safe — it only revokes a pending approval opportunity, never grants
+    /// authority, and records an expiry (not a denial), so a later re-attempt
+    /// re-prompts. Each lapse is audited (#3193-D). Returns the count expired.
+    pub fn expire_all_pending_continuations(&self) -> Result<usize, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let expired = approval_continuation::expire_all_pending(conn, &now)?;
+            for row in &expired {
+                audit(
+                    conn,
+                    &row.conversation_id,
+                    AuditEvent::ApprovalExpired,
+                    &audit_context_for_row(row),
+                    &now,
+                );
+            }
+            Ok(expired.len())
+        })
+    }
+
     /// The newest audit rows for a conversation (lease lifecycle, approval
     /// outcomes, durable decisions). Lease expiries are refreshed first so an
     /// expired-but-unobserved lease still shows its expiry event.
@@ -2430,6 +2456,62 @@ mod tests {
             .unwrap();
         assert!(!fresh.deduplicated);
         assert_ne!(fresh.approval_id, r.approval_id);
+    }
+
+    /// A view reload orphans every live approval: the renderer that held each
+    /// resume token is gone. The host-authoritative reconciliation expires them all
+    /// — across conversations, regardless of TTL — so each task returns to `running`
+    /// at once instead of showing a stale `waiting_for_approval` until its window
+    /// lapses. It is an expiry (audited, re-promptable), never a denial, and settled
+    /// rows are untouched.
+    #[test]
+    fn reload_reconciliation_expires_all_live_pending_across_conversations() {
+        let s = state();
+        // Long TTLs: these are not overdue, so only the reload reconciliation — not
+        // the ordinary TTL sweep — can expire them.
+        s.register_continuation("conv-a", send_cap(), ContinuationScope::Linear, 3600)
+            .unwrap();
+        s.register_continuation("conv-b", shell_cap("git push"), ContinuationScope::Branch, 3600)
+            .unwrap();
+        // A previously-settled block must stay settled, not be reopened or re-expired.
+        let approved = s
+            .register_continuation("conv-a", shell_cap("cargo build"), ContinuationScope::Linear, 3600)
+            .unwrap();
+        s.resolve_continuation(&approved.approval_id, &approved.resume_token, ResolveDecision::Approve)
+            .unwrap();
+
+        assert_eq!(
+            s.task_execution_state("conv-a").unwrap(),
+            TaskExecutionState::WaitingForApproval
+        );
+        assert_eq!(
+            s.task_execution_state("conv-b").unwrap(),
+            TaskExecutionState::RunningWithBlockedActions
+        );
+
+        // Two live pending blocks (the approved one is already settled) are expired.
+        assert_eq!(s.expire_all_pending_continuations().unwrap(), 2);
+
+        // Both tasks are released; nothing blocks completion.
+        assert_eq!(
+            s.task_execution_state("conv-a").unwrap(),
+            TaskExecutionState::Running
+        );
+        assert_eq!(
+            s.task_execution_state("conv-b").unwrap(),
+            TaskExecutionState::Running
+        );
+        let summary_a = s.resolution_summary("conv-a").unwrap();
+        assert!(summary_a.can_complete());
+        assert_eq!(summary_a.expired, 1, "the pending block was expired, not the approved one");
+        assert_eq!(summary_a.approved, 1, "a settled decision is left intact");
+
+        // The lapse is audited as an expiry (not a denial), so a later attempt re-prompts.
+        assert!(audit_events(&s, "conv-a").contains(&"approval_expired".to_string()));
+        assert!(audit_events(&s, "conv-b").contains(&"approval_expired".to_string()));
+
+        // Idempotent: nothing pending remains, so a second reconciliation is a no-op.
+        assert_eq!(s.expire_all_pending_continuations().unwrap(), 0);
     }
 
     /// An independent branch block keeps the task running-with-blocked-actions,

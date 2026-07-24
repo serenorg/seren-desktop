@@ -573,6 +573,28 @@ pub fn expire_overdue_all(conn: &Connection, now: &str) -> Result<Vec<Continuati
     Ok(overdue)
 }
 
+/// Expire every pending row across all conversations, regardless of TTL. A full
+/// renderer reload destroys the single webview that held every host-minted resume
+/// token, so a pending block that survives the reload can never be settled from
+/// the new page — it is orphaned, not merely waiting. Expiring it immediately
+/// (rather than leaving it dangling until `expire_overdue_all` reaches its TTL)
+/// clears the stale `waiting_for_approval` state at once. Like `expire_overdue_all`
+/// it returns the rows it expired so the caller can audit each lapse (#3193-D),
+/// and it moves them to `Expired` — never `Denied` — so no durable denial is
+/// recorded and a later re-attempt re-prompts.
+pub fn expire_all_pending(conn: &Connection, now: &str) -> Result<Vec<ContinuationRow>, String> {
+    let sql =
+        format!("SELECT {SELECT_COLUMNS} FROM approval_continuations WHERE state = 'pending'");
+    let pending = collect_rows(conn, &sql, [])?;
+    conn.execute(
+        "UPDATE approval_continuations SET state = 'expired', resolved_at = ?1 \
+         WHERE state = 'pending'",
+        rusqlite::params![now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(pending)
+}
+
 /// Every live pending row across all conversations, oldest first — the global
 /// approval-inbox listing. Callers expire overdue rows first.
 pub fn read_pending_all(conn: &Connection) -> Result<Vec<ContinuationRow>, String> {

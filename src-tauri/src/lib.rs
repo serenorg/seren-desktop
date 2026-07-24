@@ -741,6 +741,29 @@ pub fn run() {
                                     "[ToolResultBridge] Drained {drained} pending frontend tool call(s) on main view reload"
                                 );
                             }
+                            // The reload also orphaned every suspended approval: the
+                            // webview that held each resume token is gone, so those
+                            // continuations can never be settled from the new page.
+                            // Expire them host-side so the task returns to `running`
+                            // at once, instead of showing a stale "waiting for
+                            // approval" until its TTL (serenorg/seren-desktop#3289).
+                            // try_state: the authorization store is managed inside
+                            // setup, so at the very first page load it may not be
+                            // registered yet — reconciliation simply no-ops then,
+                            // since nothing is pending at startup anyway.
+                            if let Some(auth) = app
+                                .try_state::<tool_authorization::ToolAuthorizationState>()
+                            {
+                                match auth.expire_all_pending_continuations() {
+                                    Ok(expired) if expired > 0 => log::warn!(
+                                        "[ToolAuthorization] Expired {expired} orphaned approval continuation(s) on main view reload"
+                                    ),
+                                    Ok(_) => {}
+                                    Err(err) => log::warn!(
+                                        "[ToolAuthorization] Failed to expire orphaned continuations on reload: {err}"
+                                    ),
+                                }
+                            }
                         });
                     });
                 }
