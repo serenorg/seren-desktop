@@ -63,6 +63,7 @@ export const STEALTH_EVASIONS_DISABLE_ENV =
 export const DISABLE_PAGE_INIT_PATCH_ENV =
   "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH";
 export const CONNECT_CDP_URL_ENV = "PLAYWRIGHT_MCP_CONNECT_CDP_URL";
+export const STORAGE_STATE_PATH_ENV = "SEREN_PLAYWRIGHT_STORAGE_STATE_PATH";
 const DEFAULT_DISABLED_STEALTH_EVASIONS = [
   "iframe.contentWindow",
   "navigator.permissions",
@@ -714,11 +715,22 @@ export function getDefaultBrowserContext(b: Browser): BrowserContext {
   return defaultContext;
 }
 
+export function getConfiguredStorageStatePath(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const path = env[STORAGE_STATE_PATH_ENV]?.trim();
+  return path ? path : null;
+}
+
 export async function getContext(): Promise<BrowserContext> {
   if (!context) {
     const b = await getBrowser();
     if (browserConnectionMode === "cdp") {
-      context = getDefaultBrowserContext(b);
+      const storageStatePath = getConfiguredStorageStatePath();
+      context =
+        storageStatePath && existsSync(storageStatePath)
+          ? await b.newContext({ storageState: storageStatePath })
+          : getDefaultBrowserContext(b);
       return context;
     }
 
@@ -731,6 +743,15 @@ export async function getContext(): Promise<BrowserContext> {
     });
   }
   return context;
+}
+
+export async function persistManagedStorageState(): Promise<boolean> {
+  const storageStatePath = getConfiguredStorageStatePath();
+  if (!context || !storageStatePath) {
+    return false;
+  }
+  await context.storageState({ path: storageStatePath });
+  return true;
 }
 
 function reusablePages(ctx: BrowserContext): Page[] {
@@ -841,6 +862,7 @@ export async function selectPage(selector: PageSelector): Promise<Page> {
 }
 
 export async function closeBrowser(): Promise<void> {
+  await persistManagedStorageState();
   if (browserConnectionMode === "cdp") {
     if (browser) {
       const remoteBrowser = browser as Browser & {

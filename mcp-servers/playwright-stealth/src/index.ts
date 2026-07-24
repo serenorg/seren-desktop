@@ -7,7 +7,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { getActiveBrowserType } from "./browser.js";
+import {
+  getActiveBrowserType,
+  persistManagedStorageState,
+} from "./browser.js";
 import {
   DualStdioServerTransport,
   pingTimeoutMsFromEnv,
@@ -468,6 +471,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
 
+    await persistManagedStorageState();
     return {
       content: [
         {

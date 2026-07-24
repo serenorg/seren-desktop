@@ -10,6 +10,7 @@ import {
   createSafeStealthPlugin,
   detectDefaultBrowser,
   getConfiguredCdpUrl,
+  getConfiguredStorageStatePath,
   getDefaultBrowserContext,
   isChromiumBased,
   launchBrowserWithFallback,
@@ -51,6 +52,7 @@ const CONTROLLED_ENV_KEYS = [
   "SEREN_PLAYWRIGHT_STEALTH_EVASIONS_DISABLE",
   "SEREN_PLAYWRIGHT_DISABLE_PAGE_INIT_PATCH",
   "PLAYWRIGHT_MCP_CONNECT_CDP_URL",
+  "SEREN_PLAYWRIGHT_STORAGE_STATE_PATH",
 ] as const;
 
 const ORIGINAL_ENV = new Map(
@@ -228,6 +230,15 @@ describe("CDP attach startup mode", () => {
     expect(() => getDefaultBrowserContext(attachedBrowser as never)).toThrow(
       "Attached CDP browser has no default context",
     );
+  });
+
+  it("normalizes the managed storage state path", () => {
+    expect(
+      getConfiguredStorageStatePath({
+        SEREN_PLAYWRIGHT_STORAGE_STATE_PATH: " /tmp/browser-state.json ",
+      }),
+    ).toBe("/tmp/browser-state.json");
+    expect(getConfiguredStorageStatePath({})).toBeNull();
   });
 });
 
