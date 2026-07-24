@@ -4061,6 +4061,216 @@ mod tests {
         assert_eq!(after.prompt_kind.as_deref(), Some("one-shot"));
     }
 
+    // ---- closing E2E: the 500-call coding task under one lease (#3281) -------
+    //
+    // Slice D proved silent lease reuse at 2 calls and with hand-built command
+    // rules over cargo/pnpm/git only. It never drove the *derived* coding bundle
+    // (`derive_bundle`'s `CODING_*` defaults) across the full documented toolchain
+    // at the ceiling, and it never checked the on-disk `authorization_audit`
+    // trail. This test closes that gap deterministically against a real file-backed
+    // store (no mocks): a lease derived from the coding profile runs an entire
+    // 500-call task — cargo/pnpm/npm/node/git — as silent, budget-charged allows
+    // whose handles the transport actually redeems; the audit trail persists the
+    // full `lease_used` sequence credential-safe; and budget exhaustion produces
+    // exactly one escalation that dedups to a single request, never a prompt storm.
+
+    /// The whole documented coding toolchain, one command per `CODING_COMMAND_PROGRAMS`
+    /// entry. The `npm` command carries a secret-shaped token so the credential-safety
+    /// assertion has a real target: the audit must keep only the `npm` program token,
+    /// never this argument.
+    const CODING_TOOLCHAIN: [&str; 5] = [
+        "cargo test --manifest-path src-tauri/Cargo.toml",
+        "pnpm check",
+        "npm publish --//registry.npmjs.org/:_authToken=npm_live-DO-NOT-LEAK-abcdef",
+        "node scripts/prepare-runtime.mjs",
+        "git commit -m wip",
+    ];
+
+    #[test]
+    fn derived_coding_lease_runs_a_500_call_task_silently_on_disk_and_is_audited() {
+        let dir = std::env::temp_dir().join(format!("seren-authz-coding-{}", uuid::Uuid::new_v4()));
+        let db = dir.join("tool_authorization.db");
+        let s = ToolAuthorizationState::new(db.clone());
+
+        // The envelope is *derived* from the coding profile, not hand-built: this is
+        // the `derive_bundle` / `CODING_*` path #3281 names. The derived bundle must
+        // carry the full documented toolchain and the 500-call ceiling — anything
+        // less would silently narrow what an approved coding lease can do.
+        let bundle = capability_lease::derive_bundle(&capability_lease::BundleRequest {
+            profile: "coding".to_string(),
+            duration_secs: 4 * 3600,
+            ..Default::default()
+        });
+        let derived_programs: Vec<&str> = bundle
+            .predicates
+            .command_rules
+            .iter()
+            .map(|rule| rule.program.as_str())
+            .collect();
+        for program in ["cargo", "pnpm", "npm", "node", "git"] {
+            assert!(
+                derived_programs.contains(&program),
+                "the coding profile must derive the `{program}` toolchain rule"
+            );
+        }
+        assert_eq!(
+            bundle.budgets.max_calls,
+            Some(500),
+            "the derived coding ceiling is CODING_DEFAULT_MAX_CALLS"
+        );
+        let ceiling = bundle.budgets.max_calls.unwrap();
+
+        // The user approves the derived bundle once — the real human-grant path.
+        let lease = s
+            .grant_lease(
+                "conv-coding",
+                &bundle.label,
+                bundle.duration_secs,
+                bundle.predicates,
+                bundle.budgets,
+            )
+            .unwrap();
+
+        // Drive the whole task: `ceiling` gated shell calls cycling the full
+        // toolchain. Every one is a silent allow, and the transport redeems its
+        // minted handle for that exact command — proving each authorization is a
+        // usable dispatch, not just a decision string. Zero prompts fire.
+        for i in 0..ceiling {
+            let command = CODING_TOOLCHAIN[(i as usize) % CODING_TOOLCHAIN.len()];
+            let decision = s
+                .authorize(
+                    ToolRoute::Shell,
+                    "seren",
+                    "execute_command",
+                    "conv-coding",
+                    &cmd_ctx(command),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                decision.decision, "allow",
+                "call {i} ({command}) must run silently under the derived coding lease"
+            );
+            let handle = decision
+                .handle
+                .expect("a silent allow mints a redeemable dispatch handle");
+            let binding = binding_for_command(command);
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                &binding,
+            )
+            .unwrap();
+        }
+
+        // The budget incremented to the ceiling, one charge per gated call.
+        let charged = s
+            .list_leases("conv-coding")
+            .unwrap()
+            .into_iter()
+            .find(|l| l.id == lease.id)
+            .unwrap();
+        assert_eq!(charged.budgets.calls_used, ceiling);
+
+        // The ceiling+1 call exhausts the budget: exactly one scope-escalation, a
+        // one-shot prompt — not a silent overrun.
+        let exhausted = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-coding",
+                &cmd_ctx("cargo build --release"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(exhausted.decision, "prompt");
+        assert_eq!(exhausted.prompt_kind.as_deref(), Some("one-shot"));
+
+        // The renderer registers the blocked action as one pending request. A
+        // deduped retry of the still-blocked task adds no second request — this is
+        // what makes exhaustion a single escalation, never a prompt storm.
+        s.register_continuation(
+            "conv-coding",
+            shell_cap("cargo build --release"),
+            ContinuationScope::Linear,
+            300,
+        )
+        .unwrap();
+        s.register_continuation(
+            "conv-coding",
+            shell_cap("cargo build --release"),
+            ContinuationScope::Linear,
+            300,
+        )
+        .unwrap();
+
+        // Evidence: the on-disk audit trail. Exactly one grant, the full
+        // `lease_used` sequence (one per silent call, all keyed to the lease), and
+        // exactly one escalation — nothing else, no prompt inside the envelope.
+        let entries = s.list_audit("conv-coding", 2000).unwrap();
+        let count = |event: &str| entries.iter().filter(|e| e.event == event).count();
+        assert_eq!(count("lease_granted"), 1, "one grant");
+        assert_eq!(
+            count("lease_used"),
+            ceiling as usize,
+            "one lease_used row per silently-gated call"
+        );
+        assert_eq!(
+            count("approval_requested"),
+            1,
+            "budget exhaustion escalates exactly once — no prompt storm"
+        );
+        // Those three event kinds account for every row: no denial, no in-envelope
+        // prompt, no durable-decision fallback leaked in.
+        assert_eq!(
+            entries.len(),
+            1 + ceiling as usize + 1,
+            "the trail is exactly grant + {ceiling} uses + one escalation"
+        );
+
+        // Every lease_used row is attributed to the lease and reduced to the leading
+        // program token — the credential-safe detail the matcher keys on.
+        let mut used_programs: Vec<&str> = entries
+            .iter()
+            .filter(|e| e.event == "lease_used")
+            .map(|e| {
+                assert_eq!(e.subject_id.as_deref(), Some(lease.id.as_str()));
+                assert_eq!(e.route.as_deref(), Some("shell"));
+                e.detail.as_deref().expect("a lease_used row records its program token")
+            })
+            .collect();
+        used_programs.sort_unstable();
+        used_programs.dedup();
+        assert_eq!(
+            used_programs,
+            vec!["cargo", "git", "node", "npm", "pnpm"],
+            "the audited sequence spans the whole coding toolchain"
+        );
+
+        // Credential safety at scale: no full command line or secret-shaped argument
+        // ever reached the persisted trail, only program tokens.
+        for entry in &entries {
+            let row = serde_json::to_string(entry).unwrap();
+            assert!(
+                !row.contains("npm_live"),
+                "audit row leaked a credential-shaped argument: {row}"
+            );
+            assert!(
+                !row.contains("registry.npmjs.org"),
+                "audit row leaked a command argument: {row}"
+            );
+            assert!(
+                !row.contains("--manifest-path"),
+                "audit row leaked a command argument: {row}"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ---- standing policies (#3193-E) — headless pre-authorization -----------
 
     fn standing_policy_input(
