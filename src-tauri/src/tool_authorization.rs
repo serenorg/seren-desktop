@@ -1357,4 +1357,38 @@ mod tests {
             .unwrap();
         assert_eq!(decision.decision, "prompt");
     }
+
+    /// The `:memory:` tests above prove the SQL; this proves the headline
+    /// property that decisions are durable host-side. A grant recorded through
+    /// one state must survive a fresh state opened against the same file — the
+    /// on-disk equivalent of an app restart.
+    #[test]
+    fn decisions_survive_reopening_the_on_disk_store() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let db_path = dir.path().join("tool_authorization.db");
+
+        {
+            let first = ToolAuthorizationState::new(db_path.clone());
+            first
+                .record_decision(
+                    ToolRoute::Gateway,
+                    "new-publisher",
+                    "inspect_records",
+                    "conv-a",
+                    true,
+                )
+                .unwrap();
+        }
+        assert!(db_path.exists(), "store should be written to disk");
+
+        // A brand-new state (no shared connection) at the same path.
+        let second = ToolAuthorizationState::new(db_path);
+        let decision = second
+            .authorize(ToolRoute::Gateway, "new-publisher", "inspect_records", "conv-a", &ctx())
+            .unwrap();
+        assert_eq!(
+            decision.decision, "allow",
+            "the recorded grant must survive reopening the store"
+        );
+    }
 }
