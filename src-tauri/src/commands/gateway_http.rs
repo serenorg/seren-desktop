@@ -403,6 +403,18 @@ mod tests {
         assert!(!should_use_stored_auth(&refresh, &no_auth_headers));
     }
 
+    /// The dispatch handle is app-internal proof — it must be stripped before
+    /// the request goes on the wire, whatever its casing.
+    #[test]
+    fn auth_handle_header_never_reaches_the_wire() {
+        let mut raw = HashMap::new();
+        raw.insert("X-Seren-Auth-Handle".to_string(), "handle-1".to_string());
+        raw.insert("accept".to_string(), "application/json".to_string());
+        let headers = build_header_map(&raw).unwrap();
+        assert!(!headers.contains_key(AUTH_HANDLE_HEADER));
+        assert!(headers.contains_key("accept"));
+    }
+
     /// #3193-F: only the publisher tool-dispatch surface demands a dispatch
     /// handle; every other Gateway path is app-level API traffic.
     #[test]
