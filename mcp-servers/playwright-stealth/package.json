@@ -24,7 +24,8 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "playwright": "^1.49.1",
+    "playwright": "1.61.1",
+    "playwright-core": "1.61.1",
     "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },

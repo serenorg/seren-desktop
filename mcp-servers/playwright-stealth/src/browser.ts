@@ -46,14 +46,10 @@ const PLAYWRIGHT_BUNDLED_BROWSER_NAMES = new Set([
   "webkit",
 ]);
 
-/** Default user agents per browser engine. */
-const DEFAULT_USER_AGENTS: Record<BrowserEngine, string> = {
+/** Chromium override aligned with the bundled browser release. */
+const DEFAULT_USER_AGENTS: Partial<Record<BrowserEngine, string>> = {
   chromium:
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-  firefox:
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0",
-  webkit:
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
 };
 
 export const PLAYWRIGHT_HEADLESS_ENV = "SEREN_PLAYWRIGHT_HEADLESS";
@@ -735,8 +731,9 @@ export async function getContext(): Promise<BrowserContext> {
     }
 
     const engine = resolveBrowserName(getActiveBrowserType());
+    const userAgent = DEFAULT_USER_AGENTS[engine];
     context = await b.newContext({
-      userAgent: DEFAULT_USER_AGENTS[engine],
+      ...(userAgent ? { userAgent } : {}),
       viewport: { width: 1920, height: 1080 },
       locale: "en-US",
       timezoneId: "America/New_York",
