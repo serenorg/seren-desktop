@@ -214,8 +214,8 @@ pub const TASK_EXECUTION_STATE_EVENT: &str = "orchestrator://task-execution-stat
 /// a gate suspend/settle. Best-effort: a snapshot or emit failure is logged, never
 /// surfaced to the caller — the store mutation already succeeded and the frontend's
 /// poll is the backstop, so a missed push must not fail the command.
-pub(crate) fn emit_task_execution_state(
-    app: &AppHandle,
+pub(crate) fn emit_task_execution_state<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     state: &ToolAuthorizationState,
     conversation_id: &str,
 ) {
@@ -341,4 +341,67 @@ pub fn list_authorization_audit(
     limit: Option<u32>,
 ) -> Result<Vec<AuditEntry>, String> {
     state.list_audit(&conversation_id, limit.unwrap_or(200).min(1000))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::approval_continuation::ContinuationScope;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use tauri::Listener;
+
+    fn in_memory_state() -> ToolAuthorizationState {
+        // The store opens and schema-inits its cached connection lazily on first
+        // use, so the first `register_continuation` bootstraps the `:memory:` db.
+        ToolAuthorizationState::new(PathBuf::from(":memory:"))
+    }
+
+    fn send_cap() -> RequestedCapability {
+        RequestedCapability {
+            route: "gateway".to_string(),
+            publisher_slug: "gmail".to_string(),
+            tool_name: "post_send".to_string(),
+            operation_class: "high-risk".to_string(),
+            description: "Send email".to_string(),
+            is_destructive: false,
+            command: None,
+            host: None,
+            target: None,
+            binding: None,
+        }
+    }
+
+    /// The host broadcast reaches a real event listener with the authoritative
+    /// payload — the exact seam (event name + camelCase shape) the frontend store
+    /// subscribes to. Exercises a real mock app and the real `app.emit`, so a broken
+    /// event name or payload shape fails here rather than silently in production.
+    #[test]
+    fn emit_broadcasts_task_state_to_listeners() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+
+        let state = in_memory_state();
+        state
+            .register_continuation("conv-x", send_cap(), ContinuationScope::Linear, 300)
+            .expect("register continuation");
+
+        let (tx, rx) = mpsc::channel::<serde_json::Value>();
+        app.handle().listen(TASK_EXECUTION_STATE_EVENT, move |event| {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                let _ = tx.send(value);
+            }
+        });
+
+        emit_task_execution_state(app.handle(), &state, "conv-x");
+
+        let payload = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("a listener received the host broadcast");
+        assert_eq!(payload["conversationId"], "conv-x");
+        assert_eq!(payload["state"], "waiting_for_approval");
+        assert_eq!(payload["summary"]["unresolved"], 1);
+    }
 }
