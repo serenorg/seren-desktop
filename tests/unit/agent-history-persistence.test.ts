@@ -17,6 +17,11 @@ const agentStoreSource = readFileSync(
   "utf-8",
 );
 
+const agentRuntimeSource = readFileSync(
+  resolve("src/lib/agent/runtime.ts"),
+  "utf-8",
+);
+
 const agentChatSource = readFileSync(
   resolve("src/components/chat/AgentChat.tsx"),
   "utf-8",
@@ -297,7 +302,7 @@ describe("#2499 — agent thread transcript must fall back to durable history wh
     expect(agentStoreSource).toContain(
       "persistedMessages: Record<string, AgentMessage[]>;",
     );
-    expect(agentStoreSource).toContain("persistedMessages: {},");
+    expect(agentRuntimeSource).toContain("persistedMessages: {},");
   });
 
   it("hydratePersistedHistory loads from SQLite, respects live-session precedence, and re-reads fresh", () => {

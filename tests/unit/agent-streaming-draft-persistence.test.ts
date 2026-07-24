@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { readSource } from "./source-text";
 
 const agentStoreSource = readSource("src/stores/agent.store.ts");
+const agentRuntimeSource = readSource("src/lib/agent/runtime.ts");
 
 describe("#2333 — live assistant stream drafts are recoverable after reload", () => {
   it("flushChunkBuf checkpoints visible live assistant text to SQLite", () => {
@@ -50,7 +51,7 @@ describe("#2333 — live assistant stream drafts are recoverable after reload", 
   });
 
   it("serializes draft and final saves for the same assistant message id", () => {
-    expect(agentStoreSource).toContain(
+    expect(agentRuntimeSource).toContain(
       "const messagePersistQueues = new Map<string, Promise<void>>()",
     );
 
