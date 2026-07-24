@@ -6,8 +6,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const agentStoreSource = readFileSync(
-  resolve("src/stores/agent.store.ts"),
+const compactionSource = readFileSync(
+  resolve("src/lib/agent/compaction.ts"),
   "utf-8",
 );
 
@@ -18,15 +18,15 @@ function preservedContextBlock(): string {
   // summarization request, not a continuation request — different codepath,
   // not the bleed source. Anchor on the formatter's variable name so
   // assertions are scoped to the bug surface.
-  const start = agentStoreSource.indexOf("const preservedContext = toPreserve");
+  const start = compactionSource.indexOf("const preservedContext = toPreserve");
   if (start < 0) {
-    throw new Error("preservedContext formatter not found in agent.store.ts");
+    throw new Error("preservedContext formatter not found in compaction.ts");
   }
-  const end = agentStoreSource.indexOf("const userTurnCount", start);
+  const end = compactionSource.indexOf("/** Claude Code model IDs", start);
   if (end < 0) {
     throw new Error("could not find prepend-wrapper end");
   }
-  return agentStoreSource.slice(start, end);
+  return compactionSource.slice(start, end);
 }
 
 describe("#1941 — preserved-context format does not mimic Claude Code stream-json", () => {

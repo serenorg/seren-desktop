@@ -25,6 +25,10 @@ const agentStoreTs = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
 );
+const compactionTs = readFileSync(
+  resolve("src/lib/agent/compaction.ts"),
+  "utf-8",
+);
 const threadStoreTs = readFileSync(
   resolve("src/stores/thread.store.ts"),
   "utf-8",
@@ -149,12 +153,12 @@ describe("Gemini Agent — agent.store.ts wiring (#1471)", () => {
     // #1749: this default now lives in defaultContextWindowFor; the spawn
     // block delegates via that helper. Assert the helper still maps gemini
     // to 1M.
-    const helperStart = agentStoreTs.indexOf(
+    const helperStart = compactionTs.indexOf(
       "function defaultContextWindowFor(",
     );
     expect(helperStart, "defaultContextWindowFor must exist").toBeGreaterThan(0);
-    const helperEnd = agentStoreTs.indexOf("\n}\n", helperStart);
-    const helperBody = agentStoreTs.slice(helperStart, helperEnd);
+    const helperEnd = compactionTs.indexOf("\n}\n", helperStart);
+    const helperBody = compactionTs.slice(helperStart, helperEnd);
     expect(helperBody).toMatch(
       /agentType\s*===\s*"gemini"\)?\s*return\s*1_000_000/,
     );
