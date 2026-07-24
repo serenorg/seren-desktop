@@ -27,6 +27,7 @@ import {
   employeeApprovals,
   type OrgPendingApprovalRun,
 } from "@/services/employee-approvals";
+import { pendingApprovalCount } from "@/stores/approvals.store";
 import { authStore } from "@/stores/auth.store";
 import { employeeStore } from "@/stores/employees.store";
 import { type Thread, threadStore } from "@/stores/thread.store";
@@ -238,6 +239,17 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
 
   const pendingCountFor = (deploymentId: string): number =>
     pendingByDeployment().get(deploymentId)?.length ?? 0;
+
+  // The global inbox badge: local-gate blocks (this device) + cloud operator
+  // approvals. Stays visible wherever the sidebar is, i.e. after navigating
+  // away from the blocked thread.
+  const inboxPendingTotal = createMemo(() => {
+    let cloud = 0;
+    for (const rows of pendingByDeployment().values()) {
+      cloud += rows.length;
+    }
+    return cloud + pendingApprovalCount();
+  });
 
   const handleSelect = (id: string) => {
     threadStore.setActiveThread(null);
@@ -506,6 +518,51 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                   Persistent cloud worker
                 </div>
               </div>
+            </button>
+            <button
+              type="button"
+              class="thread-list-row group flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/40"
+              onClick={() => props.onOpenInbox?.()}
+              aria-label={`Open approval inbox${inboxPendingTotal() > 0 ? `, ${inboxPendingTotal()} pending` : ""}`}
+              data-testid="sidebar-approval-inbox"
+            >
+              <span
+                class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-border/80 text-muted-foreground/80 transition-colors duration-100 group-hover:border-primary/50 group-hover:text-primary"
+                aria-hidden="true"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M2 9.5V12a1.5 1.5 0 0 0 1.5 1.5h9A1.5 1.5 0 0 0 14 12V9.5M2 9.5h3l1 1.5h4l1-1.5h3M2 9.5l1.6-6A1.5 1.5 0 0 1 5.05 2.5h5.9a1.5 1.5 0 0 1 1.45 1l1.6 6"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="thread-list-title text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
+                  Approval inbox
+                </div>
+                <div class="thread-list-meta text-muted-foreground/70 truncate">
+                  Blocked actions awaiting you
+                </div>
+              </div>
+              <Show when={inboxPendingTotal() > 0}>
+                <span
+                  class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-800 dark:text-amber-200 text-[10.5px] font-semibold leading-none"
+                  title={`${inboxPendingTotal()} pending approval${inboxPendingTotal() === 1 ? "" : "s"}`}
+                  aria-hidden="true"
+                >
+                  {inboxPendingTotal()}
+                </span>
+              </Show>
             </button>
           </Show>
         </div>

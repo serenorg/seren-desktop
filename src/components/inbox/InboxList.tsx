@@ -11,6 +11,7 @@ import {
   Show,
   Switch,
 } from "solid-js";
+import { LocalApprovalsSection } from "@/components/approvals/LocalApprovalsSection";
 import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
 import { groupInboxEntries } from "@/components/inbox/grouping";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
@@ -393,6 +394,8 @@ export const InboxList: Component = () => {
           {actionError()}
         </div>
       </Show>
+
+      <LocalApprovalsSection />
 
       <Switch>
         <Match when={initialPage.loading}>
