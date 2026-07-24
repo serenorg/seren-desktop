@@ -732,23 +732,28 @@ impl ToolAuthorizationState {
         // UI, no prompt. The call then runs silently under that lease exactly as
         // it would under a human-granted one. Out-of-policy work still falls
         // through to the escalation below.
-        if self
-            .try_materialize_standing_policy(conversation_id, &request)?
-            .is_some()
+        //
+        // Re-evaluate the lease set unconditionally after the materialize attempt
+        // (#3296): a concurrent first-call for the same conversation may have
+        // already minted the covering lease, in which case this call's
+        // `try_materialize` returns `None` (its per-conversation+policy idempotency
+        // guard correctly refuses a second lease) yet a covering lease now exists.
+        // Gating the re-check on `try_materialize` returning `Some` would then
+        // spuriously prompt the loser of that race; re-checking regardless lets it
+        // run silently under the sibling's lease.
+        self.try_materialize_standing_policy(conversation_id, &request)?;
+        if let LeaseOutcome::Allow(lease_id) =
+            self.evaluate_and_charge_leases(conversation_id, &request)?
         {
-            if let LeaseOutcome::Allow(lease_id) =
-                self.evaluate_and_charge_leases(conversation_id, &request)?
-            {
-                let handle = self.mint_handle(
-                    conversation_id,
-                    route,
-                    publisher_slug,
-                    tool_name,
-                    &binding,
-                    Some(&lease_id),
-                )?;
-                return Ok(AuthorizationDecision::allow(class, handle));
-            }
+            let handle = self.mint_handle(
+                conversation_id,
+                route,
+                publisher_slug,
+                tool_name,
+                &binding,
+                Some(&lease_id),
+            )?;
+            return Ok(AuthorizationDecision::allow(class, handle));
         }
 
         if class == OperationClass::HighRisk {
@@ -4091,5 +4096,48 @@ mod tests {
             s.create_standing_policy(standing_policy_input("x", true, 0, LeasePredicates::default(), call_budget(1)))
                 .is_err()
         );
+    }
+
+    /// #3296 guard: when a covering auto-lease already exists for the conversation
+    /// (as a concurrent first-call would have minted) *and* a matching enabled
+    /// policy is still present, a further in-policy call runs silently under the
+    /// existing lease and mints **no** second lease — the policy hook must never
+    /// double-mint. (The pure race that motivated this — the loser of two
+    /// simultaneous first-calls — is a threading window that a single-threaded
+    /// test cannot deterministically reproduce; this pins the adjacent
+    /// no-double-mint invariant the fix relies on.)
+    #[test]
+    fn a_matching_policy_never_double_mints_over_an_existing_auto_lease() {
+        let s = state();
+        s.create_standing_policy(standing_policy_input(
+            "Unattended coding",
+            true,
+            3600,
+            command_rules(&["cargo"]),
+            call_budget(500),
+        ))
+        .unwrap();
+
+        // First in-policy call materializes exactly one lease.
+        let first = s
+            .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx("cargo build"), None)
+            .unwrap();
+        assert_eq!(first.decision, "allow");
+        let leases = s.list_leases("conv-a").unwrap();
+        assert_eq!(leases.len(), 1);
+        let lease_id = leases[0].id.clone();
+
+        // Further in-policy calls run under that same lease; the policy still
+        // matches but must not mint a second lease.
+        for command in ["cargo test", "cargo clippy", "cargo fmt"] {
+            let decision = s
+                .authorize(ToolRoute::Shell, "seren", "execute_command", "conv-a", &cmd_ctx(command), None)
+                .unwrap();
+            assert_eq!(decision.decision, "allow", "{command} runs under the existing lease");
+        }
+        let after = s.list_leases("conv-a").unwrap();
+        assert_eq!(after.len(), 1, "no second lease minted");
+        assert_eq!(after[0].id, lease_id, "same lease throughout");
+        assert_eq!(after[0].budgets.calls_used, 4, "all four calls charged one lease");
     }
 }
