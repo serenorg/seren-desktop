@@ -49,6 +49,8 @@ interface GatewayConnectionArgsResult {
 interface GatewayApprovalPrompt {
   description?: string;
   isDestructive?: boolean;
+  /** Host classification wire token (trusted-read/high-risk/unclassified). */
+  operationClass?: string;
 }
 
 /**
@@ -443,6 +445,7 @@ async function requestGatewayApproval(
         conversationStore.activeConversationId,
       description: prompt?.description ?? "Execute operation",
       isDestructive: prompt?.isDestructive ?? false,
+      operationClass: prompt?.operationClass,
       continuationId: link?.continuationId,
     });
   } catch (err) {
@@ -552,6 +555,7 @@ async function authorizeToolOperation(
     {
       description: decision.description,
       isDestructive: decision.isDestructive,
+      operationClass: decision.operationClass,
     },
     { threadId: sessionId, continuationId: registered?.approvalId },
   );

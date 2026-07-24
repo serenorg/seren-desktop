@@ -13,10 +13,16 @@ import {
   onMount,
   Show,
 } from "solid-js";
+import { ApprovalActions } from "@/components/approvals/ApprovalActions";
+import { cancelOrchestration } from "@/services/orchestrator";
 import {
   listConnectedPublishers,
   resolveOAuthProviderForPublisher,
 } from "@/services/publisher-oauth";
+import {
+  grantCapabilityLease,
+  type LeasePredicates,
+} from "@/services/tool-authorization";
 import { conversationStore } from "@/stores/conversation.store";
 import {
   formatOAuthConnectionLabel,
@@ -37,6 +43,9 @@ interface ApprovalRequest {
   threadId?: string | null;
   description: string;
   isDestructive: boolean;
+  /** Host classification wire token; decides whether a task lease must opt in
+   * to high-risk coverage for matching calls to run silently. */
+  operationClass?: string;
 }
 
 interface Provenance {
@@ -200,51 +209,153 @@ export const GatewayToolApproval: Component = () => {
     if (shouldRenderAccountChoices() && connection) {
       return `Approve & send from ${formatOAuthConnectionLabel(connection)}`;
     }
-    return "Approve";
+    return "Approve once";
   });
 
-  const handleApprove = async () => {
+  /** Emit the decision and dismiss; idempotent against double clicks. */
+  const settle = async (outcome: {
+    approved: boolean;
+    skipped?: boolean;
+  }): Promise<boolean> => {
     const req = request();
-    if (!req || isProcessing()) return;
-    if (needsConnectionChoice()) return;
+    if (!req || isProcessing()) return false;
 
     setIsProcessing(true);
-    console.log("[GatewayToolApproval] Approving operation:", req.approvalId);
-
     try {
       await emit("gateway-tool-approval-response", {
         id: req.approvalId,
-        approved: true,
-        connectionId: selectedConnection()?.id ?? null,
+        approved: outcome.approved,
+        skipped: outcome.skipped ?? false,
+        connectionId: outcome.approved
+          ? (selectedConnection()?.id ?? null)
+          : null,
       });
       setRequest(null);
       setProvenance(null);
       setSelectedConnectionId(null);
+      return true;
     } catch (err) {
-      console.error("[GatewayToolApproval] Failed to emit approval:", err);
+      console.error("[GatewayToolApproval] Failed to emit decision:", err);
       setIsProcessing(false);
+      return false;
     }
   };
 
+  const handleApprove = async () => {
+    if (needsConnectionChoice()) return;
+    console.log(
+      "[GatewayToolApproval] Approving operation:",
+      request()?.approvalId,
+    );
+    await settle({ approved: true });
+  };
+
   const handleDeny = async () => {
-    const req = request();
-    if (!req || isProcessing()) return;
+    console.log(
+      "[GatewayToolApproval] Denying operation:",
+      request()?.approvalId,
+    );
+    await settle({ approved: false });
+  };
 
-    setIsProcessing(true);
-    console.log("[GatewayToolApproval] Denying operation:", req.approvalId);
+  const handleSkip = async () => {
+    console.log(
+      "[GatewayToolApproval] Skipping operation:",
+      request()?.approvalId,
+    );
+    await settle({ approved: false, skipped: true });
+  };
 
-    try {
-      await emit("gateway-tool-approval-response", {
-        id: req.approvalId,
-        approved: false,
-      });
-      setRequest(null);
-      setProvenance(null);
-      setSelectedConnectionId(null);
-    } catch (err) {
-      console.error("[GatewayToolApproval] Failed to emit denial:", err);
-      setIsProcessing(false);
+  const handleStopTask = async () => {
+    const threadId = approvalThreadId();
+    console.log(
+      "[GatewayToolApproval] Stopping task for operation:",
+      request()?.approvalId,
+    );
+    const settled = await settle({ approved: false });
+    if (settled && threadId) {
+      try {
+        await cancelOrchestration(threadId);
+      } catch (err) {
+        console.error("[GatewayToolApproval] Failed to stop task:", err);
+      }
     }
+  };
+
+  /** The gate/lease key for this prompt — must match the executor's session id. */
+  const leaseConversationId = () =>
+    request()?.threadId ??
+    conversationStore.activeConversationId ??
+    "session-without-conversation";
+
+  /** What an approve-for-this-task lease will cover, in the user's terms. */
+  const leaseSummary = () => {
+    const req = request();
+    if (!req) return "";
+    const host = webFetchHost();
+    if (host) return `web access to ${host}`;
+    return `${req.publisherSlug} operations`;
+  };
+
+  /** For a web fetch, the lease predicate is the target host, not a publisher. */
+  const webFetchHost = (): string | null => {
+    const req = request();
+    if (!req || req.toolName !== "seren_web_fetch") return null;
+    const url = req.args.url;
+    if (typeof url !== "string") return null;
+    try {
+      return new URL(url).hostname || null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Grant a reviewed, bounded lease for this task, then approve this call. The
+   * lease mirrors what the gate evaluates: the target host for a web fetch,
+   * otherwise this publisher (scoped to the call's account/connection when it
+   * names one, and opting into high-risk coverage only when this operation
+   * already is high-risk). If the grant fails the call still proceeds as a
+   * one-shot approval — the conservative subset of the user's intent.
+   */
+  const handleApproveForTask = async (
+    durationSecs: number,
+    maxCalls: number,
+  ) => {
+    const req = request();
+    if (!req || isProcessing() || needsConnectionChoice()) return;
+
+    const host = webFetchHost();
+    const target =
+      typeof req.args.connection_id === "string"
+        ? req.args.connection_id
+        : (selectedConnection()?.id ?? undefined);
+    const predicates: LeasePredicates = host
+      ? { networkHosts: [host] }
+      : {
+          publisherOps: [
+            {
+              publisherSlug: req.publisherSlug,
+              allowHighRisk: req.operationClass === "high-risk",
+              target,
+            },
+          ],
+        };
+    try {
+      await grantCapabilityLease(
+        leaseConversationId(),
+        `Task lease: ${leaseSummary()}`,
+        durationSecs,
+        predicates,
+        { maxCalls },
+      );
+    } catch (err) {
+      console.error(
+        "[GatewayToolApproval] Failed to grant task lease; approving once:",
+        err,
+      );
+    }
+    await handleApprove();
   };
 
   const formatArgs = (args: Record<string, unknown>): string => {
@@ -496,24 +607,17 @@ export const GatewayToolApproval: Component = () => {
               </Show>
             </div>
 
-            <div class="px-6 py-4 border-t border-border flex gap-3 justify-end">
-              <button
-                type="button"
-                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-surface-1 hover:border-muted-foreground"
-                onClick={handleDeny}
-                disabled={isProcessing()}
-              >
-                Deny
-              </button>
-              <button
-                type="button"
-                class="px-6 py-2.5 text-[0.95rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-primary-foreground hover:bg-primary/85 hover:shadow-[var(--glow-primary)]"
-                onClick={handleApprove}
-                disabled={isProcessing() || needsConnectionChoice()}
-              >
-                {approveLabel()}
-              </button>
-            </div>
+            <ApprovalActions
+              isProcessing={isProcessing()}
+              approveOnceLabel={approveLabel()}
+              approveDisabled={needsConnectionChoice()}
+              leaseSummary={leaseSummary()}
+              onApproveOnce={handleApprove}
+              onApproveForTask={handleApproveForTask}
+              onDeny={handleDeny}
+              onSkip={handleSkip}
+              onStopTask={handleStopTask}
+            />
           </div>
         </div>
       )}
