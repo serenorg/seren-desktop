@@ -300,7 +300,7 @@ export const GatewayToolApproval: Component = () => {
   /** For a web fetch, the lease predicate is the target host, not a publisher. */
   const webFetchHost = (): string | null => {
     const req = request();
-    if (!req || req.toolName !== "seren_web_fetch") return null;
+    if (req?.toolName !== "seren_web_fetch") return null;
     const url = req.args.url;
     if (typeof url !== "string") return null;
     try {
