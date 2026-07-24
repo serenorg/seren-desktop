@@ -3,6 +3,7 @@
 
 import { emit, listen } from "@tauri-apps/api/event";
 import { createStore, reconcile } from "solid-js/store";
+import { postNotification } from "@/services/notifications";
 import {
   type ContinuationView,
   listPendingApprovals,
@@ -201,23 +202,10 @@ function maybeNotifyBackgrounded(pending: ContinuationView[]): void {
 }
 
 async function showApprovalNotification(): Promise<void> {
-  try {
-    if (typeof Notification === "undefined") return;
-    const title = "Approval needed";
-    const body = "Seren is waiting for your approval to continue a task.";
-    if (Notification.permission === "granted") {
-      new Notification(title, { body });
-      return;
-    }
-    if (Notification.permission !== "denied") {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        new Notification(title, { body });
-      }
-    }
-  } catch (err) {
-    console.warn("[Approvals Store] Failed to show notification:", err);
-  }
+  await postNotification(
+    "Approval needed",
+    "Seren is waiting for your approval to continue a task.",
+  );
 }
 
 /**
