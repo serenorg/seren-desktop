@@ -128,8 +128,25 @@ export const GatewayToolApproval: Component = () => {
       },
     );
 
+    // The same request can be decided from another surface (the inline
+    // timeline card or the inbox). Dismiss this dialog when its request is
+    // settled elsewhere, so a stale prompt never lingers over a decided action.
+    const unlistenResolved = await listen<{ id: string }>(
+      "gateway-tool-approval-response",
+      (event) => {
+        const req = request();
+        if (req && event.payload.id === req.approvalId) {
+          setRequest(null);
+          setProvenance(null);
+          setSelectedConnectionId(null);
+          setIsProcessing(false);
+        }
+      },
+    );
+
     onCleanup(() => {
       unlisten();
+      unlistenResolved();
     });
   });
 

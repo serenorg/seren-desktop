@@ -26,25 +26,6 @@ interface ApprovalRequestCardProps {
   view: ContinuationView;
 }
 
-const STATE_BANNERS: Record<string, { label: string; classes: string }> = {
-  approved: {
-    label: "Approved — the action ran.",
-    classes: "text-success border-success/30 bg-success/10",
-  },
-  denied: {
-    label: "Denied — the agent was told to adapt without it.",
-    classes: "text-destructive border-destructive/30 bg-destructive/10",
-  },
-  skipped: {
-    label: "Skipped — the task continued without this action.",
-    classes: "text-muted-foreground border-border bg-surface-1",
-  },
-  expired: {
-    label: "Expired — no decision arrived before the request lapsed.",
-    classes: "text-warning border-warning/30 bg-warning/10",
-  },
-};
-
 function formatElapsed(sinceIso: string, nowMs: number): string {
   const started = Date.parse(sinceIso);
   if (Number.isNaN(started)) return "";
@@ -99,10 +80,12 @@ function leaseSummaryFor(view: ContinuationView): string {
 }
 
 /**
- * One authorization-blocked action, rendered at the timeline's suspension
- * point. While the request is live in this renderer, all five decisions are
- * available inline; afterwards the card stays as the visible, auditable
- * outcome (never a hung agent, never a vanished prompt).
+ * One pending authorization-blocked action, rendered at the timeline's
+ * suspension point so a block is never a hung agent. All five decisions are
+ * available inline while the request is live in this renderer; a request from
+ * an earlier app session is shown read-only with its auto-expiry time. Once
+ * decided, the store drops the request and the settled outcome is carried by
+ * the tool-result message, the thread status, and the audit history.
  */
 export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
   props,
@@ -116,9 +99,7 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
   });
 
   const live = createMemo<LiveApprovalRequest | undefined>(() =>
-    props.view.state === "pending"
-      ? liveRequestForContinuation(props.view.approvalId)
-      : undefined,
+    liveRequestForContinuation(props.view.approvalId),
   );
 
   const cap = () => props.view.requestedCapability;
@@ -169,16 +150,11 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
     }
   };
 
-  const banner = () =>
-    props.view.state === "pending" ? null : STATE_BANNERS[props.view.state];
-
   return (
     <div class="mx-5 my-3 border border-warning/40 rounded-xl overflow-hidden bg-surface-1/60">
       <div class="px-4 py-3 flex items-center gap-2 border-b border-border bg-warning/10">
         <span class="text-[0.95rem] font-semibold text-foreground">
-          {props.view.state === "pending"
-            ? "Approval needed"
-            : "Approval request"}
+          Approval needed
         </span>
         <Show when={cap().isDestructive}>
           <span class="text-[0.75rem] font-medium text-destructive border border-destructive/40 rounded px-1.5 py-0.5">
@@ -188,11 +164,9 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
         <span class="text-[0.75rem] font-medium text-muted-foreground border border-border rounded px-1.5 py-0.5">
           {cap().operationClass}
         </span>
-        <Show when={props.view.state === "pending"}>
-          <span class="ml-auto text-[0.8rem] text-muted-foreground">
-            pending for {formatElapsed(props.view.createdAt, nowMs())}
-          </span>
-        </Show>
+        <span class="ml-auto text-[0.8rem] text-muted-foreground">
+          pending for {formatElapsed(props.view.createdAt, nowMs())}
+        </span>
       </div>
 
       <div class="px-4 py-3 flex flex-col gap-2 text-[0.9rem]">
@@ -215,7 +189,7 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
             ? "The task is paused until you decide."
             : "Unrelated work in this task is continuing while this action waits."}
         </div>
-        <Show when={props.view.state === "pending" && !live()}>
+        <Show when={!live()}>
           <div class="text-[0.85rem] text-warning">
             This request is no longer resolvable from here (it belongs to an
             earlier app session). It expires automatically at{" "}
@@ -223,16 +197,6 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
           </div>
         </Show>
       </div>
-
-      <Show when={banner()}>
-        {(state) => (
-          <div
-            class={`mx-4 mb-3 px-3 py-2 border rounded-lg text-[0.85rem] ${state().classes}`}
-          >
-            {state().label}
-          </div>
-        )}
-      </Show>
 
       <Show when={live()}>
         <ApprovalActions
