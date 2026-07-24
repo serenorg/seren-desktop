@@ -717,6 +717,33 @@ pub fn run() {
                         window_config.label
                     );
                 }
+                // A reload of the main webview (crash-recovery reload, a manual
+                // reload, or dev HMR) destroys the renderer that owns any in-flight
+                // frontend tool calls, so their results can never be submitted. Drain
+                // the tool bridge as the new page begins loading so each stranded
+                // worker await resolves with an explicit interrupted result instead
+                // of hanging forever (serenorg/seren-desktop#3287). Scoped to the main
+                // window — a secondary window's reload must not abandon main's calls —
+                // and a no-op on first load, where nothing is pending yet.
+                if window_config.label == "main" {
+                    window_builder = window_builder.on_page_load(|window, payload| {
+                        if payload.event() != tauri::webview::PageLoadEvent::Started {
+                            return;
+                        }
+                        let app = window.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let drained = app
+                                .state::<orchestrator::tool_bridge::ToolResultBridge>()
+                                .drain()
+                                .await;
+                            if drained > 0 {
+                                log::warn!(
+                                    "[ToolResultBridge] Drained {drained} pending frontend tool call(s) on main view reload"
+                                );
+                            }
+                        });
+                    });
+                }
                 window_builder.build()?;
             }
 

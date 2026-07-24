@@ -48,7 +48,35 @@ impl ToolResultBridge {
             false
         }
     }
+
+    /// Abandon every pending frontend tool call, completing each waiting worker
+    /// with an explicit interrupted result. Called when the main webview
+    /// (re)loads: the renderer that owned these calls — and any approval it was
+    /// awaiting — is gone, so `submit_tool_result` can never arrive and a worker
+    /// blocked in `execute_frontend_tool` would otherwise wait forever on a
+    /// result that will never be sent (an authorization block must never look
+    /// like a hung agent). Draining resolves each stranded await so the worker's
+    /// turn finishes with the interruption disclosed. Returns how many calls were
+    /// drained (0 on a first load, where nothing is pending).
+    pub async fn drain(&self) -> usize {
+        let mut pending = self.pending.lock().await;
+        let drained = pending.len();
+        for (_tool_call_id, tx) in pending.drain() {
+            let _ = tx.send(ToolExecutionResult {
+                content: INTERRUPTED_RESULT.to_string(),
+                is_error: true,
+            });
+        }
+        drained
+    }
 }
+
+/// The result a worker sees when its pending frontend tool call is abandoned
+/// because the renderer that owned it reloaded or crashed. Explicit so the
+/// interrupted turn discloses the interruption instead of hanging on a result
+/// that will never arrive.
+const INTERRUPTED_RESULT: &str = "Tool execution was interrupted because the app view reloaded \
+     before the result returned. The action did not complete; ask again to retry.";
 
 #[cfg(test)]
 mod tests {
@@ -91,6 +119,36 @@ mod tests {
         let result = rx.await.unwrap();
         assert_eq!(result.content, "tool failed");
         assert!(result.is_error);
+    }
+
+    #[tokio::test]
+    async fn drain_completes_stranded_awaits_instead_of_hanging() {
+        // The renderer-loss hang (#3287): a worker registers a pending frontend
+        // tool call and awaits its receiver. If the renderer never submits (a
+        // reload/crash), the sender lingers and `rx.await` would hang forever.
+        // `drain()` — invoked on the main webview's page-load — must complete the
+        // await with an explicit interrupted error so the worker's turn finishes.
+        let bridge = ToolResultBridge::new();
+        let rx_a = bridge.register("tc_a").await;
+        let rx_b = bridge.register("tc_b").await;
+
+        let drained = bridge.drain().await;
+        assert_eq!(drained, 2, "both stranded calls should be drained");
+
+        for rx in [rx_a, rx_b] {
+            let result = rx
+                .await
+                .expect("drained await resolves rather than hanging");
+            assert!(result.is_error, "an interrupted call is an error result");
+            assert!(
+                result.content.contains("reloaded"),
+                "the result discloses the view reload, got: {}",
+                result.content
+            );
+        }
+
+        // A subsequent drain is a harmless no-op (idempotent; first-load safe).
+        assert_eq!(bridge.drain().await, 0);
     }
 
     #[tokio::test]
