@@ -147,6 +147,43 @@ fn delete_agent_transcripts_best_effort(targets: &[AgentTranscriptTarget]) {
     remove_agent_transcripts(targets, claude_root.as_deref(), codex_root.as_deref());
 }
 
+/// Resolve the Claude and Codex session ids a conversation's stored
+/// `agent_session_id` points at, returned as `(claude_id, codex_id)`.
+///
+/// A standalone `claude-code`/`codex` conversation stores that one agent's raw
+/// session UUID. A paired `claude-codex` conversation stores a JSON composite
+/// (`paired-runtime.mjs` → `compositeAgentSessionId`) with separate `planner`
+/// (Claude) and `executor` (Codex) ids plus a ledger — treating that whole blob
+/// as a single UUID left BOTH legs' transcripts on disk. Each leg is `None`
+/// when it does not apply to the agent type, has no captured id, or the
+/// composite is unparseable; downstream UUID validation still gates every path.
+fn split_paired_session_ids(
+    agent_type: &str,
+    session_id: &str,
+) -> (Option<String>, Option<String>) {
+    let non_empty = |value: &str| (!value.is_empty()).then(|| value.to_string());
+    match agent_type {
+        "claude-code" => (non_empty(session_id), None),
+        "codex" => (None, non_empty(session_id)),
+        "claude-codex" => match serde_json::from_str::<PairedSessionIds>(session_id) {
+            Ok(ids) => (
+                ids.planner.filter(|id| !id.is_empty()),
+                ids.executor.filter(|id| !id.is_empty()),
+            ),
+            Err(_) => (None, None),
+        },
+        _ => (None, None),
+    }
+}
+
+/// The planner/executor session ids embedded in a paired `claude-codex`
+/// conversation's composite `agent_session_id`. The trailing ledger is ignored.
+#[derive(Deserialize)]
+struct PairedSessionIds {
+    planner: Option<String>,
+    executor: Option<String>,
+}
+
 /// Core of [`delete_agent_transcripts_best_effort`], with the Claude/Codex roots
 /// injected so it can be exercised against a real temporary filesystem. Session
 /// ids must parse as UUIDs before a path is touched, which doubles as
@@ -157,25 +194,24 @@ fn remove_agent_transcripts(
     codex_root: Option<&std::path::Path>,
 ) {
     for target in targets {
-        let uses_claude = matches!(target.agent_type.as_str(), "claude-code" | "claude-codex");
-        let uses_codex = matches!(target.agent_type.as_str(), "codex" | "claude-codex");
+        let (claude_id, codex_id) =
+            split_paired_session_ids(&target.agent_type, &target.session_id);
 
-        if uses_claude {
+        if let Some(claude_id) = claude_id {
             if let (Some(root), Some(cwd)) = (claude_root, target.agent_cwd.as_deref()) {
-                if uuid::Uuid::parse_str(&target.session_id).is_ok() {
+                if uuid::Uuid::parse_str(&claude_id).is_ok() {
                     let path = crate::claude_memory::session_jsonl_path(
                         root,
                         std::path::Path::new(cwd),
-                        &target.session_id,
+                        &claude_id,
                     );
                     remove_transcript_file(&path);
                 }
             }
         }
-        if uses_codex {
+        if let Some(codex_id) = codex_id {
             if let Some(root) = codex_root {
-                for path in crate::terminal::codex_transcripts_for_session(root, &target.session_id)
-                {
+                for path in crate::terminal::codex_transcripts_for_session(root, &codex_id) {
                     remove_transcript_file(&path);
                 }
             }
@@ -2482,6 +2518,90 @@ mod tests {
         }];
         remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
         assert!(naive_path.exists(), "non-UUID session id must be skipped");
+    }
+
+    #[test]
+    fn deleting_paired_conversation_removes_both_legs() {
+        let conn = open();
+        let planner_id = "5973b6c0-94b8-487b-a530-2aeb6098ae0e";
+        let executor_id = "11111111-2222-4333-8444-555555555555";
+        let cwd = "/work/project";
+
+        // A paired claude-codex conversation stores a JSON composite in
+        // agent_session_id (planner + executor ids + ledger), exactly as
+        // paired-runtime.mjs → compositeAgentSessionId writes it. The nested
+        // ledger even carries its own `planner`/`executor` spend objects, which
+        // must NOT be mistaken for the top-level session-id strings.
+        let composite = serde_json::json!({
+            "planner": planner_id,
+            "executor": executor_id,
+            "ledger": {
+                "version": 1,
+                "totalSpend": {
+                    "planner": { "input_tokens": 10, "output_tokens": 20 },
+                    "executor": { "input_tokens": 30, "output_tokens": 40 }
+                }
+            }
+        })
+        .to_string();
+
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type, agent_session_id, agent_cwd)
+             VALUES ('paired-convo', 't', 0, 'agent', 'claude-codex', ?1, ?2)",
+            params![composite, cwd],
+        )
+        .unwrap();
+
+        let targets =
+            collect_agent_transcript_targets(&conn, &["paired-convo".to_string()]).unwrap();
+        assert_eq!(targets.len(), 1);
+
+        // Lay down both legs where production would have written them: the Claude
+        // planner transcript keyed by the planner UUID, and the Codex executor
+        // rollout keyed by the executor UUID.
+        let claude_root = tempfile::TempDir::new().unwrap();
+        let codex_root = tempfile::TempDir::new().unwrap();
+        let claude_path = crate::claude_memory::session_jsonl_path(
+            claude_root.path(),
+            std::path::Path::new(cwd),
+            planner_id,
+        );
+        std::fs::create_dir_all(claude_path.parent().unwrap()).unwrap();
+        std::fs::write(&claude_path, b"{}").unwrap();
+
+        let codex_day = codex_root.path().join("2026").join("06").join("16");
+        std::fs::create_dir_all(&codex_day).unwrap();
+        let codex_path = codex_day.join(format!("rollout-2026-06-16T07-24-21-{executor_id}.jsonl"));
+        std::fs::write(&codex_path, b"{}").unwrap();
+
+        remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
+
+        assert!(
+            !claude_path.exists(),
+            "paired planner transcript should be deleted"
+        );
+        assert!(
+            !codex_path.exists(),
+            "paired executor rollout should be deleted"
+        );
+
+        // A malformed / legacy composite must touch no path and never panic.
+        let bad = vec![AgentTranscriptTarget {
+            agent_type: "claude-codex".to_string(),
+            session_id: "not-json".to_string(),
+            agent_cwd: Some(cwd.to_string()),
+        }];
+        std::fs::write(&claude_path, b"{}").unwrap();
+        std::fs::write(&codex_path, b"{}").unwrap();
+        remove_agent_transcripts(&bad, Some(claude_root.path()), Some(codex_root.path()));
+        assert!(
+            claude_path.exists(),
+            "unparseable composite must not delete anything"
+        );
+        assert!(
+            codex_path.exists(),
+            "unparseable composite must not delete anything"
+        );
     }
 
     #[test]
