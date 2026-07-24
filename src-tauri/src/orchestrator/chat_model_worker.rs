@@ -1242,6 +1242,12 @@ created if missing.",
     /// Check if a tool name refers to a locally-executable tool.
     /// Non-local tools (gateway__, mcp__) are routed to the frontend.
     fn is_local_tool(name: &str) -> bool {
+        // Only file tools run directly in this Rust loop; they are gated by the
+        // project-root file-access policy. Every other model-originated tool —
+        // including `seren_web_fetch` (open-world data egress) and
+        // `execute_command` — must route to the frontend so the host
+        // authorization gate mints and the transport enforces a dispatch handle
+        // (#3193-F, #3285). A directly-executed web fetch would bypass the gate.
         matches!(
             name,
             "read_file"
@@ -1251,7 +1257,6 @@ created if missing.",
                 | "list_directory"
                 | "path_exists"
                 | "create_directory"
-                | "seren_web_fetch"
         )
     }
 
@@ -3054,6 +3059,19 @@ mod tests {
             !ChatModelWorker::is_local_tool("execute_command"),
             "execute_command must not execute directly in the Rust chat loop; \
              it has to route through the frontend shell approval path"
+        );
+    }
+
+    /// #3285: open-world web egress must pass the host authorization gate. If
+    /// `seren_web_fetch` is treated as a local tool it runs directly via
+    /// `fetch_web_content`, skipping the gate — an unapproved exfiltration path.
+    /// It has to route to the frontend like `execute_command`.
+    #[test]
+    fn seren_web_fetch_routes_to_frontend_for_gate_approval() {
+        assert!(
+            !ChatModelWorker::is_local_tool("seren_web_fetch"),
+            "seren_web_fetch must not execute directly in the Rust chat loop; \
+             it has to route through the gated frontend egress path"
         );
     }
 
