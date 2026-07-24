@@ -29,6 +29,10 @@ const compactionTs = readFileSync(
   resolve("src/lib/agent/compaction.ts"),
   "utf-8",
 );
+const bootstrapContextTs = readFileSync(
+  resolve("src/lib/agent/bootstrap-context.ts"),
+  "utf-8",
+);
 const threadStoreTs = readFileSync(
   resolve("src/stores/thread.store.ts"),
   "utf-8",
@@ -140,7 +144,7 @@ describe("Gemini Agent — shared ACP client (#1471, #3084)", () => {
 describe("Gemini Agent — agent.store.ts wiring (#1471)", () => {
   it("agentDisplayName has a 'gemini' case", () => {
     // Whitespace-tolerant: case "gemini": ... return "Gemini";
-    expect(agentStoreTs).toMatch(/case\s+"gemini":\s*\n\s*return\s+"Gemini"/);
+    expect(bootstrapContextTs).toMatch(/case\s+"gemini":\s*\n\s*return\s+"Gemini"/);
   });
 
   it("CLI ensure dispatcher routes gemini to providerService.ensureGeminiCli", () => {

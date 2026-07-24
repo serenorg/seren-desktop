@@ -5,6 +5,7 @@ import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
 const agentStoreSource = readSource("src/stores/agent.store.ts");
+const bootstrapContextSource = readSource("src/lib/agent/bootstrap-context.ts");
 const agentChatSource = readSource("src/components/chat/AgentChat.tsx");
 
 const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
@@ -54,9 +55,9 @@ describe("#1805 — death-string catalog matches what runtimes emit", () => {
 
 describe("#1805 — error event handler detects mid-prompt session death", () => {
   it("matches the four substring patterns covering all three providers", () => {
-    const idx = agentStoreSource.indexOf("function isSessionDeathMessage");
+    const idx = bootstrapContextSource.indexOf("function isSessionDeathMessage");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 500);
+    const body = bootstrapContextSource.slice(idx, idx + 500);
     expect(body).toContain('message.includes("Session terminated")');
     expect(body).toContain(
       'message.includes("stopped before request completed")',
@@ -128,11 +129,11 @@ describe("#1952 — dropped-prompt recovery keeps context and replay invisible",
   });
 
   it("explicitly tells the restarted worker not to rely on a manual continue", () => {
-    const idx = agentStoreSource.indexOf(
+    const idx = bootstrapContextSource.indexOf(
       "function buildDroppedPromptRecoveryBootstrapContext",
     );
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 1800);
+    const body = bootstrapContextSource.slice(idx, idx + 1800);
     expect(body).toContain(
       "do not ask the user to type continue",
     );

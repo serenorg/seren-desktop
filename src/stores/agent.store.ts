@@ -5,6 +5,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createEffect, createRoot } from "solid-js";
 import { produce } from "solid-js/store";
 import {
+  agentDisplayName,
+  agentInitializationFailureMessage,
+  buildDroppedPromptRecoveryBootstrapContext,
+  buildForkBootstrapContext,
+  filterDroppedPromptRecoveryMessages,
+  isRecoverableDeadSessionSendFailure,
+  isSessionDeathMessage,
+  mergeRecoveryMessages,
+} from "@/lib/agent/bootstrap-context";
+import {
   applyPrunedAgentMessages,
   buildAgentCompactionPrepend,
   type CompactAgentResult,
@@ -89,6 +99,9 @@ import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 
+// Bootstrap-context helpers live in @/lib/agent/bootstrap-context.
+// Re-exported so existing importers keep the unchanged public surface.
+export { agentDisplayName } from "@/lib/agent/bootstrap-context";
 // Compaction helpers live in @/lib/agent/compaction.
 // Re-exported so existing importers keep the unchanged public surface.
 export {
@@ -1302,149 +1315,6 @@ export interface ActiveSession {
 // Agent message persistence helpers
 // ============================================================================
 
-const FORK_BOOTSTRAP_MAX_MSG_CHARS = 2_000;
-
-export function agentDisplayName(agentType?: string): string {
-  switch (agentType) {
-    case "codex":
-      return "Codex";
-    case "claude-code":
-      return "Claude Code";
-    case "gemini":
-      return "Gemini";
-    case "grok":
-      return "Grok";
-    case "claude-codex":
-      return "Claude + Codex";
-    case "lmstudio":
-      return "LM Studio";
-    default:
-      return agentType ?? "Agent";
-  }
-}
-
-function agentInitializationFailureMessage(agentType?: string): string {
-  const agentName = agentDisplayName(agentType);
-  const remediation =
-    agentType === "codex"
-      ? "Codex is installed and signed in"
-      : agentType === "gemini"
-        ? "Gemini is installed and signed in"
-        : agentType === "grok"
-          ? "Grok is installed and signed in"
-          : agentType === "lmstudio"
-            ? "LM Studio is running and reachable"
-            : agentType === "claude-codex"
-              ? "Claude Code and Codex are installed and signed in"
-              : `${agentName} is installed and authenticated`;
-
-  return `Agent session terminated before initialization completed. Check that ${remediation}.`;
-}
-
-function truncateBootstrapText(content: string): string {
-  return content.length > FORK_BOOTSTRAP_MAX_MSG_CHARS
-    ? `${content.slice(0, FORK_BOOTSTRAP_MAX_MSG_CHARS)}... [truncated]`
-    : content;
-}
-
-function formatForkBootstrapMessage(message: AgentMessage): string | null {
-  const content = message.content.trim();
-
-  switch (message.type) {
-    case "user":
-      return content ? `USER: ${truncateBootstrapText(content)}` : null;
-    case "assistant":
-      return content ? `ASSISTANT: ${truncateBootstrapText(content)}` : null;
-    case "error":
-      return content ? `SYSTEM: ${truncateBootstrapText(content)}` : null;
-    case "tool": {
-      const label = message.toolCall?.status
-        ? `TOOL (${message.toolCall.status})`
-        : "TOOL";
-      return content ? `${label}: ${truncateBootstrapText(content)}` : null;
-    }
-    case "diff": {
-      const path = message.diff?.path;
-      const summary = path ? `Modified ${path}` : content;
-      return summary ? `DIFF: ${truncateBootstrapText(summary)}` : null;
-    }
-    case "handoff":
-      return content ? `SYSTEM: ${truncateBootstrapText(content)}` : null;
-    case "thought":
-      return null;
-  }
-}
-
-function buildForkBootstrapContext(
-  session: ActiveSession,
-  messages: AgentMessage[],
-): string | null {
-  const summary = session.compactedSummary?.content.trim();
-  const transcript = messages
-    .map(formatForkBootstrapMessage)
-    .filter((line): line is string => Boolean(line))
-    .join("\n\n");
-
-  if (!summary && !transcript) {
-    return null;
-  }
-
-  const sections = [
-    "This prompt continues a forked branch of an earlier coding-agent conversation.",
-    "Treat the summary and transcript below as the authoritative history for this branch.",
-    "Anything that happened after the branch point is not part of this branch.",
-  ];
-
-  if (summary) {
-    sections.push(`Earlier summary:\n${summary}`);
-  }
-
-  if (transcript) {
-    sections.push(`Branch transcript:\n${transcript}`);
-  }
-
-  sections.push(
-    "Continue from the branch transcript's final message. Do not mention this bootstrap unless it helps answer the user.",
-  );
-
-  return sections.join("\n\n");
-}
-
-function isSessionDeathMessage(message: string): boolean {
-  return (
-    message.includes("Session terminated") ||
-    message.includes("stopped before request completed") ||
-    message.includes("stopped while prompt was active") ||
-    message.includes("Worker thread dropped")
-  );
-}
-
-function isRecoverableDeadSessionSendFailure(message: string): boolean {
-  if (message.includes("Task cancelled")) {
-    return false;
-  }
-  return (
-    message.includes("unresponsive") ||
-    message.includes("Worker thread dropped") ||
-    message.includes("not found") ||
-    message.includes("Session not initialized")
-  );
-}
-
-function filterDroppedPromptRecoveryMessages(
-  messages: AgentMessage[],
-): AgentMessage[] {
-  return messages.filter((message) => {
-    if (message.type !== "error") {
-      return true;
-    }
-    return (
-      !message.content.includes("unresponsive") &&
-      !isSessionDeathMessage(message.content)
-    );
-  });
-}
-
 function usesClaudeMemory(agentType: AgentType): boolean {
   return agentType === "claude-code" || agentType === "claude-codex";
 }
@@ -1530,60 +1400,6 @@ async function refreshClaudeMemoryMdBeforeSpawn(
       clearTimeout(timeoutId);
     }
   }
-}
-
-function mergeRecoveryMessages(
-  liveMessages: AgentMessage[],
-  persistedMessages: AgentMessage[],
-): AgentMessage[] {
-  const byId = new Map<string, AgentMessage>();
-  for (const message of persistedMessages) {
-    byId.set(message.id, message);
-  }
-  for (const message of liveMessages) {
-    byId.set(message.id, message);
-  }
-  return [...byId.values()].sort((a, b) => a.timestamp - b.timestamp);
-}
-
-function buildDroppedPromptRecoveryBootstrapContext(
-  session: ActiveSession,
-  messages: AgentMessage[],
-  reason: string,
-  persistedContext: string,
-): string | null {
-  const summary = session.compactedSummary?.content.trim();
-  const transcript = messages
-    .map(formatForkBootstrapMessage)
-    .filter((line): line is string => Boolean(line))
-    .join("\n\n");
-
-  if (!summary && !transcript && !persistedContext.trim()) {
-    return null;
-  }
-
-  const sections = [
-    "Seren Desktop restarted the coding-agent worker while a prompt was active.",
-    `Recovery reason: ${truncateBootstrapText(reason)}`,
-    "Use the recovered history below as authoritative context for the restarted worker.",
-    "The user's original prompt will be replayed automatically after this context; do not ask the user to type continue.",
-  ];
-
-  if (summary) {
-    sections.push(`Earlier summary:\n${summary}`);
-  }
-
-  if (transcript) {
-    sections.push(`Recovered transcript:\n${transcript}`);
-  } else if (persistedContext.trim()) {
-    sections.push(`Persisted transcript fallback:\n${persistedContext}`);
-  }
-
-  sections.push(
-    "Continue the interrupted task from the recovered context and the replayed prompt.",
-  );
-
-  return sections.join("\n\n");
 }
 
 async function buildDroppedPromptRecoverySnapshot(
