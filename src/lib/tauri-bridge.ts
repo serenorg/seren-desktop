@@ -1084,6 +1084,12 @@ export async function deleteConversation(id: string): Promise<void> {
   if (!invoke) {
     throw new Error("Conversation operations require Tauri runtime");
   }
+  // Mark the conversation erased before the delete so a turn's memory capture
+  // still in flight cannot re-create a retained cloud source after the delete's
+  // erase runs (#3348). Dynamic import avoids a static cycle: privacy.store
+  // imports this module.
+  const { privacyStore } = await import("@/stores/privacy.store");
+  privacyStore.markConversationErased(id);
   await invoke("delete_conversation", { id });
 }
 

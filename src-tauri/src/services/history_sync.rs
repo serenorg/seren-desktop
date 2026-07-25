@@ -199,7 +199,7 @@ pub async fn run_history_sync_once(
     let _guard = lock.lock().await;
     let sync_scope = history_sync_scope(&config);
     let excluded_conversation_ids = config.excluded_conversation_ids.clone();
-    with_remote_client(&app, &config, move |app, mut client| {
+    let result = with_remote_client(&app, &config, move |app, mut client| {
         ensure_remote_schema(&mut client)?;
 
         let backfilled = with_local_db(&app, |conn| {
@@ -228,7 +228,16 @@ pub async fn run_history_sync_once(
             conflicts,
         })
     })
-    .await
+    .await;
+
+    // A successful sync proves connectivity and auth, so drain any cloud-memory
+    // source erases queued by an earlier offline/signed-out delete (#3345). Only
+    // on success — a failed sync means the memory service is likely unreachable
+    // too, so the queue stays for the next attempt.
+    if result.is_ok() {
+        crate::commands::chat::retry_pending_memory_erases(&app).await;
+    }
+    result
 }
 
 pub async fn wipe_remote_history(
@@ -560,18 +569,18 @@ fn push_outbox(
         for item in batch {
             match push_outbox_item(app, client, &item, &excluded) {
                 Ok(PushItemOutcome::Pushed) => {
-                    clear_outbox_item(app, item.id)?;
+                    clear_outbox_item(app, &item)?;
                     mark_synced(app, &item.table_name, &item.row_id)?;
                     pushed += 1;
                     left_active_set += 1;
                 }
                 Ok(PushItemOutcome::Tombstoned) => {
-                    clear_outbox_item(app, item.id)?;
+                    clear_outbox_item(app, &item)?;
                     pushed += 1;
                     left_active_set += 1;
                 }
                 Ok(PushItemOutcome::Skipped) => {
-                    clear_outbox_item(app, item.id)?;
+                    clear_outbox_item(app, &item)?;
                     left_active_set += 1;
                 }
                 Ok(PushItemOutcome::Excluded) => {}
@@ -603,14 +612,18 @@ fn push_outbox_item(
     item: &OutboxItem,
     excluded_conversation_ids: &HashSet<String>,
 ) -> Result<PushItemOutcome, String> {
+    // A delete must always scrub whatever was previously synced, even for a
+    // conversation the user has since excluded from sync — exclusion suppresses
+    // uploads of new content, not the removal of content already on the remote
+    // (#3348). So push tombstones before the exclusion gate.
+    if item.op == "tombstone" {
+        push_tombstone(client, item)?;
+        return Ok(PushItemOutcome::Tombstoned);
+    }
     if let Some(conversation_id) = outbox_item_conversation_id(app, item)? {
         if excluded_conversation_ids.contains(&conversation_id) {
             return Ok(PushItemOutcome::Excluded);
         }
-    }
-    if item.op == "tombstone" {
-        push_tombstone(client, item)?;
-        return Ok(PushItemOutcome::Tombstoned);
     }
 
     let pushed_row = match item.table_name.as_str() {
@@ -749,9 +762,18 @@ fn read_outbox_batch(conn: &Connection) -> rusqlite::Result<Vec<OutboxItem>> {
     .collect()
 }
 
-fn clear_outbox_item(app: &AppHandle, id: i64) -> Result<(), String> {
+fn clear_outbox_item(app: &AppHandle, item: &OutboxItem) -> Result<(), String> {
     with_local_db(app, |conn| {
-        conn.execute("DELETE FROM sync_outbox WHERE id = ?1", params![id])?;
+        // Clear only the exact row-version we pushed. A delete that ran during
+        // the push flips this row to `op = tombstone` with a new `enqueued_at`
+        // (ON CONFLICT reuses the same id); an unconditional delete-by-id would
+        // then drop that fresh tombstone and the remote copy would survive the
+        // local delete. The `op`/`enqueued_at` guard leaves a flipped row in the
+        // outbox to be pushed on the next round (#3345).
+        conn.execute(
+            "DELETE FROM sync_outbox WHERE id = ?1 AND op = ?2 AND enqueued_at = ?3",
+            params![item.id, item.op, item.enqueued_at],
+        )?;
         Ok(())
     })
 }

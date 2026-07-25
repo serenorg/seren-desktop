@@ -1374,6 +1374,19 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     setup_provider_runtime_schema(conn)?;
     setup_happy_provider_session_lifecycle_schema(conn)?;
 
+    // Durable queue for retained cloud-memory sources whose erase has not yet
+    // been confirmed. A conversation delete enqueues its source URI here and
+    // removes it once the memory service confirms the erase; a delete made while
+    // offline or signed out therefore retries on the next sync instead of
+    // leaking the retained transcript forever (#3345).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS pending_memory_source_erase (
+            source_uri TEXT PRIMARY KEY NOT NULL,
+            enqueued_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(())
 }
 
