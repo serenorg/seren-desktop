@@ -2565,15 +2565,20 @@ pub async fn clear_conversation_history(
     conversation_id: String,
 ) -> Result<(), String> {
     let index_id = conversation_id.clone();
-    run_db(app.clone(), move |conn| {
+    let transcript_targets = run_db(app.clone(), move |conn| {
+        // Capture the on-disk CLI transcript targets before the clear so the raw
+        // ~/.claude|.codex transcript is removed too, matching delete (#3348);
+        // otherwise "Clear history" leaves the full verbatim transcript on disk.
+        let targets = collect_agent_transcript_targets(conn, std::slice::from_ref(&conversation_id))?;
         clear_conversation_history_records(conn, &conversation_id)?;
         // Reclaim and zero the freed pages so the cleared messages don't linger
         // in the chat.db file, matching the per-conversation delete and
         // erase-all paths.
         vacuum_database(conn)?;
-        Ok(())
+        Ok(targets)
     })
     .await?;
+    delete_agent_transcripts_best_effort(&transcript_targets);
     delete_conversation_index_best_effort(&app, &index_id);
     vacuum_conversation_index_best_effort(&app);
     // Cascade the cloud-memory retained-source erasure so clearing a

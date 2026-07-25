@@ -52,6 +52,7 @@ import { chatStore } from "@/stores/chat.store";
 import { cryptoWalletStore } from "@/stores/crypto-wallet.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { resetAllKeybindings } from "@/stores/keybindings.store";
+import { privacyStore } from "@/stores/privacy.store";
 import { providerStore } from "@/stores/provider.store";
 import {
   mcpSettings,
@@ -305,6 +306,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     stopHistorySync();
     try {
       const reports = await eraseAllConversationData();
+      // Drop the renderer-side privacy.json entries (per-conversation flags and
+      // free-text counsel direction) so identifying data does not survive the
+      // erase-all (#3348).
+      await privacyStore.clearAll();
       setEraseAllReports(reports);
       setEraseAllConfirm("");
       setHistorySyncSummary(null);
