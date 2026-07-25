@@ -21,6 +21,7 @@ import {
 } from "@/services/publisher-oauth";
 import {
   grantCapabilityLease,
+  type LeaseBudgets,
   type LeasePredicates,
 } from "@/services/tool-authorization";
 import { conversationStore } from "@/stores/conversation.store";
@@ -337,7 +338,7 @@ export const GatewayToolApproval: Component = () => {
    */
   const handleApproveForTask = async (
     durationSecs: number,
-    maxCalls: number,
+    budgets: LeaseBudgets,
   ) => {
     const req = request();
     if (!req || isProcessing() || needsConnectionChoice()) return;
@@ -364,7 +365,7 @@ export const GatewayToolApproval: Component = () => {
         `Task lease: ${leaseSummary()}`,
         durationSecs,
         predicates,
-        { maxCalls },
+        budgets,
       );
     } catch (err) {
       console.error(

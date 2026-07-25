@@ -14,6 +14,7 @@ import { cancelOrchestration } from "@/services/orchestrator";
 import {
   type ContinuationView,
   grantCapabilityLease,
+  type LeaseBudgets,
   type LeasePredicates,
 } from "@/services/tool-authorization";
 import {
@@ -117,7 +118,7 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
 
   const handleApproveForTask = async (
     durationSecs: number,
-    maxCalls: number,
+    budgets: LeaseBudgets,
   ) => {
     const request = live();
     if (!request || isProcessing()) return;
@@ -129,7 +130,7 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
           `Task lease: ${leaseSummaryFor(props.view)}`,
           durationSecs,
           predicates,
-          { maxCalls },
+          budgets,
         );
       } catch (err) {
         console.error(
@@ -204,8 +205,8 @@ export const ApprovalRequestCard: Component<ApprovalRequestCardProps> = (
           approveOnceLabel="Approve once"
           leaseSummary={leaseSummaryFor(props.view)}
           onApproveOnce={() => void respond({ approved: true })}
-          onApproveForTask={(durationSecs, maxCalls) =>
-            void handleApproveForTask(durationSecs, maxCalls)
+          onApproveForTask={(durationSecs, budgets) =>
+            void handleApproveForTask(durationSecs, budgets)
           }
           onDeny={() => void respond({ approved: false })}
           onSkip={() => void respond({ approved: false, skipped: true })}
