@@ -1997,8 +1997,8 @@ mod tests {
             panic!("guard_completion must keep the completion event, never suppress it");
         };
         assert!(final_content.starts_with("Done."));
-        assert!(final_content.contains("still awaiting approval"));
-        assert!(final_content.contains("expired"));
+        assert!(final_content.contains("not performed"));
+        assert!(final_content.contains("1 expired"));
 
         // The invariant now holds in the store: a completed task carries no
         // unresolved required approval, and the block is terminally `expired`.

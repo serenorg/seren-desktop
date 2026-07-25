@@ -240,35 +240,67 @@ impl ResolutionSummary {
     }
 }
 
+/// Settled outcomes newly rolled up into a task's final summary — the
+/// denied / skipped / expired actions that had not yet been disclosed in an
+/// earlier completion. Each un-performed action appears in exactly one summary.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosedOutcomes {
+    pub denied: usize,
+    pub skipped: usize,
+    pub expired: usize,
+}
+
+impl DisclosedOutcomes {
+    pub fn total(&self) -> usize {
+        self.denied + self.skipped + self.expired
+    }
+}
+
 /// The outcome of settling a conversation's still-pending continuations at task
 /// completion (#3193-C, completion integrity): how many blocks this settle
-/// expired, and the resulting outcome counts — whose `unresolved` is necessarily
-/// zero, which is the invariant a completed task must hold.
+/// expired, the settled outcomes newly disclosed in this completion's summary, and
+/// the resulting counts — whose `unresolved` is necessarily zero, the invariant a
+/// completed task must hold.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompletionSettlement {
     pub newly_expired: usize,
+    pub disclosed: DisclosedOutcomes,
     pub summary: ResolutionSummary,
 }
 
 impl CompletionSettlement {
-    /// A plain-language disclosure for a task's final summary when completion
-    /// expired one or more still-pending approvals, or `None` when nothing was
-    /// pending (a clean completion is left untouched). Explicit about the lapse —
-    /// never a generic failure — so the un-performed work is disclosed rather than
-    /// hidden behind a clean-looking finish.
+    /// A plain-language disclosure for a task's final summary enumerating every
+    /// action that did not complete during the turn — denied, skipped, or expired
+    /// (including any block expired at completion) — or `None` when the turn
+    /// performed all of its approved work (a clean completion is left untouched).
+    /// Explicit about the lapse, never a generic failure, and disclosed exactly
+    /// once so a later clean completion of the same conversation stays silent.
     pub fn completion_notice(&self) -> Option<String> {
-        if self.newly_expired == 0 {
+        let d = &self.disclosed;
+        let total = d.total();
+        if total == 0 {
             return None;
         }
-        let (actions, they) = if self.newly_expired == 1 {
-            ("action", "it was")
+        let mut parts = Vec::new();
+        if d.denied > 0 {
+            parts.push(format!("{} denied", d.denied));
+        }
+        if d.skipped > 0 {
+            parts.push(format!("{} skipped", d.skipped));
+        }
+        if d.expired > 0 {
+            parts.push(format!("{} expired", d.expired));
+        }
+        let (actions, were) = if total == 1 {
+            ("action", "was")
         } else {
-            ("actions", "they were")
+            ("actions", "were")
         };
         Some(format!(
-            "\n\n_This response finished with {} {} still awaiting approval; {} marked expired and not performed._",
-            self.newly_expired, actions, they
+            "\n\n_This task finished with {total} {actions} that {were} not performed: {}._",
+            parts.join(", ")
         ))
     }
 }
@@ -300,6 +332,10 @@ pub struct ContinuationRow {
     pub created_at: String,
     pub expires_at: String,
     pub resolved_at: Option<String>,
+    /// When this settled row was first rolled up into a task's final summary, or
+    /// `None` until then. Ensures each denied/skipped/expired action is disclosed
+    /// in exactly one completion notice, never re-disclosed on a later completion.
+    pub disclosed_at: Option<String>,
 }
 
 impl ContinuationRow {
@@ -444,11 +480,19 @@ pub fn init_schema(conn: &Connection) -> Result<(), String> {
             requested_json  TEXT NOT NULL,
             created_at      TEXT NOT NULL,
             expires_at      TEXT NOT NULL,
-            resolved_at     TEXT
+            resolved_at     TEXT,
+            disclosed_at    TEXT
         )",
         [],
     )
     .map_err(|e| e.to_string())?;
+    // Backfill `disclosed_at` onto a pre-existing table (created before the final-
+    // summary roll-up). A fresh table already has the column, so the duplicate-column
+    // error is the expected no-op and is intentionally ignored.
+    let _ = conn.execute(
+        "ALTER TABLE approval_continuations ADD COLUMN disclosed_at TEXT",
+        [],
+    );
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_approval_continuations_conversation \
          ON approval_continuations(conversation_id)",
@@ -482,11 +526,12 @@ fn row_from_sql(row: &rusqlite::Row) -> rusqlite::Result<ContinuationRow> {
         created_at: row.get(7)?,
         expires_at: row.get(8)?,
         resolved_at: row.get(9)?,
+        disclosed_at: row.get(10)?,
     })
 }
 
 const SELECT_COLUMNS: &str = "approval_id, conversation_id, fingerprint, resume_token, \
-     scope, state, requested_json, created_at, expires_at, resolved_at";
+     scope, state, requested_json, created_at, expires_at, resolved_at, disclosed_at";
 
 pub fn read_continuations(
     conn: &Connection,
@@ -539,8 +584,8 @@ pub fn insert_continuation(conn: &Connection, row: &ContinuationRow) -> Result<(
     conn.execute(
         "INSERT INTO approval_continuations \
            (approval_id, conversation_id, fingerprint, resume_token, scope, state, \
-            requested_json, created_at, expires_at, resolved_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            requested_json, created_at, expires_at, resolved_at, disclosed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         rusqlite::params![
             row.approval_id,
             row.conversation_id,
@@ -552,6 +597,7 @@ pub fn insert_continuation(conn: &Connection, row: &ContinuationRow) -> Result<(
             row.created_at,
             row.expires_at,
             row.resolved_at,
+            row.disclosed_at,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -669,6 +715,54 @@ pub fn expire_pending_for_conversation(
     Ok(pending)
 }
 
+/// Roll every not-yet-disclosed settled outcome (denied / skipped / expired) of a
+/// conversation into a task's final summary: count each kind, then stamp them
+/// `disclosed_at = now` so the same lapse is never re-disclosed on a later
+/// completion of the same conversation. A pending row is never touched (it is not
+/// a settled outcome). Returns the counts newly disclosed by this call.
+pub fn disclose_settled(
+    conn: &Connection,
+    conversation_id: &str,
+    now: &str,
+) -> Result<DisclosedOutcomes, String> {
+    let mut outcomes = DisclosedOutcomes::default();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT state, COUNT(*) FROM approval_continuations \
+                 WHERE conversation_id = ?1 AND disclosed_at IS NULL \
+                   AND state IN ('denied', 'skipped', 'expired') \
+                 GROUP BY state",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(rusqlite::params![conversation_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (state, count) = row.map_err(|e| e.to_string())?;
+            let count = count.max(0) as usize;
+            match state.as_str() {
+                "denied" => outcomes.denied = count,
+                "skipped" => outcomes.skipped = count,
+                "expired" => outcomes.expired = count,
+                _ => {}
+            }
+        }
+    }
+    if outcomes.total() > 0 {
+        conn.execute(
+            "UPDATE approval_continuations SET disclosed_at = ?2 \
+             WHERE conversation_id = ?1 AND disclosed_at IS NULL \
+               AND state IN ('denied', 'skipped', 'expired')",
+            rusqlite::params![conversation_id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(outcomes)
+}
+
 /// Every live pending row across all conversations, oldest first — the global
 /// approval-inbox listing. Callers expire overdue rows first.
 pub fn read_pending_all(conn: &Connection) -> Result<Vec<ContinuationRow>, String> {
@@ -727,6 +821,7 @@ mod tests {
             created_at: "2026-07-24T00:00:00Z".to_string(),
             expires_at: "2026-07-24T00:05:00Z".to_string(),
             resolved_at: None,
+            disclosed_at: None,
         }
     }
 
