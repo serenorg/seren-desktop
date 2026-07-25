@@ -117,6 +117,14 @@ function flagsFor(id: string): ConversationPrivacy {
   );
 }
 
+// Conversations whose data has been deleted this session. A turn's memory
+// capture is fired fire-and-forget at turn end and can still be in flight when
+// the user deletes the conversation; checking this at the capture's write point
+// stops a late capture from re-creating a retained cloud source the delete just
+// erased (#3348). Bounded so it cannot grow without limit.
+const ERASED_CONVERSATION_LIMIT = 512;
+const erasedConversationIds = new Set<string>();
+
 export const privacyStore = {
   getConversationPrivacy(id: string): ConversationPrivacy {
     return flagsFor(id);
@@ -124,6 +132,19 @@ export const privacyStore = {
 
   isMemoryExcluded(id: string | null | undefined): boolean {
     return id ? flagsFor(id).privileged || flagsFor(id).excludeMemory : false;
+  },
+
+  /** Record that a conversation was deleted so an in-flight memory capture for
+   * it does not re-create a retained source after the erase (#3348). */
+  markConversationErased(id: string): void {
+    if (erasedConversationIds.size >= ERASED_CONVERSATION_LIMIT) {
+      erasedConversationIds.clear();
+    }
+    erasedConversationIds.add(id);
+  },
+
+  isConversationErased(id: string | null | undefined): boolean {
+    return id ? erasedConversationIds.has(id) : false;
   },
 
   isHistorySyncExcluded(id: string | null | undefined): boolean {

@@ -349,17 +349,103 @@ fn cloud_memory_erase_report(
     }
 }
 
-/// Fire-and-forget the retained cloud-memory source erasure so an interactive
-/// conversation delete stays responsive. The local delete has already
-/// committed; this cleans up the remote copy in the background.
+/// Erase a set of cloud-memory source URIs, removing each from the durable
+/// retry queue only once the memory service confirms its erasure. A URI that
+/// fails (offline / unauthenticated) stays queued for the next drain.
+async fn erase_and_clear_pending(
+    app: &AppHandle,
+    source_uris: Vec<String>,
+) -> MemorySourceEraseCounts {
+    let mut counts = MemorySourceEraseCounts::default();
+    if source_uris.is_empty() {
+        return counts;
+    }
+    let client = reqwest::Client::new();
+    for uri in &source_uris {
+        match erase_memory_source(app, &client, uri).await {
+            Ok(outcome) => {
+                counts.sources_deleted += outcome.sources_deleted;
+                counts.memories_deleted += outcome.memories_deleted;
+                let uri_owned = uri.clone();
+                let _ = run_db(app.clone(), move |conn| {
+                    conn.execute(
+                        "DELETE FROM pending_memory_source_erase WHERE source_uri = ?1",
+                        params![uri_owned],
+                    )?;
+                    Ok(())
+                })
+                .await;
+            }
+            Err(err) => {
+                counts.failures += 1;
+                log::warn!("[Delete] Cloud-memory source erase failed for {uri}: {err}");
+            }
+        }
+    }
+    counts
+}
+
+/// Enqueue the retained cloud-memory sources for the deleted conversations into
+/// the durable retry queue, then fire-and-forget the erase so an interactive
+/// delete stays responsive. The local delete has already committed; enqueuing
+/// first means a delete made while offline or signed out is retried on the next
+/// sync instead of leaking the retained transcript forever (#3345).
 fn spawn_memory_source_erase_best_effort(app: &AppHandle, conversation_ids: Vec<String>) {
     if conversation_ids.is_empty() {
         return;
     }
+    let source_uris: Vec<String> = conversation_ids
+        .iter()
+        .map(|id| conversation_source_uri(id))
+        .collect();
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = erase_memory_sources(&app, &conversation_ids).await;
+        let enqueue_uris = source_uris.clone();
+        let _ = run_db(app.clone(), move |conn| {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            for uri in &enqueue_uris {
+                conn.execute(
+                    "INSERT OR IGNORE INTO pending_memory_source_erase (source_uri, enqueued_at)
+                     VALUES (?1, ?2)",
+                    params![uri, now],
+                )?;
+            }
+            Ok(())
+        })
+        .await;
+        let _ = erase_and_clear_pending(&app, source_uris).await;
     });
+}
+
+/// Retry every cloud-memory source erase still queued from an earlier delete
+/// that could not reach the memory service. Called after a successful history
+/// sync (i.e. once connectivity and auth are known good). Idempotent: erasing
+/// an already-removed source is a no-op that still clears the queue entry.
+pub(crate) async fn retry_pending_memory_erases(app: &AppHandle) {
+    let pending = match run_db(app.clone(), |conn| {
+        conn.prepare("SELECT source_uri FROM pending_memory_source_erase")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()
+    })
+    .await
+    {
+        Ok(pending) => pending,
+        Err(err) => {
+            log::warn!("[Delete] Could not read pending cloud-memory erases: {err}");
+            return;
+        }
+    };
+    if pending.is_empty() {
+        return;
+    }
+    log::info!(
+        "[Delete] Retrying {} pending cloud-memory source erase(s)",
+        pending.len()
+    );
+    let _ = erase_and_clear_pending(app, pending).await;
 }
 
 /// Ids removed by the linked-meeting cascade: the meeting ids (to drop the
@@ -966,6 +1052,10 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
+    // Hold the history-sync lock so an in-flight pull cannot re-insert this
+    // conversation after we delete it locally (#3345).
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let index_id = id.clone();
     let (transcript_targets, meetings) = run_db(app.clone(), move |conn| {
         let ids = vec![id];
@@ -2457,6 +2547,14 @@ pub(crate) fn clear_conversation_history_records(
         "DELETE FROM messages WHERE conversation_id = ?1",
         params![conversation_id],
     )?;
+    // The verbatim prompts the user typed live in `input_history`, not
+    // `messages`. Clearing a conversation's history must remove them too, or the
+    // raw prompts survive a "Clear history" (#3348), matching the delete and
+    // clear-all paths.
+    tx.execute(
+        "DELETE FROM input_history WHERE conversation_id = ?1",
+        params![conversation_id],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -2538,12 +2636,23 @@ pub(crate) fn clear_all_history_records(conn: &Connection) -> rusqlite::Result<V
     conn.execute("DELETE FROM thread_skill_override_state", [])?;
     conn.execute("DELETE FROM message_events", [])?;
     conn.execute("DELETE FROM messages", [])?;
+    // Recorded meetings reference a conversation via `meetings
+    // .agent_conversation_id`, an enforced foreign key with no ON DELETE
+    // CASCADE. Clear them before the conversations or the delete aborts for any
+    // user who routed a meeting to an agent conversation (#3345), matching the
+    // erase-all path which clears meetings before the conversation delete.
+    crate::commands::audio::clear_all_meetings(conn)?;
     conn.execute("DELETE FROM conversations", [])?;
     Ok(conversation_ids)
 }
 
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
+    // Hold the history-sync lock across the local erase so an in-flight pull
+    // cannot re-insert the conversations/messages we are clearing (#3345).
+    // `run_history_sync_once` acquires the same lock.
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let conversation_ids = run_db(app.clone(), |conn| {
         let ids = clear_all_history_records(conn)?;
         // Reclaim and zero the freed pages so no cleared content lingers in the
@@ -2594,6 +2703,10 @@ pub async fn erase_all_conversation_data(
     app: AppHandle,
     authorization_state: State<'_, crate::tool_authorization::ToolAuthorizationState>,
 ) -> Result<Vec<EraseTargetReport>, String> {
+    // Hold the history-sync lock across the erase so an in-flight pull cannot
+    // resurrect erased rows locally (#3345). run_history_sync_once holds it too.
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let mut reports = Vec::new();
 
     // Local chat.db: capture each agent conversation's transcript identity
@@ -2617,6 +2730,12 @@ pub async fn erase_all_conversation_data(
         let meeting_note_ids = crate::commands::audio::collect_all_meeting_note_ids(conn)?;
         let meetings_removed = crate::commands::audio::clear_all_meetings(conn)?;
         delete_conversation_records(conn, &conversation_ids)?;
+        // Local-only metadata that outlives the conversations: archived virtual
+        // employee snapshots (names captured at delete time) and the provider
+        // session <-> conversation lifecycle links. Both hold identifying data
+        // and must not survive an "erase all" (#3348).
+        conn.execute("DELETE FROM archived_employees", [])?;
+        conn.execute("DELETE FROM happy_provider_session_lifecycle", [])?;
         vacuum_database(conn)?;
         Ok((conversation_ids, targets, meetings_removed, meeting_note_ids))
     })
@@ -2627,6 +2746,9 @@ pub async fn erase_all_conversation_data(
     let mut erased_conversation_ids: Vec<String> = Vec::new();
     // Cloud-note ids captured before deletion, erased from seren-notes below.
     let mut meeting_note_ids: Vec<String> = Vec::new();
+    // When the chat.db step fails, no ids were captured, so the cloud erases are
+    // not genuinely attempted — they must not report a false green "0 erased".
+    let chat_failed = chat_result.is_err();
     let transcript_targets = match chat_result {
         Ok((conversation_ids, targets, meetings_removed, note_ids)) => {
             meeting_note_ids = note_ids;
@@ -2650,12 +2772,17 @@ pub async fn erase_all_conversation_data(
         }
         Err(err) => {
             reports.push(EraseTargetReport::new("local_chat_db", "failed", Some(err)));
-            // The meeting purge shares the chat.db transaction path, so a chat.db
-            // failure means it did not run either — report it honestly.
+            // clear_all_meetings commits per meeting before the conversation
+            // delete, so on a chat.db failure the meeting state is uncertain —
+            // some may already be gone. Report that honestly rather than
+            // asserting either outcome (#3348).
             reports.push(EraseTargetReport::new(
                 "meeting_recordings",
                 "failed",
-                Some("chat.db erase failed; meeting recordings were not removed".to_string()),
+                Some(
+                    "chat.db erase failed; some meeting recordings may have been removed before the failure"
+                        .to_string(),
+                ),
             ));
             Vec::new()
         }
@@ -2732,8 +2859,14 @@ pub async fn erase_all_conversation_data(
     // (offline / unauthenticated memory service) the target is `failed`, not a
     // false green `ok` that implies the retained cloud transcripts are gone.
     let memory_counts = erase_memory_sources(&app, &erased_conversation_ids).await;
-    let (memory_status, memory_detail) =
-        cloud_memory_erase_report(&memory_counts, erased_conversation_ids.len());
+    let (memory_status, memory_detail) = if chat_failed {
+        (
+            "failed",
+            "chat.db erase failed; retained cloud memory sources were not attempted".to_string(),
+        )
+    } else {
+        cloud_memory_erase_report(&memory_counts, erased_conversation_ids.len())
+    };
     reports.push(EraseTargetReport::new(
         "cloud_memories",
         memory_status,
@@ -2745,7 +2878,12 @@ pub async fn erase_all_conversation_data(
     let note_total = meeting_note_ids.len();
     let note_counts =
         crate::audio::seren_notes_publish::erase_meeting_notes(&app, &meeting_note_ids).await;
-    let (notes_status, notes_detail) = if note_counts.failed == 0 {
+    let (notes_status, notes_detail) = if chat_failed {
+        (
+            "failed",
+            "chat.db erase failed; cloud meeting notes were not attempted".to_string(),
+        )
+    } else if note_counts.failed == 0 {
         (
             "ok",
             format!("{} cloud meeting note(s) erased", note_counts.deleted),

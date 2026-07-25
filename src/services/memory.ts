@@ -769,6 +769,14 @@ export async function processConversationMemory(
   ) {
     return null;
   }
+  // The conversation was deleted while this capture was in flight; retaining a
+  // source now would re-create cloud memory the delete just erased (#3348).
+  if (
+    input.conversationId &&
+    privacyStore.isConversationErased(input.conversationId)
+  ) {
+    return null;
+  }
   if (!isMemoryAvailable()) {
     return null;
   }
