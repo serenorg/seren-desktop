@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::approval_continuation::{
-    self, ContinuationRow, ContinuationScope, ContinuationState, ContinuationView,
-    RegisteredContinuation, RequestedCapability, ResolutionSummary, ResolveDecision, ResolveOutcome,
-    TaskStateSnapshot,
+    self, CompletionSettlement, ContinuationRow, ContinuationScope, ContinuationState,
+    ContinuationView, RegisteredContinuation, RequestedCapability, ResolutionSummary,
+    ResolveDecision, ResolveOutcome, TaskStateSnapshot,
 };
 use crate::authorization_audit::{self, AuditContext, AuditEntry, AuditEvent};
 use crate::capability_lease::{
@@ -1676,6 +1676,45 @@ impl ToolAuthorizationState {
         })
     }
 
+    /// Host-owned completion settlement (#3193-C, completion integrity): drive a
+    /// conversation's still-pending approvals to a terminal state at task
+    /// completion, so a completed task can never carry an unresolved required
+    /// approval. Because a worker blocks on its own linear approval before it can
+    /// emit a completion (the tool call awaits the host result), any block still
+    /// pending here is an orphan no continuation will resume; expiring it (audited)
+    /// makes `unresolved == 0` hold at completion without hard-blocking the
+    /// completion event — which would recreate the very hung agent this ticket
+    /// exists to prevent — and records an expiry, never a denial, so a later
+    /// re-attempt re-prompts. Returns the count expired by this call plus the
+    /// resulting outcome counts, so the caller can disclose the lapsed work.
+    pub fn settle_conversation_on_completion(
+        &self,
+        conversation_id: &str,
+    ) -> Result<CompletionSettlement, String> {
+        self.with_conn(|conn| {
+            let now = current_timestamp(conn)?;
+            let expired = approval_continuation::expire_pending_for_conversation(
+                conn,
+                conversation_id,
+                &now,
+            )?;
+            for row in &expired {
+                audit(
+                    conn,
+                    &row.conversation_id,
+                    AuditEvent::ApprovalExpired,
+                    &audit_context_for_row(row),
+                    &now,
+                );
+            }
+            let rows = approval_continuation::read_continuations(conn, conversation_id)?;
+            Ok(CompletionSettlement {
+                newly_expired: expired.len(),
+                summary: approval_continuation::summarize(&rows),
+            })
+        })
+    }
+
     /// Every continuation for a conversation, redacted (no resume tokens), for the
     /// inspection surface. Overdue pending blocks are expired first so the listing
     /// reflects true live state.
@@ -3085,6 +3124,50 @@ mod tests {
             TaskExecutionState::WaitingForApproval
         );
         assert!(!s.resolution_summary("conv-a").unwrap().can_complete());
+    }
+
+    /// Completion integrity is *enforced*, not merely disclosed: an approval still
+    /// pending when a task completes is an orphan no worker awaits (a worker blocks
+    /// on its own approval before it can complete), so the host settles it on
+    /// completion — expiring it, driving `unresolved` to zero so the task no longer
+    /// carries an unresolved required approval, and surfacing a disclosure of the
+    /// lapsed work. The lapse is an explicit expiry (auditable), never a durable
+    /// denial, so a later re-attempt re-prompts.
+    #[test]
+    fn completion_settles_orphaned_pending_approvals() {
+        let s = state();
+        s.register_continuation("conv-a", send_cap(), ContinuationScope::Linear, 300)
+            .unwrap();
+        // Before completion the task honestly cannot complete — one block is open.
+        assert!(!s.resolution_summary("conv-a").unwrap().can_complete());
+
+        let settlement = s.settle_conversation_on_completion("conv-a").unwrap();
+        assert_eq!(settlement.newly_expired, 1);
+        // The invariant a completed task must hold: no unresolved required approval.
+        assert_eq!(settlement.summary.unresolved, 0);
+        assert_eq!(settlement.summary.expired, 1);
+        assert!(settlement.summary.can_complete());
+        let notice = settlement
+            .completion_notice()
+            .expect("an expired-on-completion block is disclosed");
+        assert!(notice.contains("still awaiting approval"));
+        assert!(notice.contains("expired"));
+
+        // Host-owned and terminal: the store now reports the task runnable (no
+        // stranded `waiting_for_approval`), and the block is `expired`, not `denied`.
+        assert!(s.resolution_summary("conv-a").unwrap().can_complete());
+        assert_eq!(
+            s.task_execution_state("conv-a").unwrap(),
+            TaskExecutionState::Running
+        );
+        let views = s.list_continuations("conv-a").unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(views[0].state, ContinuationState::Expired);
+
+        // A clean completion (nothing pending) is left untouched — no spurious notice.
+        let clean = s.settle_conversation_on_completion("conv-a").unwrap();
+        assert_eq!(clean.newly_expired, 0);
+        assert_eq!(clean.completion_notice(), None);
     }
 
     /// The host snapshot the frontend consumes is authoritative across the whole
