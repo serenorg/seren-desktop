@@ -320,17 +320,57 @@ fn sandbox_windows_gui_dll_child_starts() {
     );
 }
 
+fn embedded_node_dir() -> Option<PathBuf> {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
+    for candidate in [
+        base.join("win32-x64").join("node"),
+        base.join("win32-x64"),
+    ] {
+        if candidate.join("node.exe").is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Run a sandboxed child to completion with a timeout. Returns the exit code, or
+/// None if it was still running at the deadline (loaded fine, blocked on stdin).
+fn run_sandboxed_to_completion(cmd: &mut Command, timeout_secs: u64) -> Option<i32> {
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("sandbox launcher starts");
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("wait on sandboxed child") {
+            return status.code();
+        }
+        if start.elapsed() >= std::time::Duration::from_secs(timeout_secs) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 /// Faithful repro of #3379: install the real claude-code CLI and run it through
-/// the restricted-token sandbox. node.exe alone runs fine sandboxed, so the
-/// STATUS_DLL_INIT_FAILED (0xC0000142) crash is specific to claude-code's own
-/// startup module graph (bundled JS + native addons). This exercises that graph.
+/// the restricted-token sandbox exactly as the provider runtime does — the full
+/// stream-json invocation, resolved through the app's EMBEDDED node. node.exe
+/// alone runs fine sandboxed, so this exercises claude-code's real startup
+/// module graph (bundled JS + native addons) under the confined token.
+///
+/// LOUD by design: a missing prerequisite panics rather than silently skipping,
+/// so a green result cannot hide a no-op (cargo hides passing-test output).
 #[test]
-fn sandbox_windows_claude_cli_starts() {
+fn sandbox_windows_claude_stream_json_starts() {
     const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502; // 0xC0000142 as i32
-    let Some(npm) = find_on_path("npm.cmd").or_else(|| find_on_path("npm.exe")) else {
-        eprintln!("npm not on PATH; skipping claude sandbox canary");
-        return;
-    };
+    let npm = find_on_path("npm.cmd")
+        .or_else(|| find_on_path("npm.exe"))
+        .expect("npm must be on PATH in Windows CI (node/pnpm build ran first)");
 
     let prefix = tempfile::tempdir().expect("claude install prefix");
     let install = Command::new(&npm)
@@ -344,13 +384,12 @@ fn sandbox_windows_claude_cli_starts() {
         .env("npm_config_prefix", prefix.path())
         .output()
         .expect("npm install runs");
-    if !install.status.success() {
-        eprintln!(
-            "npm install of claude-code failed (network?); skipping. stderr={}",
-            String::from_utf8_lossy(&install.stderr)
-        );
-        return;
-    }
+    assert!(
+        install.status.success(),
+        "npm install of claude-code failed: status={:?} stderr={}",
+        install.status,
+        String::from_utf8_lossy(&install.stderr),
+    );
     let claude_cmd = prefix.path().join("claude.cmd");
     assert!(
         claude_cmd.is_file(),
@@ -358,41 +397,47 @@ fn sandbox_windows_claude_cli_starts() {
         claude_cmd.display()
     );
 
-    // Baseline: the CLI starts fine OUTSIDE the sandbox on this runner.
-    let direct = Command::new(&claude_cmd)
-        .arg("--version")
-        .output()
-        .expect("claude --version runs");
-    assert!(
-        direct.status.success(),
-        "claude --version failed unsandboxed (bad install, not a sandbox issue): status={:?} stdout={} stderr={}",
-        direct.status,
-        String::from_utf8_lossy(&direct.stdout),
-        String::from_utf8_lossy(&direct.stderr),
-    );
+    // Resolve claude's `node` through the app's embedded runtime, matching the
+    // real spawn's PATH. Fall back to the stock node already proven to work.
+    let mut child_path = String::new();
+    if let Some(dir) = embedded_node_dir() {
+        child_path.push_str(&dir.to_string_lossy());
+        child_path.push(';');
+    }
+    if let Some(existing) = env::var_os("PATH") {
+        child_path.push_str(&existing.to_string_lossy());
+    }
 
-    // Through the restricted-token sandbox: this is where the release e2e died.
+    // The exact stream-json flag set the provider runtime passes (buildClaudeArgs).
+    let claude_args = [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--replay-user-messages",
+        "--permission-prompt-tool",
+        "stdio",
+        "--allow-dangerously-skip-permissions",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000000",
+    ];
+
     let (_root, workspace) = workspace_fixture();
     let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
-    let sandboxed = sandbox_launcher_command(&policy, &workspace, &claude_cmd)
-        .arg("--version")
-        .output()
-        .expect("sandbox launcher starts");
+    let mut cmd = sandbox_launcher_command(&policy, &workspace, &claude_cmd);
+    cmd.args(claude_args).env("PATH", &child_path);
+
+    // stdin is closed, so a healthy claude reaches EOF and exits; a loader crash
+    // exits 0xC0000142 before reading stdin. Timeout guards against a clean block.
+    let code = run_sandboxed_to_completion(&mut cmd, 90);
 
     assert_ne!(
-        sandboxed.status.code(),
+        code,
         Some(STATUS_DLL_INIT_FAILED),
-        "claude crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the restricted-token \
-         sandbox while starting fine unsandboxed (#3379). stdout={} stderr={}",
-        String::from_utf8_lossy(&sandboxed.stdout),
-        String::from_utf8_lossy(&sandboxed.stderr),
-    );
-    assert!(
-        sandboxed.status.success(),
-        "claude did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
-        sandboxed.status,
-        String::from_utf8_lossy(&sandboxed.stdout),
-        String::from_utf8_lossy(&sandboxed.stderr),
+        "claude stream-json crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the \
+         restricted-token sandbox (#3379); exit code reproduced the release-e2e crash",
     );
 }
 
