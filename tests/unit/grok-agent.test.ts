@@ -105,6 +105,9 @@ describe("Grok native ACP agent (#3084)", () => {
           arch: "x64",
           home: join(root, "home"),
           appData: "",
+          // Empty so a real /opt/homebrew/bin/grok on the dev's host cannot
+          // taint the bare-command fallback assertion.
+          systemPaths: [],
         }),
       ).toBe("grok");
     } finally {
