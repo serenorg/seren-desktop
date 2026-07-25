@@ -1210,11 +1210,21 @@ async function handleToolRequest(request: ToolExecutionRequest): Promise<void> {
     // Expected agent outcome (submitted back as an is_error result). Not reportable.
     console.warn("[orchestrator] Tool execution failed:", message);
 
-    await invoke("submit_tool_result", {
-      toolCallId: request.tool_call_id,
-      content: `Tool execution error: ${message}`,
-      isError: true,
-    });
+    // Guard the fallback submit: if it also rejects, an unhandled rejection
+    // would escape here while the worker keeps waiting on its result channel.
+    // Logging it at least surfaces the double failure instead of hiding it.
+    try {
+      await invoke("submit_tool_result", {
+        toolCallId: request.tool_call_id,
+        content: `Tool execution error: ${message}`,
+        isError: true,
+      });
+    } catch (submitError) {
+      console.error(
+        "[orchestrator] Failed to submit tool-error result; the worker may stall until Stop:",
+        submitError,
+      );
+    }
   } finally {
     activeToolRequests.delete(request.tool_call_id);
   }

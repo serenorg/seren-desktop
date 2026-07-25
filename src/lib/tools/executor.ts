@@ -566,6 +566,13 @@ async function requestGatewayApproval(
     const timeout = setTimeout(() => {
       console.log(`[Tool Executor] Approval timeout for ${approvalId}`);
       unlisten?.();
+      // Tell the UI the request expired so the modal dismisses itself instead
+      // of lingering over an action the executor has already abandoned.
+      void emit("gateway-tool-approval-response", {
+        id: approvalId,
+        approved: false,
+        expired: true,
+      });
       resolve({ approved: false, timedOut: true });
     }, GATEWAY_APPROVAL_TIMEOUT_MS);
 
@@ -929,6 +936,13 @@ async function requestShellApproval(
     const timeout = setTimeout(() => {
       console.log(`[Tool Executor] Shell approval timeout for ${approvalId}`);
       unlisten?.();
+      // Dismiss the shell approval dialog on expiry rather than leaving it open
+      // over an action the executor has already abandoned.
+      void emit("shell-command-approval-response", {
+        id: approvalId,
+        approved: false,
+        expired: true,
+      });
       resolve({ approved: false, timedOut: true });
     }, SHELL_APPROVAL_TIMEOUT_MS);
 

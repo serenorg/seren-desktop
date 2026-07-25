@@ -1,7 +1,7 @@
 // ABOUTME: Approval dialog for Gateway publisher tool operations.
 // ABOUTME: Shows operation details and requires user confirmation before execution.
 
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   type Component,
   createEffect,
@@ -113,41 +113,60 @@ export const GatewayToolApproval: Component = () => {
     async ([approvalId]) => (approvalId ? listConnectedPublishers() : []),
   );
 
-  onMount(async () => {
-    const unlisten = await listen<ApprovalRequest>(
-      "gateway-tool-approval-request",
-      (event) => {
-        console.log(
-          "[GatewayToolApproval] Received approval request:",
-          event.payload,
-        );
-        // Snapshot provenance at the moment the request arrives
-        setProvenance(deriveProvenance(conversationStore.messages));
-        setSelectedConnectionId(null);
-        setRequest(event.payload);
-        setIsProcessing(false);
-      },
-    );
+  // Register cleanup synchronously so it keeps this component's reactive owner:
+  // an onCleanup added after an `await` is ownerless and never runs, so the
+  // Tauri listeners leaked and stacked on every remount. `disposed` also cancels
+  // listeners that resolve after the component has already unmounted.
+  onMount(() => {
+    let unlisten: UnlistenFn | undefined;
+    let unlistenResolved: UnlistenFn | undefined;
+    let disposed = false;
 
-    // The same request can be decided from another surface (the inline
-    // timeline card or the inbox). Dismiss this dialog when its request is
-    // settled elsewhere, so a stale prompt never lingers over a decided action.
-    const unlistenResolved = await listen<{ id: string }>(
-      "gateway-tool-approval-response",
-      (event) => {
-        const req = request();
-        if (req && event.payload.id === req.approvalId) {
-          setRequest(null);
-          setProvenance(null);
+    void (async () => {
+      unlisten = await listen<ApprovalRequest>(
+        "gateway-tool-approval-request",
+        (event) => {
+          console.log(
+            "[GatewayToolApproval] Received approval request:",
+            event.payload,
+          );
+          // Do not swap out a request already on screen — a concurrent tool
+          // round would otherwise replace it mid-review and a click could land
+          // on the wrong request. The newer request stays decidable via the
+          // inline timeline card / approval inbox.
+          if (request()) return;
+          // Snapshot provenance at the moment the request arrives
+          setProvenance(deriveProvenance(conversationStore.messages));
           setSelectedConnectionId(null);
+          setRequest(event.payload);
           setIsProcessing(false);
-        }
-      },
-    );
+        },
+      );
+      // The same request can be decided from another surface (the inline
+      // timeline card or the inbox). Dismiss this dialog when its request is
+      // settled elsewhere, so a stale prompt never lingers over a decided action.
+      unlistenResolved = await listen<{ id: string }>(
+        "gateway-tool-approval-response",
+        (event) => {
+          const req = request();
+          if (req && event.payload.id === req.approvalId) {
+            setRequest(null);
+            setProvenance(null);
+            setSelectedConnectionId(null);
+            setIsProcessing(false);
+          }
+        },
+      );
+      if (disposed) {
+        unlisten();
+        unlistenResolved();
+      }
+    })();
 
     onCleanup(() => {
-      unlisten();
-      unlistenResolved();
+      disposed = true;
+      unlisten?.();
+      unlistenResolved?.();
     });
   });
 
