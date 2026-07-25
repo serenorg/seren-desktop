@@ -50,8 +50,15 @@ pub fn seatbelt_profile(policy: &SandboxPolicy) -> Result<String, SandboxError> 
         profile.push("(deny network*)".to_string());
     }
 
+    // Deny both read and write on the credential directories. The workspace
+    // allow-write above would otherwise leave a deny_read path that sits inside
+    // the workspace root writable (e.g. ~/.config opened as the project) — a
+    // persistence vector even when reads are blocked. Last-match-wins in SBPL,
+    // so these denials override the earlier workspace allow for these subpaths
+    // (#3347). Matches Landlock's validate_deny_read invariant.
     for path in &policy.deny_read {
         profile.push(format!("(deny file-read* (subpath {}))", sbpl_path(path)));
+        profile.push(format!("(deny file-write* (subpath {}))", sbpl_path(path)));
     }
 
     Ok(profile.join("\n"))

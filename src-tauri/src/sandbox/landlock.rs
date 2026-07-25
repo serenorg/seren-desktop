@@ -64,6 +64,11 @@ mod linux {
             // No NetPort rules are added, so every handled TCP bind/connect is denied. AccessNet
             // arrives in ABI V4 (kernel 6.7); best-effort so an older kernel drops the network
             // handle rather than failing the whole launch, matching the filesystem handling above.
+            //
+            // Landlock only governs TCP: UDP (and other L4) is not restrictable, so a
+            // network-disabled bounded session on Linux can still send UDP (e.g. DNS-based
+            // exfiltration). This is a kernel limitation, unlike macOS Seatbelt's comprehensive
+            // `(deny network*)`. Documented so the "network disabled" promise is not overread (#3347).
             ruleset = ruleset
                 .set_compatibility(CompatLevel::BestEffort)
                 .handle_access(AccessNet::from_all(ABI::V4))
@@ -157,7 +162,11 @@ mod linux {
         env::var_os("PATH")
             .into_iter()
             .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
-            .filter(|path| path.as_os_str().is_empty() || path.is_dir())
+            // Drop empty PATH components (a trailing ':' yields one). An empty
+            // path is not a real directory to grant, and it makes
+            // validate_deny_read's `starts_with` prefix-match every deny_read
+            // path, failing an otherwise-valid launch closed (#3347).
+            .filter(|path| !path.as_os_str().is_empty() && path.is_dir())
             .collect()
     }
 
