@@ -100,14 +100,31 @@ export const CapabilityLeasePanel: Component<CapabilityLeasePanelProps> = (
   const [revision, setRevision] = createSignal(0);
   const [revokingId, setRevokingId] = createSignal<string | null>(null);
 
+  // Catch fetch failures here and return empty. An un-caught rejection puts the
+  // resource in an error state, and reading it in JSX then throws during render,
+  // escalating a panel-level data failure to the app-wide recovery boundary.
   const [leases] = createResource(
     () => [props.conversationId, revision()] as const,
-    async ([conversationId]) => listCapabilityLeases(conversationId),
+    async ([conversationId]) => {
+      try {
+        return await listCapabilityLeases(conversationId);
+      } catch (err) {
+        console.error("[CapabilityLeasePanel] Failed to load leases:", err);
+        return [];
+      }
+    },
   );
 
   const [audit] = createResource(
     () => [props.conversationId, revision()] as const,
-    async ([conversationId]) => listAuthorizationAudit(conversationId, 50),
+    async ([conversationId]) => {
+      try {
+        return await listAuthorizationAudit(conversationId, 50);
+      } catch (err) {
+        console.error("[CapabilityLeasePanel] Failed to load audit:", err);
+        return [];
+      }
+    },
   );
 
   const handleRevoke = async (lease: CapabilityLease) => {

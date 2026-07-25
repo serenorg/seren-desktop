@@ -1,7 +1,7 @@
 // ABOUTME: Approval dialog for shell command execution.
 // ABOUTME: Shows the command and requires user confirmation before execution.
 
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   type Component,
   createSignal,
@@ -62,36 +62,54 @@ export const ShellApproval: Component = () => {
     }
   });
 
-  onMount(async () => {
-    const unlisten = await listen<ShellApprovalRequest>(
-      "shell-command-approval-request",
-      (event) => {
-        console.log(
-          "[ShellApproval] Received approval request:",
-          event.payload,
-        );
-        setRequest(event.payload);
-        setIsProcessing(false);
-      },
-    );
+  // Register cleanup synchronously so it keeps this component's reactive owner:
+  // an onCleanup added after an `await` is ownerless and never runs, so the
+  // Tauri listeners leaked and stacked on every remount. `disposed` also cancels
+  // listeners that resolve after the component has already unmounted.
+  onMount(() => {
+    let unlisten: UnlistenFn | undefined;
+    let unlistenResolved: UnlistenFn | undefined;
+    let disposed = false;
 
-    // The same request can be decided from another surface (the inline
-    // timeline card or the inbox). Dismiss this dialog when its request is
-    // settled elsewhere, so a stale prompt never lingers over a decided action.
-    const unlistenResolved = await listen<{ id: string }>(
-      "shell-command-approval-response",
-      (event) => {
-        const req = request();
-        if (req && event.payload.id === req.approvalId) {
-          setRequest(null);
+    void (async () => {
+      unlisten = await listen<ShellApprovalRequest>(
+        "shell-command-approval-request",
+        (event) => {
+          console.log(
+            "[ShellApproval] Received approval request:",
+            event.payload,
+          );
+          // Keep a request already on screen rather than letting a concurrent
+          // round swap it mid-review; the newer one stays decidable via the
+          // inline card / approval inbox.
+          if (request()) return;
+          setRequest(event.payload);
           setIsProcessing(false);
-        }
-      },
-    );
+        },
+      );
+      // The same request can be decided from another surface (the inline
+      // timeline card or the inbox). Dismiss this dialog when its request is
+      // settled elsewhere, so a stale prompt never lingers over a decided action.
+      unlistenResolved = await listen<{ id: string }>(
+        "shell-command-approval-response",
+        (event) => {
+          const req = request();
+          if (req && event.payload.id === req.approvalId) {
+            setRequest(null);
+            setIsProcessing(false);
+          }
+        },
+      );
+      if (disposed) {
+        unlisten();
+        unlistenResolved();
+      }
+    })();
 
     onCleanup(() => {
-      unlisten();
-      unlistenResolved();
+      disposed = true;
+      unlisten?.();
+      unlistenResolved?.();
     });
   });
 
