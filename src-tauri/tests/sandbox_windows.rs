@@ -320,6 +320,126 @@ fn sandbox_windows_gui_dll_child_starts() {
     );
 }
 
+/// Faithful repro of #3379: install the real claude-code CLI and run it through
+/// the restricted-token sandbox. node.exe alone runs fine sandboxed, so the
+/// STATUS_DLL_INIT_FAILED (0xC0000142) crash is specific to claude-code's own
+/// startup module graph (bundled JS + native addons). This exercises that graph.
+#[test]
+fn sandbox_windows_claude_cli_starts() {
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502; // 0xC0000142 as i32
+    let Some(npm) = find_on_path("npm.cmd").or_else(|| find_on_path("npm.exe")) else {
+        eprintln!("npm not on PATH; skipping claude sandbox canary");
+        return;
+    };
+
+    let prefix = tempfile::tempdir().expect("claude install prefix");
+    let install = Command::new(&npm)
+        .args([
+            "install",
+            "-g",
+            "--no-fund",
+            "--no-audit",
+            "@anthropic-ai/claude-code@latest",
+        ])
+        .env("npm_config_prefix", prefix.path())
+        .output()
+        .expect("npm install runs");
+    if !install.status.success() {
+        eprintln!(
+            "npm install of claude-code failed (network?); skipping. stderr={}",
+            String::from_utf8_lossy(&install.stderr)
+        );
+        return;
+    }
+    let claude_cmd = prefix.path().join("claude.cmd");
+    assert!(
+        claude_cmd.is_file(),
+        "claude.cmd not installed at {}",
+        claude_cmd.display()
+    );
+
+    // Baseline: the CLI starts fine OUTSIDE the sandbox on this runner.
+    let direct = Command::new(&claude_cmd)
+        .arg("--version")
+        .output()
+        .expect("claude --version runs");
+    assert!(
+        direct.status.success(),
+        "claude --version failed unsandboxed (bad install, not a sandbox issue): status={:?} stdout={} stderr={}",
+        direct.status,
+        String::from_utf8_lossy(&direct.stdout),
+        String::from_utf8_lossy(&direct.stderr),
+    );
+
+    // Through the restricted-token sandbox: this is where the release e2e died.
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+    let sandboxed = sandbox_launcher_command(&policy, &workspace, &claude_cmd)
+        .arg("--version")
+        .output()
+        .expect("sandbox launcher starts");
+
+    assert_ne!(
+        sandboxed.status.code(),
+        Some(STATUS_DLL_INIT_FAILED),
+        "claude crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the restricted-token \
+         sandbox while starting fine unsandboxed (#3379). stdout={} stderr={}",
+        String::from_utf8_lossy(&sandboxed.stdout),
+        String::from_utf8_lossy(&sandboxed.stderr),
+    );
+    assert!(
+        sandboxed.status.success(),
+        "claude did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
+        sandboxed.status,
+        String::from_utf8_lossy(&sandboxed.stdout),
+        String::from_utf8_lossy(&sandboxed.stderr),
+    );
+}
+
+/// The real spawn runs the agent through the app's EMBEDDED node (bundled as a
+/// tauri resource), not the stock node on PATH. If that specific build is the
+/// differentiator behind #3379, it crashes here while stock node passes.
+#[test]
+fn sandbox_windows_embedded_node_starts() {
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502; // 0xC0000142 as i32
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
+    let candidates = [
+        base.join("win32-x64").join("node").join("node.exe"),
+        base.join("win32-x64").join("node.exe"),
+    ];
+    let Some(embedded) = candidates.iter().find(|p| p.is_file()) else {
+        eprintln!(
+            "embedded node not staged under {}; skipping embedded-node canary",
+            base.display()
+        );
+        return;
+    };
+
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+    let output = sandbox_launcher_command(&policy, &workspace, embedded)
+        .arg("-e")
+        .arg("process.exit(0)")
+        .output()
+        .expect("sandbox launcher starts");
+
+    assert_ne!(
+        output.status.code(),
+        Some(STATUS_DLL_INIT_FAILED),
+        "EMBEDDED node crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the sandbox \
+         while stock node did not (#3379). stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        output.status.success(),
+        "embedded node did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 #[test]
 fn sandbox_windows_bad_arguments_exit_64() {
     let output = Command::new(env!("CARGO_BIN_EXE_Seren"))
