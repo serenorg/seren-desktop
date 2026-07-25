@@ -273,6 +273,53 @@ fn sandbox_windows_batch_wrapper_preserves_quoted_paths_and_arguments() {
     );
 }
 
+fn find_on_path(exe: &str) -> Option<PathBuf> {
+    env::var_os("PATH").and_then(|paths| {
+        env::split_paths(&paths)
+            .map(|dir| dir.join(exe))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// A restricted-token child that loads the GUI-subsystem DLLs (user32/gdi32,
+/// whose DllMain connects to win32k/CSRSS) must still start. node.exe statically
+/// imports them, so it reproduces the STATUS_DLL_INIT_FAILED (0xC0000142) crash
+/// claude-code hit on the release e2e (#3379). The existing canaries only spawn
+/// cmd.exe (console-only), so this loader path was never exercised.
+#[test]
+fn sandbox_windows_gui_dll_child_starts() {
+    // 0xC0000142 == 3221225794 == -1073741502 as i32 (how ExitStatus reports it).
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502;
+    let Some(node) = find_on_path("node.exe") else {
+        eprintln!("node.exe not on PATH; skipping GUI-DLL sandbox canary");
+        return;
+    };
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+
+    let output = sandbox_launcher_command(&policy, &workspace, &node)
+        .arg("-e")
+        .arg("process.exit(0)")
+        .output()
+        .expect("sandbox launcher starts");
+
+    assert_ne!(
+        output.status.code(),
+        Some(STATUS_DLL_INIT_FAILED),
+        "node crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the restricted-token \
+         sandbox: GUI DLL init was denied. stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        output.status.success(),
+        "node did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 #[test]
 fn sandbox_windows_bad_arguments_exit_64() {
     let output = Command::new(env!("CARGO_BIN_EXE_Seren"))
