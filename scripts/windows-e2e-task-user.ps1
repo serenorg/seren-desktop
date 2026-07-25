@@ -331,11 +331,16 @@ function Get-MissingAgentCredentialNames() {
   `$journeys = @(Get-ConfiguredAgentJourneys)
   `$requiresClaude = `$journeys -contains "claude-code" -or `$journeys -contains "claude-codex"
   `$requiresCodex = `$journeys -contains "codex" -or `$journeys -contains "claude-codex"
+  # A Bedrock-backed claude-code journey authenticates via the EC2 instance role
+  # (CLAUDE_CODE_USE_BEDROCK=1, set during secret hydration), so it needs no
+  # Claude login file. Codex has no Bedrock equivalent and still requires its
+  # archived credential file whenever the codex/claude-codex journeys run.
+  `$claudeViaBedrock = Convert-EnvFlag (Get-EnvValue "CLAUDE_CODE_USE_BEDROCK") `$false
   `$home = [Environment]::GetEnvironmentVariable("USERPROFILE")
   `$appData = [Environment]::GetEnvironmentVariable("APPDATA")
   `$missing = @()
 
-  if (`$requiresClaude) {
+  if (`$requiresClaude -and -not `$claudeViaBedrock) {
     `$claudePaths = @(
       (Join-Path `$home ".claude\.credentials.json"),
       (Join-Path `$home ".claude.json")
@@ -478,8 +483,13 @@ try {
     [Environment]::SetEnvironmentVariable("ANTHROPIC_MODEL", `$bedrockModel, "Process")
     [Environment]::SetEnvironmentVariable("ANTHROPIC_SMALL_FAST_MODEL", `$bedrockSmallModel, "Process")
     [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_MODEL", `$bedrockModel, "Process")
-    # Bedrock uses the AWS credential chain; no Claude login file is required.
-    [Environment]::SetEnvironmentVariable("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED", "0", "Process")
+    # Bedrock uses the AWS credential chain, so the claude-code journey needs no
+    # Claude login file — Get-MissingAgentCredentialNames skips the Claude check
+    # when CLAUDE_CODE_USE_BEDROCK is set. Codex has no Bedrock path, so we must
+    # NOT waive the overall credential requirement here: the codex/claude-codex
+    # journeys still require their archived .codex/auth.json, and blanket-forcing
+    # SEREN_E2E_AGENT_CREDENTIALS_REQUIRED=0 silently let the codex journey run
+    # uncertified across releases.
     # A brand-new profile's first claude-code run on the e2e host fetches the
     # autoupdater/telemetry/feature-gate catalog over the network at startup;
     # any of those stalling can wedge the stream-json initialize handshake on a
@@ -544,6 +554,17 @@ try {
     @{ Label = "Gemini"; Package = "@google/gemini-cli@latest"; Binary = "gemini.cmd" },
     @{ Label = "Grok"; Package = "@xai-official/grok@latest"; Binary = "grok.cmd" }
   )
+  # The installed app resolves agent CLIs from the real default npm global
+  # prefix (%APPDATA%\npm), NOT this portable toolchain Node's own dir, which is
+  # where a zip Node otherwise plants its globals. Pin the prefix to %APPDATA%\npm
+  # so the app's production resolver (resolveInstalledCodexBinary, candidate #1)
+  # finds them exactly as on a real MSI-Node user profile. Without this the box
+  # installed codex-cli 0.145.0 into the scratch Node dir, the app could not see
+  # it, and the codex journey died with "not installed in a verifiable location"
+  # while build+publish were correctly skipped (run 30159367572).
+  `$appDataNpmPrefix = Join-Path `$env:APPDATA "npm"
+  New-Item -ItemType Directory -Path `$appDataNpmPrefix -Force | Out-Null
+  `$env:npm_config_prefix = `$appDataNpmPrefix
   `$agentCliInstallArgs = @("install", "--global", "--no-audit", "--no-fund") + @(
     `$agentCliPackages | ForEach-Object { `$_.Package }
   )
