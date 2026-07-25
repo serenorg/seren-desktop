@@ -247,11 +247,23 @@ fn build_launch_spec(
 
     let home =
         dirs::home_dir().ok_or_else(|| "Could not resolve the home directory.".to_string())?;
+    // The Seatbelt and Landlock backends deny reads of the user's credential
+    // directories. The Windows restricted-token backend confines writes but
+    // cannot deny reads, so populating deny_read there only makes the launcher
+    // refuse to run (leaving Windows with no bounded sandbox at all). Ship
+    // write-confinement on Windows now; a DACL-based deny-read is tracked in
+    // serenorg/seren-desktop#3342.
+    #[cfg(not(target_os = "windows"))]
     let deny_read = CREDENTIAL_STORE_SUFFIXES
         .iter()
         .map(|suffix| home.join(suffix))
         .filter(|path| path.exists())
         .collect::<Vec<PathBuf>>();
+    #[cfg(target_os = "windows")]
+    let deny_read = {
+        let _ = &home;
+        Vec::<PathBuf>::new()
+    };
 
     let policy = SandboxPolicy::new(
         mode,
