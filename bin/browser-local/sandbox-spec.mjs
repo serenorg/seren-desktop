@@ -1,7 +1,10 @@
 // ABOUTME: Resolves a bounded session's OS sandbox launch spec from the trusted app binary.
 // ABOUTME: A provider_spawn caller can never supply or widen the spec; failure blocks the launch.
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const SPEC_ARGUMENT = "__seren-sandbox-spec";
 const SPEC_TIMEOUT_MS = 15_000;
@@ -43,7 +46,7 @@ function assertKnownSpecShape(spec) {
  * Returns null only for full-access sessions. Any other failure throws so the
  * caller fails closed instead of launching unconfined.
  */
-export function resolveSandboxLaunchSpec({
+export async function resolveSandboxLaunchSpec({
   sandboxMode,
   cwd,
   networkEnabled,
@@ -65,7 +68,10 @@ export function resolveSandboxLaunchSpec({
 
   let stdout;
   try {
-    stdout = execFileSync(
+    // Async so a slow/wedged spec build (e.g. Windows Defender scanning the
+    // signed binary on first exec) does not block the provider runtime's event
+    // loop and stall every other live session for up to the timeout (#3350).
+    ({ stdout } = await execFileAsync(
       specBinary,
       [
         SPEC_ARGUMENT,
@@ -77,11 +83,8 @@ export function resolveSandboxLaunchSpec({
         encoding: "utf8",
         timeout: SPEC_TIMEOUT_MS,
         maxBuffer: 4 * 1024 * 1024,
-        // Capture stderr instead of letting it reach the runtime's own stream;
-        // the reason belongs in the thrown error, not in an unattributed log.
-        stdio: ["ignore", "pipe", "pipe"],
       },
-    );
+    ));
   } catch (error) {
     // stderr carries the Rust builder's reason (bad mode, unresolvable root,
     // unavailable backend); surface it so the failure is diagnosable.

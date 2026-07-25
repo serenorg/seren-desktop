@@ -570,11 +570,20 @@ fn redact_provider_child_output_with_values(
     // API-key values are only shown once by the Gateway but may still be
     // echoed by a misbehaving child. This format catches the active lease even
     // when it never appears in the provider-runtime parent environment.
-    regex::Regex::new(r"seren_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+")
-        .expect("static Seren API-key pattern compiles")
+    // Compiled once, not per log line (this runs for every child stdout/stderr
+    // line): a per-line Regex::new was needless work on a hot path (#3350).
+    SEREN_API_KEY_PATTERN
         .replace_all(&redacted, "[REDACTED]")
         .into_owned()
 }
+
+/// Shape of a leased Seren API key echoed by a misbehaving child. Deliberately
+/// broad — over-redacting a benign identifier in a log is noise, never a leak.
+static SEREN_API_KEY_PATTERN: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"seren_[A-Za-z0-9_-]+_[A-Za-z0-9_-]+")
+            .expect("static Seren API-key pattern compiles")
+    });
 
 async fn wait_for_provider_runtime_with_deadline(
     config: &ProviderRuntimeConfig,

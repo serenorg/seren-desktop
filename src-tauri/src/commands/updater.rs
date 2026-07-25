@@ -254,10 +254,15 @@ pub async fn updater_pre_install_release(
     log::info!("[Updater] Pre-install shutdown released (install failed or cancelled)");
 
     if crate::commands::happy_bridge::is_enabled(&app) {
-        happy_state
-            .start(&app)
-            .await
-            .map_err(|error| format!("Failed to restart Happy bridge: {error}"))?;
+        // The guard — this command's primary job — is already released, so a
+        // Happy-bridge restart failure must not surface to the renderer as
+        // "failed to release the guard" (#3350). Log it and let the next
+        // successful update or an app restart bring the bridge back.
+        if let Err(error) = happy_state.start(&app).await {
+            log::warn!(
+                "[Updater] Guard released, but the Happy bridge did not restart: {error}"
+            );
+        }
     }
 
     Ok(())

@@ -499,12 +499,31 @@ function buildSessionStatus(session, status = session.status) {
 }
 
 async function applyAcpPermissionMode(session, mode, emit, request = sendRequest) {
-  await request(
-    session,
-    "session/set_mode",
-    { sessionId: session.agentSessionId, modeId: mode },
-    5_000,
-  );
+  try {
+    await request(
+      session,
+      "session/set_mode",
+      { sessionId: session.agentSessionId, modeId: mode },
+      5_000,
+    );
+  } catch (error) {
+    // An agent that predates ACP `session/set_mode` answers method-not-found
+    // (-32601). Degrade to best-effort for that case (older Gemini CLIs) so the
+    // desktop mode toggle still works, rather than failing every change. Any
+    // other error still propagates so a genuine Happy-restore failure is not
+    // swallowed (#3350).
+    const code = error?.code ?? error?.data?.code;
+    const message = String(error?.message ?? error ?? "");
+    const unsupported =
+      code === -32601 ||
+      /not implemented|method not found|unknown method|-32601/i.test(message);
+    if (!unsupported) {
+      throw error;
+    }
+    console.warn(
+      `[acp] session/set_mode unsupported by this agent; keeping mode locally: ${message}`,
+    );
+  }
   session.currentModeId = mode;
   emit("provider://session-status", {
     ...buildSessionStatus(session),

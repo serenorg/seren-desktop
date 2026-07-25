@@ -4,8 +4,14 @@
 import path from "node:path";
 
 const SEREN_MCP_SERVER_NAME = "seren-mcp";
-// The child receives a loopback-broker capability, never a Seren API key. The
-// name ends in _TOKEN so the provider-runtime log scrubber already covers it.
+// The child receives a loopback-broker capability, never a Seren API key. NOTE:
+// the desktop's provider-runtime log scrubber does NOT cover this value — it
+// scrubs SEREN_*_{KEY,TOKEN,SECRET} values found in the *desktop* process env,
+// but this capability is minted per-session inside the Node runtime and is a
+// bare-hex value the key-shape regex does not match. Do not rely on that
+// scrubber to redact it; a misbehaving MCP child that echoes its env would log
+// it verbatim. Node-side scrubbing of forwarded child output is tracked in
+// serenorg/seren-desktop#3350.
 const SEREN_MCP_CAPABILITY_ENV = "SEREN_MCP_CAPABILITY_TOKEN";
 
 // serenorg/seren-desktop#1883 — Claude / Codex CLIs are compiled binaries that
