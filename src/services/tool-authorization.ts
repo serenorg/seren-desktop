@@ -139,6 +139,32 @@ export interface ProposedBundle {
   budgets: LeaseBudgets;
 }
 
+/** Mirrors `BundleRequest` in `src-tauri/src/capability_lease.rs`. */
+export interface BundleRequest {
+  /** `"coding"` seeds the workspace toolchain; any other value seeds nothing. */
+  profile?: string;
+  extraCommands?: string[];
+  publisherOps?: PublisherRule[];
+  networkHosts?: string[];
+  exclusions?: LeaseExclusion[];
+  durationSecs?: number;
+  maxCalls?: number | null;
+  maxSpendMicros?: number | null;
+  asset?: string | null;
+}
+
+/**
+ * Derive a reviewable, editable capability proposal for a task profile — the
+ * host owns the toolchain definition (e.g. the coding programs), so the renderer
+ * never hard-codes it. Pure and side-effect-free: it grants nothing until a
+ * user approves the proposal via `grantCapabilityLease`.
+ */
+export async function proposeCapabilityBundle(
+  request: BundleRequest,
+): Promise<ProposedBundle> {
+  return invoke<ProposedBundle>("propose_capability_bundle", { request });
+}
+
 /** Mirrors `StandingPolicy` in `src-tauri/src/standing_policy.rs`. */
 export interface StandingPolicy {
   id: string;
