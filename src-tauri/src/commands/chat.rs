@@ -2417,31 +2417,47 @@ pub(crate) fn clear_conversation_history_records(
     conn: &Connection,
     conversation_id: &str,
 ) -> rusqlite::Result<()> {
-    let mut event_stmt =
-        conn.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
+    // One immediate transaction so the sync tombstones and the local deletes
+    // commit together or not at all. Otherwise a mid-way failure (e.g. the
+    // `messages` delete aborting on a foreign key) would leave the messages on
+    // disk while their already-committed tombstones scrub the remote copies.
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+    let mut event_stmt = tx.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
     let event_ids = event_stmt
         .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(event_stmt);
-    let mut message_stmt = conn.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
+    let mut message_stmt = tx.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
     let message_ids = message_stmt
         .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     drop(message_stmt);
     for event_id in &event_ids {
-        enqueue_sync_tombstone(conn, "message_events", event_id)?;
+        enqueue_sync_tombstone(&tx, "message_events", event_id)?;
     }
     for message_id in &message_ids {
-        enqueue_sync_tombstone(conn, "messages", message_id)?;
+        enqueue_sync_tombstone(&tx, "messages", message_id)?;
     }
-    conn.execute(
+    // `eval_signals.message_id` references `messages(id)` with no cascade, and
+    // the bundled SQLite enforces foreign keys, so the messages delete aborts
+    // if any message in this conversation carries a satisfaction signal. Clear
+    // the signals first, matching `delete_conversation_records`.
+    tx.execute(
+        "DELETE FROM eval_signals
+         WHERE message_id IN (
+             SELECT id FROM messages WHERE conversation_id = ?1
+         )",
+        params![conversation_id],
+    )?;
+    tx.execute(
         "DELETE FROM message_events WHERE conversation_id = ?1",
         params![conversation_id],
     )?;
-    conn.execute(
+    tx.execute(
         "DELETE FROM messages WHERE conversation_id = ?1",
         params![conversation_id],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -3431,6 +3447,54 @@ mod tests {
                 .any(|window| window == SURVIVOR.as_bytes()),
             "untouched conversation content must remain in the chat.db file"
         );
+    }
+
+    // A conversation whose message carries a satisfaction signal must still
+    // clear. `eval_signals.message_id` references `messages(id)` with no
+    // cascade and the bundled SQLite enforces foreign keys, so before the fix
+    // the `messages` delete aborted and the caller reported a false success
+    // while the messages stayed on disk. Real on-disk db, no mocks.
+    #[test]
+    fn clear_conversation_history_succeeds_with_a_satisfaction_signal() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("chat.db");
+        let conn = Connection::open(&db_path).unwrap();
+        configure_connection(&conn).unwrap();
+        setup_schema(&conn).unwrap();
+        assert!(
+            conn.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))
+                .unwrap()
+                == 1,
+            "the fix only matters while foreign keys are enforced"
+        );
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+             VALUES ('m1', 'c1', 'assistant', 'answer', 2)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO eval_signals (message_id, task_type, satisfaction, created_at)
+             VALUES ('m1', 'code', 1, 0)",
+            [],
+        )
+        .unwrap();
+
+        clear_conversation_history_records(&conn, "c1").unwrap();
+
+        let messages: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(messages, 0, "messages must be cleared");
+        let signals: i64 = conn
+            .query_row("SELECT COUNT(*) FROM eval_signals", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(signals, 0, "the orphaned satisfaction signal must be cleared");
     }
 
     // Live no-mocks proof against a real on-disk `chat.db`: after "Clear all

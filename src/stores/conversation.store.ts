@@ -708,10 +708,15 @@ export const conversationStore = {
   async clearHistory(conversationId = state.activeConversationId) {
     if (!conversationId) return;
 
+    // Only empty the on-screen thread once the database delete has actually
+    // committed. Clearing the UI on failure would tell the user their history
+    // is gone while it survives on disk (and, worse, its sync tombstones scrub
+    // the remote copies).
     try {
       await clearConversationHistoryDb(conversationId);
     } catch (error) {
-      console.warn("Unable to clear history", error);
+      console.error("Unable to clear history", error);
+      return;
     }
     this.clearMessages(conversationId);
     setState("streamingContent", conversationId, "");
