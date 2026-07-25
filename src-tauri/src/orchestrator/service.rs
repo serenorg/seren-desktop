@@ -166,18 +166,31 @@ async fn persist_completion_message(app: AppHandle, mut message: PersistedMessag
     }
 }
 
-/// Completion integrity (#3193-C): consult the host continuation store and, when a
-/// task still has an approval pending, append a notice to its final summary so it
-/// cannot silently report a clean finish. Applied to the `Complete` event before
-/// it is persisted or forwarded, so both the stored message and the frontend see
-/// the same disclosed text.
+/// Completion integrity (#3193-C, acceptance criterion: a task with an unresolved
+/// required approval cannot report `completed`). Applied to the `Complete` event
+/// before it is persisted or forwarded, so both the stored message and the frontend
+/// see the same enforced outcome.
 ///
-/// The guard never blocks a legitimate completion: a store error, a missing state,
-/// or nothing pending leaves the event untouched. It fires when a completion
-/// coexists with a pending approval — a settle failure that leaves a stuck pending
-/// record, or a future parallel/branch flow — rather than the common linear path,
-/// where the renderer holds the tool call open until the approval resolves.
-fn guard_completion(app: &AppHandle, conversation_id: &str, event: WorkerEvent) -> WorkerEvent {
+/// A worker blocks on its own linear approval (the tool call awaits the host
+/// result) before it can ever emit a completion, so any approval still pending when
+/// a `Complete` arrives is an orphan no continuation will resume — a settle failure
+/// that stranded a pending record, not a live wait. The host therefore *settles*
+/// those orphans here rather than merely disclosing them: it expires them (audited),
+/// making the invariant `unresolved == 0` hold at the instant of completion, and
+/// broadcasts the now-cleared task state on the real worker path so the thread
+/// status converges at once instead of at the next renderer poll. The final summary
+/// discloses the lapsed, un-performed work.
+///
+/// The host never hard-blocks the completion event: there is no terminal
+/// "not-completed" worker event, so suppressing `Complete` would leave the turn with
+/// no terminal frame — the exact hung-agent symptom this ticket exists to prevent.
+/// A store error or a missing state leaves the event untouched (fail-open on the
+/// disclosure, never on the completion itself).
+fn guard_completion<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    conversation_id: &str,
+    event: WorkerEvent,
+) -> WorkerEvent {
     let WorkerEvent::Complete {
         final_content,
         thinking,
@@ -189,24 +202,35 @@ fn guard_completion(app: &AppHandle, conversation_id: &str, event: WorkerEvent) 
     };
     let notice = app
         .try_state::<crate::tool_authorization::ToolAuthorizationState>()
-        .and_then(
-            |state| match state.resolution_summary(conversation_id) {
-                Ok(summary) => summary.completion_notice(),
+        .and_then(|state| {
+            match state.settle_conversation_on_completion(conversation_id) {
+                Ok(settlement) => {
+                    if settlement.newly_expired > 0 {
+                        log::warn!(
+                            "[Orchestrator] Task {conversation_id} reached completion with {} approval(s) still pending; expired and disclosed",
+                            settlement.newly_expired
+                        );
+                        // Host-owned transition on the real completion path: the
+                        // pending block is gone, so broadcast the cleared task state
+                        // now rather than waiting for the renderer's poll.
+                        crate::commands::tool_authorization::emit_task_execution_state(
+                            app,
+                            state.inner(),
+                            conversation_id,
+                        );
+                    }
+                    settlement.completion_notice()
+                }
                 Err(err) => {
                     log::warn!(
-                        "[Orchestrator] Completion-integrity check failed for {conversation_id}: {err}"
+                        "[Orchestrator] Completion-integrity settle failed for {conversation_id}: {err}"
                     );
                     None
                 }
-            },
-        );
+            }
+        });
     let final_content = match notice {
-        Some(note) => {
-            log::warn!(
-                "[Orchestrator] Task {conversation_id} completed with an approval still pending"
-            );
-            format!("{final_content}{note}")
-        }
+        Some(note) => format!("{final_content}{note}"),
         None => final_content,
     };
     WorkerEvent::Complete {
@@ -1905,5 +1929,131 @@ mod tests {
         let sessions = state.active_sessions.lock().await;
         assert!(sessions.contains_key("test-conv"));
         assert!(*sessions.get("test-conv").unwrap().borrow());
+    }
+
+    // =========================================================================
+    // Completion Integrity (#3193-C)
+    // =========================================================================
+
+    fn send_cap() -> crate::approval_continuation::RequestedCapability {
+        crate::approval_continuation::RequestedCapability {
+            route: "gateway".to_string(),
+            publisher_slug: "gmail".to_string(),
+            tool_name: "post_send".to_string(),
+            operation_class: "high-risk".to_string(),
+            description: "Send email".to_string(),
+            is_destructive: false,
+            command: None,
+            host: None,
+            target: None,
+            binding: None,
+        }
+    }
+
+    /// The real completion path (`guard_completion` over the real
+    /// `ToolAuthorizationState`) enforces criterion #6: when a `Complete` arrives
+    /// with an approval still pending, the host settles that orphan and the emitted
+    /// completion carries no unresolved required approval. The event stays a
+    /// `Complete` (never suppressed — that would leave the turn with no terminal
+    /// frame, the hung-agent symptom), its summary discloses the lapsed work, and
+    /// the store reports the block terminally expired. No mocks: a real mock Tauri
+    /// app with a real in-memory authorization store.
+    #[test]
+    fn guard_completion_settles_pending_approval_before_completing() {
+        use tauri::Manager;
+
+        let app = tauri::test::mock_builder()
+            .manage(crate::tool_authorization::ToolAuthorizationState::new(
+                std::path::PathBuf::from(":memory:"),
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+
+        let state = app.state::<crate::tool_authorization::ToolAuthorizationState>();
+        state
+            .register_continuation(
+                "conv-a",
+                send_cap(),
+                crate::approval_continuation::ContinuationScope::Linear,
+                300,
+            )
+            .expect("register continuation");
+        // Precondition: the task genuinely cannot complete while the block is open.
+        assert!(!state.resolution_summary("conv-a").unwrap().can_complete());
+
+        let completed = guard_completion(
+            app.handle(),
+            "conv-a",
+            WorkerEvent::Complete {
+                final_content: "Done.".to_string(),
+                thinking: None,
+                cost: None,
+                rlm_steps: None,
+            },
+        );
+
+        // The event is still a completion (not suppressed) and discloses the lapse.
+        let WorkerEvent::Complete { final_content, .. } = completed else {
+            panic!("guard_completion must keep the completion event, never suppress it");
+        };
+        assert!(final_content.starts_with("Done."));
+        assert!(final_content.contains("still awaiting approval"));
+        assert!(final_content.contains("expired"));
+
+        // The invariant now holds in the store: a completed task carries no
+        // unresolved required approval, and the block is terminally `expired`.
+        let summary = state.resolution_summary("conv-a").unwrap();
+        assert_eq!(summary.unresolved, 0);
+        assert_eq!(summary.expired, 1);
+        assert!(summary.can_complete());
+        let views = state.list_continuations("conv-a").unwrap();
+        assert_eq!(views.len(), 1);
+        assert_eq!(
+            views[0].state,
+            crate::approval_continuation::ContinuationState::Expired
+        );
+    }
+
+    /// A clean completion (nothing pending) is forwarded untouched — no spurious
+    /// disclosure, no wasted mutation. Guards against the enforcement path bleeding
+    /// into the common healthy turn.
+    #[test]
+    fn guard_completion_leaves_clean_completions_untouched() {
+        use tauri::Manager;
+
+        let app = tauri::test::mock_builder()
+            .manage(crate::tool_authorization::ToolAuthorizationState::new(
+                std::path::PathBuf::from(":memory:"),
+            ))
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+        // Touch the state so its in-memory store is bootstrapped like production.
+        let _ = app
+            .state::<crate::tool_authorization::ToolAuthorizationState>()
+            .resolution_summary("conv-clean");
+
+        let completed = guard_completion(
+            app.handle(),
+            "conv-clean",
+            WorkerEvent::Complete {
+                final_content: "All good.".to_string(),
+                thinking: Some("t".to_string()),
+                cost: Some(1.5),
+                rlm_steps: None,
+            },
+        );
+
+        let WorkerEvent::Complete {
+            final_content,
+            thinking,
+            cost,
+            ..
+        } = completed
+        else {
+            panic!("expected a completion event");
+        };
+        assert_eq!(final_content, "All good.");
+        assert_eq!(thinking.as_deref(), Some("t"));
+        assert_eq!(cost, Some(1.5));
     }
 }

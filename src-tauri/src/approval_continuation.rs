@@ -240,6 +240,39 @@ impl ResolutionSummary {
     }
 }
 
+/// The outcome of settling a conversation's still-pending continuations at task
+/// completion (#3193-C, completion integrity): how many blocks this settle
+/// expired, and the resulting outcome counts — whose `unresolved` is necessarily
+/// zero, which is the invariant a completed task must hold.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionSettlement {
+    pub newly_expired: usize,
+    pub summary: ResolutionSummary,
+}
+
+impl CompletionSettlement {
+    /// A plain-language disclosure for a task's final summary when completion
+    /// expired one or more still-pending approvals, or `None` when nothing was
+    /// pending (a clean completion is left untouched). Explicit about the lapse —
+    /// never a generic failure — so the un-performed work is disclosed rather than
+    /// hidden behind a clean-looking finish.
+    pub fn completion_notice(&self) -> Option<String> {
+        if self.newly_expired == 0 {
+            return None;
+        }
+        let (actions, they) = if self.newly_expired == 1 {
+            ("action", "it was")
+        } else {
+            ("actions", "they were")
+        };
+        Some(format!(
+            "\n\n_This response finished with {} {} still awaiting approval; {} marked expired and not performed._",
+            self.newly_expired, actions, they
+        ))
+    }
+}
+
 /// The host's authoritative live execution state for one conversation, broadcast
 /// on every gate suspend/settle so the frontend converges without waiting for a
 /// poll and a host-initiated transition (a reload sweep, a lapsed TTL) surfaces at
@@ -604,6 +637,33 @@ pub fn expire_all_pending(conn: &Connection, now: &str) -> Result<Vec<Continuati
         "UPDATE approval_continuations SET state = 'expired', resolved_at = ?1 \
          WHERE state = 'pending'",
         rusqlite::params![now],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(pending)
+}
+
+/// Expire every pending row for one conversation regardless of TTL, returning the
+/// rows this call expired. Backs host-owned completion settlement: because a worker
+/// blocks on its own linear approval before it can emit a completion, any block
+/// still pending when a completion arrives is an orphan no continuation will
+/// resume. Expiring it (rather than leaving it dangling until its TTL) keeps the
+/// completion-integrity invariant true — a completed task carries no unresolved
+/// approval — and, like the reload sweep, records an expiry, never a denial, so a
+/// later re-attempt re-prompts.
+pub fn expire_pending_for_conversation(
+    conn: &Connection,
+    conversation_id: &str,
+    now: &str,
+) -> Result<Vec<ContinuationRow>, String> {
+    let sql = format!(
+        "SELECT {SELECT_COLUMNS} FROM approval_continuations \
+         WHERE conversation_id = ?1 AND state = 'pending'"
+    );
+    let pending = collect_rows(conn, &sql, rusqlite::params![conversation_id])?;
+    conn.execute(
+        "UPDATE approval_continuations SET state = 'expired', resolved_at = ?2 \
+         WHERE conversation_id = ?1 AND state = 'pending'",
+        rusqlite::params![conversation_id, now],
     )
     .map_err(|e| e.to_string())?;
     Ok(pending)
