@@ -1293,6 +1293,11 @@ function isHistorySyncReadinessError(error) {
     "returned http 504",
     "server closed the connection",
     "could not connect",
+    // A history destination is provisioned on the spot; its branch-DB compute
+    // endpoint cold-starts and cannot complete TLS for a few seconds, surfacing
+    // "error performing TLS handshake". Same readiness class as the connection
+    // errors above, so retry it rather than failing the run (run 30165487150).
+    "tls handshake",
   ].some((marker) => message.includes(marker));
 }
 

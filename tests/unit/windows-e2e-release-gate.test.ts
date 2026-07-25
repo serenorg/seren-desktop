@@ -393,6 +393,20 @@ describe("Windows production e2e release gate", () => {
     expect(taskUserRunner).toContain("$profileHome = [Environment]::GetEnvironmentVariable");
   });
 
+  it("retries a cold-start TLS handshake error from a freshly provisioned history destination", () => {
+    // A history destination is provisioned on the spot; its branch-DB compute
+    // endpoint cold-starts and throws "error performing TLS handshake" before it
+    // can complete TLS. That is the same readiness class as the connection
+    // errors already retried, so isHistorySyncReadinessError must match it or
+    // the run fails after the agent journey already passed (run 30165487150).
+    const readiness = probe.slice(
+      probe.indexOf("function isHistorySyncReadinessError"),
+      probe.indexOf("async function runHistorySync"),
+    );
+    expect(readiness).toContain("tls handshake");
+    expect(readiness).toContain("could not connect");
+  });
+
   it("allows unsigned release walkthroughs only for an explicit MAX_SIGNATURES block", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
     expect(runner).toContain("[switch]$AllowUnsignedBudgetBlockedArtifact");
