@@ -13,11 +13,19 @@ export const MICROS_PER_UNIT = 1_000_000;
  * a set ceiling (a conservative fail-safe that escalates earlier, never
  * mischarges).
  */
+/** Upper bound on a task lease's call budget. Also caps a non-finite input
+ * (e.g. `Number("1e999") === Infinity`), which would otherwise serialize to
+ * JSON null and become an unmetered (`max_calls: None`) lease in the gate. */
+export const MAX_LEASE_CALLS = 100_000;
+
 export function leaseBudgetsFromInputs(
   maxCalls: number,
   maxSpendInput: string,
 ): LeaseBudgets {
-  const calls = Math.max(1, Math.floor(maxCalls));
+  const requested = Number.isFinite(maxCalls)
+    ? Math.floor(maxCalls)
+    : MAX_LEASE_CALLS;
+  const calls = Math.min(MAX_LEASE_CALLS, Math.max(1, requested));
   const spend = Number.parseFloat(maxSpendInput);
   const maxSpendMicros =
     Number.isFinite(spend) && spend > 0

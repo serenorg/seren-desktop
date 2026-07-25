@@ -606,6 +606,11 @@ impl ToolAuthorizationState {
                 std::fs::create_dir_all(parent).ok();
             }
             let conn = Connection::open(&self.db_path).map_err(|e| e.to_string())?;
+            // Zero freed pages so wiped lease/audit/decision rows (tool names,
+            // conversation ids) do not linger in the file's free list after an
+            // erase-all wipe (#3348), matching the chat databases.
+            conn.execute_batch("PRAGMA secure_delete = ON;")
+                .map_err(|e| e.to_string())?;
             init_schema(&conn)?;
             *guard = Some(conn);
         }
@@ -1855,6 +1860,9 @@ impl ToolAuthorizationState {
             let reservations = conn
                 .execute("DELETE FROM spend_reservations", [])
                 .map_err(|e| e.to_string())?;
+            // Reclaim and zero the freed pages so no wiped authorization data
+            // survives in the file after an erase-all (#3348).
+            conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
             Ok(decisions + leases + policies + continuations + audit_rows + handles + reservations)
         })
     }

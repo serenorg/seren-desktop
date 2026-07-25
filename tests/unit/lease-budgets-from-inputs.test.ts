@@ -2,7 +2,10 @@
 // ABOUTME: spend cap becomes a micro ceiling; a blank cap leaves no monetary allowance.
 
 import { describe, expect, it } from "vitest";
-import { leaseBudgetsFromInputs } from "@/components/approvals/leaseBudgets";
+import {
+  leaseBudgetsFromInputs,
+  MAX_LEASE_CALLS,
+} from "@/components/approvals/leaseBudgets";
 
 describe("leaseBudgetsFromInputs", () => {
   it("threads a set spend cap through as unpinned micros", () => {
@@ -32,5 +35,20 @@ describe("leaseBudgetsFromInputs", () => {
   it("rounds fractional micros to the nearest integer", () => {
     // 0.0000005 USDC * 1_000_000 = 0.5 micros -> rounds to 1.
     expect(leaseBudgetsFromInputs(10, "0.0000005").maxSpendMicros).toBe(1);
+  });
+
+  it("clamps a non-finite call count to a finite ceiling, never unmetered", () => {
+    // Number("1e999") === Infinity; Math.floor(Infinity) stays Infinity, which
+    // serializes to JSON null and would become an unmetered (max_calls: None)
+    // lease in the gate. Clamp it to the finite cap instead.
+    const budgets = leaseBudgetsFromInputs(Number("1e999"), "");
+    expect(Number.isFinite(budgets.maxCalls)).toBe(true);
+    expect(budgets.maxCalls).toBe(MAX_LEASE_CALLS);
+  });
+
+  it("caps an over-large call count to the ceiling", () => {
+    expect(leaseBudgetsFromInputs(MAX_LEASE_CALLS * 10, "").maxCalls).toBe(
+      MAX_LEASE_CALLS,
+    );
   });
 });
