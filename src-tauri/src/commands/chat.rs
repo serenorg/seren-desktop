@@ -2322,6 +2322,42 @@ pub async fn get_messages(
     .await
 }
 
+/// Delete a single conversation's messages and events, enqueueing sync
+/// tombstones so the delete propagates to other devices. Mirrors
+/// `clear_all_history_records` for the per-conversation "Clear history" path so
+/// the deletion is unit-testable without an `AppHandle`.
+pub(crate) fn clear_conversation_history_records(
+    conn: &Connection,
+    conversation_id: &str,
+) -> rusqlite::Result<()> {
+    let mut event_stmt =
+        conn.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
+    let event_ids = event_stmt
+        .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(event_stmt);
+    let mut message_stmt = conn.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
+    let message_ids = message_stmt
+        .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(message_stmt);
+    for event_id in &event_ids {
+        enqueue_sync_tombstone(conn, "message_events", event_id)?;
+    }
+    for message_id in &message_ids {
+        enqueue_sync_tombstone(conn, "messages", message_id)?;
+    }
+    conn.execute(
+        "DELETE FROM message_events WHERE conversation_id = ?1",
+        params![conversation_id],
+    )?;
+    conn.execute(
+        "DELETE FROM messages WHERE conversation_id = ?1",
+        params![conversation_id],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn clear_conversation_history(
     app: AppHandle,
@@ -2329,36 +2365,21 @@ pub async fn clear_conversation_history(
 ) -> Result<(), String> {
     let index_id = conversation_id.clone();
     run_db(app.clone(), move |conn| {
-        let mut event_stmt =
-            conn.prepare("SELECT id FROM message_events WHERE conversation_id = ?1")?;
-        let event_ids = event_stmt
-            .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(event_stmt);
-        let mut message_stmt =
-            conn.prepare("SELECT id FROM messages WHERE conversation_id = ?1")?;
-        let message_ids = message_stmt
-            .query_map(params![conversation_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(message_stmt);
-        for event_id in &event_ids {
-            enqueue_sync_tombstone(conn, "message_events", event_id)?;
-        }
-        for message_id in &message_ids {
-            enqueue_sync_tombstone(conn, "messages", message_id)?;
-        }
-        conn.execute(
-            "DELETE FROM message_events WHERE conversation_id = ?1",
-            params![conversation_id],
-        )?;
-        conn.execute(
-            "DELETE FROM messages WHERE conversation_id = ?1",
-            params![conversation_id],
-        )?;
+        clear_conversation_history_records(conn, &conversation_id)?;
+        // Reclaim and zero the freed pages so the cleared messages don't linger
+        // in the chat.db file, matching the per-conversation delete and
+        // erase-all paths.
+        vacuum_database(conn)?;
         Ok(())
     })
     .await?;
     delete_conversation_index_best_effort(&app, &index_id);
+    vacuum_conversation_index_best_effort(&app);
+    // Cascade the cloud-memory retained-source erasure so clearing a
+    // conversation's history leaves no verbatim transcript or derived memory on
+    // the memory service, matching `delete_conversation`. Best-effort and never
+    // fatal: the local clear has already committed.
+    spawn_memory_source_erase_best_effort(&app, vec![index_id]);
     Ok(())
 }
 
@@ -2648,7 +2669,8 @@ mod tests {
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
         claim_happy_provider_session_owner_with_provenance_in_db, clear_all_history_records,
-        cloud_memory_erase_report, collect_agent_transcript_targets, conversation_source_uri,
+        clear_conversation_history_records, cloud_memory_erase_report,
+        collect_agent_transcript_targets, conversation_source_uri,
         delete_conversation_records, emit_happy_archive_event,
         emit_happy_provider_archive_event,
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
@@ -3068,6 +3090,89 @@ mod tests {
                 );
             }
         }
+    }
+
+    // Live no-mocks proof against a real on-disk `chat.db`: the per-conversation
+    // "Clear history" path (`clear_conversation_history_records` + VACUUM) must
+    // erase the cleared conversation's verbatim message text from the file while
+    // leaving every other conversation intact. Guards the residue #3318 found:
+    // the command skipped VACUUM (and the cloud-memory cascade) that its sibling
+    // delete paths run.
+    #[test]
+    fn true_deletion_clear_conversation_history_erases_message_canary_and_scopes_to_target() {
+        const CANARY: &str = "clear-conv-canary-9f2c1b7a-4d0e-4c93-8a55-1e6b3f0d84cc";
+        const SURVIVOR: &str = "survivor-2a7d3e10-5c88-4b21-9f6e-0d1a2b3c4d5e";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("chat.db");
+        let wal_path = temp_dir.path().join("chat.db-wal");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            configure_connection(&conn).unwrap();
+            setup_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Chat', 1), ('c2', 'Keep', 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO messages (id, conversation_id, role, content, timestamp)
+                 VALUES ('m1', 'c1', 'user', ?1, 2), ('m2', 'c2', 'user', ?2, 2)",
+                params![CANARY, SURVIVOR],
+            )
+            .unwrap();
+            // Land both messages in the main db file before the clear, mirroring
+            // a real session that has checkpointed prior turns.
+            crate::services::database::checkpoint_wal(
+                &conn,
+                crate::services::database::WalCheckpointMode::Truncate,
+            )
+            .unwrap();
+
+            clear_conversation_history_records(&conn, "c1").unwrap();
+            vacuum_database(&conn).unwrap();
+
+            // The target conversation's messages are gone; the untouched
+            // conversation's message survives.
+            let cleared: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages WHERE conversation_id = 'c1'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(cleared, 0, "target conversation messages must be cleared");
+            let kept: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages WHERE conversation_id = 'c2'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(kept, 1, "other conversation messages must be preserved");
+        }
+
+        for path in [&db_path, &wal_path] {
+            if path.exists() {
+                let bytes = std::fs::read(path).unwrap();
+                assert!(
+                    !bytes
+                        .windows(CANARY.len())
+                        .any(|window| window == CANARY.as_bytes()),
+                    "cleared conversation canary remained in {}",
+                    path.display()
+                );
+            }
+        }
+        // The untouched conversation's content must survive the clear, proving
+        // the erase is scoped and not a full wipe.
+        let db_bytes = std::fs::read(&db_path).unwrap();
+        assert!(
+            db_bytes
+                .windows(SURVIVOR.len())
+                .any(|window| window == SURVIVOR.as_bytes()),
+            "untouched conversation content must remain in the chat.db file"
+        );
     }
 
     // Live no-mocks proof against a real on-disk `chat.db`: after "Clear all
