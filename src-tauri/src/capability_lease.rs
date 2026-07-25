@@ -89,13 +89,44 @@ pub struct LeaseBudgets {
     pub spend_used_micros: u64,
     #[serde(default)]
     pub asset: Option<String>,
+    /// Rate limit: at most `max_calls_per_window` covered calls within each
+    /// rolling `window_secs` window. Both must be set for the limit to apply.
+    /// Bounds a runaway autonomous loop even under an approved lease, on top of
+    /// the total `max_calls` ceiling.
+    #[serde(default)]
+    pub max_calls_per_window: Option<u64>,
+    #[serde(default)]
+    pub window_secs: Option<i64>,
+    /// End instant (RFC3339 UTC) of the current window, or `None` before the
+    /// first call opens one. A call arriving after this instant opens a fresh
+    /// window, so an idle lease is never permanently rate-blocked.
+    #[serde(default)]
+    pub window_ends_at: Option<String>,
+    #[serde(default)]
+    pub calls_in_window: u64,
+    // Data-egress budget (max outbound bytes under this lease) is intentionally
+    // not implemented: no consumer authors a byte budget today, and enforcing it
+    // needs an `egress_bytes` measure threaded onto `OperationRequest`. Deferred
+    // to serenorg/seren-desktop#3337 until a consumer needs it (YAGNI).
 }
 
 impl LeaseBudgets {
-    /// Whether charging `cost_micros` for one more call stays within budget.
-    fn admits(&self, cost_micros: u64) -> bool {
+    /// Whether charging `cost_micros` for one more call at `now` stays within
+    /// budget. `now` is an RFC3339 UTC instant, compared lexicographically
+    /// against the rate window's end.
+    fn admits(&self, cost_micros: u64, now: &str) -> bool {
         if let Some(max) = self.max_calls
             && self.calls_used.saturating_add(1) > max
+        {
+            return false;
+        }
+        // Rate window: only enforce while the current window is still open. A
+        // window with no end (never opened) or one already closed does not block
+        // — the charge opens a fresh window for that call.
+        if let Some(max_per_window) = self.max_calls_per_window
+            && let Some(window_ends_at) = &self.window_ends_at
+            && now < window_ends_at.as_str()
+            && self.calls_in_window.saturating_add(1) > max_per_window
         {
             return false;
         }
@@ -364,7 +395,7 @@ pub fn evaluate_for_conversation(
 
     // First lease that both covers the call and has budget for it.
     for lease in &active {
-        if predicates_cover(lease, req) && lease.budgets.admits(req.cost_micros) {
+        if predicates_cover(lease, req) && lease.budgets.admits(req.cost_micros, now) {
             return LeaseOutcome::Allow(lease.id.clone());
         }
     }
@@ -538,6 +569,7 @@ pub fn derive_bundle(request: &BundleRequest) -> ProposedBundle {
         max_spend_micros: request.max_spend_micros,
         spend_used_micros: 0,
         asset: request.asset.clone(),
+        ..Default::default()
     };
 
     let label = if request.profile == "coding" {
@@ -925,11 +957,58 @@ mod tests {
             max_spend_micros: Some(10_000_000),
             spend_used_micros: 0,
             asset: Some("USDC".to_string()),
+            ..Default::default()
         };
-        assert!(!budgets.admits(1_000_000), "call budget is exhausted");
+        assert!(
+            !budgets.admits(1_000_000, "2026-07-25T00:00:00Z"),
+            "call budget is exhausted"
+        );
         assert!(
             budgets.admits_spend(1_000_000, "USDC"),
             "spend admission ignores the call budget",
+        );
+    }
+
+    #[test]
+    fn rate_window_admits_to_the_cap_then_blocks_until_it_closes() {
+        let now = "2026-07-25T00:00:00Z";
+        // A window of 3 that is still open at `now` and has seen 2 calls admits the
+        // 3rd but blocks the 4th.
+        let two_used = LeaseBudgets {
+            max_calls: Some(500),
+            max_calls_per_window: Some(3),
+            window_secs: Some(60),
+            window_ends_at: Some("2026-07-25T00:01:00Z".to_string()),
+            calls_in_window: 2,
+            ..Default::default()
+        };
+        assert!(two_used.admits(0, now), "3rd call in a window of 3 is admitted");
+
+        let saturated = LeaseBudgets {
+            calls_in_window: 3,
+            ..two_used.clone()
+        };
+        assert!(
+            !saturated.admits(0, now),
+            "4th call in a window of 3 is blocked"
+        );
+
+        // The same saturated window, but `now` is past its end → a fresh window
+        // opens, so an idle lease is never permanently rate-blocked.
+        assert!(
+            saturated.admits(0, "2026-07-25T00:02:00Z"),
+            "a call after the window closes is admitted"
+        );
+
+        // A per-window cap with no window ever opened does not block the first call.
+        let unopened = LeaseBudgets {
+            max_calls_per_window: Some(1),
+            window_secs: Some(60),
+            ..Default::default()
+        };
+        assert!(
+            unopened.admits(0, now),
+            "the first call opens the window rather than being blocked"
         );
     }
 

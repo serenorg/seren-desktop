@@ -39,6 +39,12 @@ export interface LeaseBudgets {
   maxSpendMicros?: number | null;
   spendUsedMicros?: number;
   asset?: string | null;
+  /** Rate limit: at most `maxCallsPerWindow` covered calls per rolling
+   * `windowSecs` window. Both must be set for the limit to apply. */
+  maxCallsPerWindow?: number | null;
+  windowSecs?: number | null;
+  windowEndsAt?: string | null;
+  callsInWindow?: number;
 }
 
 /** Mirrors `CapabilityLease` in `src-tauri/src/capability_lease.rs`. */

@@ -987,6 +987,24 @@ impl ToolAuthorizationState {
                                 .spend_used_micros
                                 .saturating_add(request.cost_micros);
                         }
+                        // Rate window: increment the in-window count while the
+                        // window is open, or open a fresh one for this call once it
+                        // has closed (the admit check already allowed it).
+                        if let Some(window_secs) = lease.budgets.window_secs {
+                            let window_open = lease
+                                .budgets
+                                .window_ends_at
+                                .as_deref()
+                                .is_some_and(|end| now.as_str() < end);
+                            if window_open {
+                                lease.budgets.calls_in_window =
+                                    lease.budgets.calls_in_window.saturating_add(1);
+                            } else {
+                                lease.budgets.window_ends_at =
+                                    Some(timestamp_plus_seconds(conn, window_secs.max(1))?);
+                                lease.budgets.calls_in_window = 1;
+                            }
+                        }
                         write_lease(conn, &lease)?;
                         audit(
                             conn,
@@ -2627,6 +2645,64 @@ mod tests {
             .unwrap();
         assert_eq!(decision.decision, "prompt");
         assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+    }
+
+    /// §3 rate budget: a lease capped at N calls per rolling window runs N
+    /// silently, then escalates once while the window is still open — a runaway
+    /// loop is bounded even under an approved lease. Driven through the real gate
+    /// and store; the on-disk window counter reflects only the charged calls.
+    #[test]
+    fn rate_limited_lease_escalates_after_the_per_window_cap() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "rate-limited",
+            4 * 3600,
+            command_rules(&["cargo"]),
+            LeaseBudgets {
+                max_calls: Some(500),
+                max_calls_per_window: Some(3),
+                window_secs: Some(3600),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        for i in 0..3 {
+            let decision = s
+                .authorize(
+                    ToolRoute::Shell,
+                    "seren",
+                    "execute_command",
+                    "conv-a",
+                    &cmd_ctx("cargo build"),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                decision.decision, "allow",
+                "call {i} within the per-window cap runs silently"
+            );
+        }
+
+        // The 4th call in the same window exceeds the rate cap → one escalation.
+        let decision = s
+            .authorize(
+                ToolRoute::Shell,
+                "seren",
+                "execute_command",
+                "conv-a",
+                &cmd_ctx("cargo build"),
+                None,
+            )
+            .unwrap();
+        assert_eq!(decision.decision, "prompt");
+        assert_eq!(decision.prompt_kind.as_deref(), Some("one-shot"));
+
+        // Only the 3 admitted calls are charged; the escalated one is not.
+        let updated = s.list_leases("conv-a").unwrap().into_iter().next().unwrap();
+        assert_eq!(updated.budgets.calls_in_window, 3);
+        assert_eq!(updated.budgets.calls_used, 3);
     }
 
     /// A shell command outside the lease's command rules is not covered and
