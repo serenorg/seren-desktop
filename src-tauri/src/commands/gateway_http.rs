@@ -112,8 +112,8 @@ fn publisher_dispatch_target(url: &Url) -> Option<(String, String)> {
 /// live host-minted handle for the exact publisher, tool, and body payload —
 /// the same rule the MCP transport enforces, so neither wire shape can be used
 /// to skip the authorization gate.
-fn enforce_publisher_dispatch(
-    app: &AppHandle,
+fn enforce_publisher_dispatch<R: tauri::Runtime>(
+    app: &AppHandle<R>,
     url: &Url,
     body: Option<&str>,
     auth_handle: Option<&str>,
@@ -463,5 +463,69 @@ mod tests {
         // so /auth/refresh does not loop into itself.
         let refresh = Url::parse("https://api.serendb.com/auth/refresh").unwrap();
         assert!(!should_attach_stored_auth(&refresh, &no_auth_headers, true));
+    }
+
+    fn mock_app_with_authorization() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+        app.manage(crate::tool_authorization::ToolAuthorizationState::new(
+            std::path::PathBuf::from(":memory:"),
+        ));
+        app
+    }
+
+    /// #3193-F: the gateway HTTP bridge refuses a publisher tool dispatch unless a
+    /// live host-minted handle matches the exact publisher, tool, and body — the
+    /// same rule proven at the shared consume path, here driven through the bridge's
+    /// own enforcement entrypoint (the one `gateway_http_start` calls before any
+    /// network request leaves the process).
+    #[test]
+    fn publisher_dispatch_refuses_missing_forged_and_mismatched_handles() {
+        use crate::tool_authorization::{
+            ToolAuthorizationState, ToolRoute, binding_for_publisher_args,
+        };
+
+        let app = mock_app_with_authorization();
+        let url =
+            Url::parse("https://api.serendb.com/publishers/gmail/_mcp/tools/post_send").unwrap();
+        let body = r#"{"to":"a@example.com"}"#;
+        let args: serde_json::Value = serde_json::from_str(body).unwrap();
+        let mint = |tool: &str, args: &serde_json::Value| {
+            app.state::<ToolAuthorizationState>()
+                .mint_dispatch_handle_for_test(
+                    ToolRoute::Gateway,
+                    "gmail",
+                    tool,
+                    &binding_for_publisher_args(args),
+                )
+                .expect("test handle mints")
+        };
+
+        // A missing or forged handle refuses the dispatch.
+        assert!(enforce_publisher_dispatch(app.handle(), &url, Some(body), None).is_err());
+        assert!(
+            enforce_publisher_dispatch(app.handle(), &url, Some(body), Some("not-a-real-handle"))
+                .is_err()
+        );
+
+        // A handle minted for a different tool, or a different body, cannot be
+        // redeemed for this exact call.
+        let wrong_tool = mint("get_messages", &args);
+        assert!(
+            enforce_publisher_dispatch(app.handle(), &url, Some(body), Some(&wrong_tool)).is_err()
+        );
+        let wrong_body = mint("post_send", &serde_json::json!({"to":"someone-else@example.com"}));
+        assert!(
+            enforce_publisher_dispatch(app.handle(), &url, Some(body), Some(&wrong_body)).is_err()
+        );
+
+        // The exact matching handle redeems.
+        let good = mint("post_send", &args);
+        assert!(enforce_publisher_dispatch(app.handle(), &url, Some(body), Some(&good)).is_ok());
+
+        // A non-publisher Gateway path is app-level API traffic and needs no handle.
+        let api = Url::parse("https://api.serendb.com/projects").unwrap();
+        assert!(enforce_publisher_dispatch(app.handle(), &api, None, None).is_ok());
     }
 }
