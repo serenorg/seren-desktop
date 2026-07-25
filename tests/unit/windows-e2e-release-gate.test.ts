@@ -49,16 +49,30 @@ function workflowJob(name: string): string {
 describe("Windows production e2e release gate", () => {
   it("blocks release publishing on the AWS Windows e2e job", () => {
     expect(releaseWorkflow).toContain("windows-app-e2e:");
-    expect(releaseWorkflow).toContain("needs: build");
     expect(releaseWorkflow).toContain("aws ssm send-command");
     expect(releaseWorkflow).toContain("aws ssm get-command-invocation");
     expect(releaseWorkflow).toContain("WINDOWS_E2E_INSTANCE_ID");
     expect(releaseWorkflow).toContain("WINDOWS_E2E_S3_BUCKET");
+    // The Windows e2e now runs BEFORE signing, against an unsigned preflight
+    // build, and the signed `build` matrix depends on it — so a Windows
+    // regression fails the tag before any signing spend or publish, not after.
+    expect(releaseWorkflow).toContain("windows-e2e-preflight-build:");
+    expect(releaseWorkflow).toMatch(
+      /windows-app-e2e:\s*\n\s*needs:\s*\[create-release, windows-e2e-preflight-build\]/,
+    );
+    expect(releaseWorkflow).toMatch(
+      /\n  build:\s*\n\s*needs:\s*\[create-release, windows-app-e2e\]/,
+    );
     expect(releaseWorkflow).toMatch(
       /publish-release:\s*\n\s*needs:\s*\[create-release, build, windows-app-e2e\]/,
     );
-    expect(workflowJob("windows-app-e2e")).not.toContain(
-      "continue-on-error: true",
+    // Only the pre-signing budget-state download may be best-effort (it does
+    // not exist before signing now). The SSM run itself must still fail the job
+    // — and therefore the release — on any error.
+    const job = workflowJob("windows-app-e2e");
+    expect((job.match(/continue-on-error: true/g) ?? []).length).toBe(1);
+    expect(job.indexOf("continue-on-error: true")).toBeLessThan(
+      job.indexOf("aws ssm send-command"),
     );
   });
 

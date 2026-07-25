@@ -167,8 +167,55 @@ jobs:
         id: set_release_id
         run: echo "id=${{ steps.create_release.outputs.id }}" >> $GITHUB_OUTPUT
 
-  build:
+  # Build an UNSIGNED Windows installer purely to gate the release on the Windows
+  # on-box e2e BEFORE any signing budget is spent or anything is published. The
+  # signed `build` matrix depends on `windows-app-e2e`, which runs against this
+  # artifact, so a Windows regression fails the tag here — cheaply, with no
+  # SSL.com spend and nothing on R2 — instead of after the release is cut.
+  # The installer is unsigned; the e2e box accepts it because the harness passes
+  # `-AllowUnsignedBudgetBlockedArtifact` (WINDOWS_SIGNING_BLOCKED=true).
+  windows-e2e-preflight-build:
     needs: create-release
+    runs-on: windows-latest
+    env:
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure git for private dependencies
+        if: env.HAS_GH_PAT == 'true'
+        shell: bash
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+      - uses: pnpm/action-setup@v5
+        with:
+          version: 11
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'pnpm'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          prefix-key: v1-windows-e2e-preflight
+      - run: pnpm install --frozen-lockfile
+      # Same command CI uses for the Windows build; tauri.ci.json only disables
+      # updater artifacts. The embedded runtime is staged by tauri build's
+      # beforeBuild step, so the NSIS installer is a functional app.
+      - name: Build unsigned Windows installer for the e2e gate
+        run: pnpm tauri build --config src-tauri/tauri.ci.json
+      # Distinct name from the signed build's `Seren-Desktop-Windows-x64.exe`
+      # (uploaded later by `build` and shipped by `publish-release`), so the two
+      # never collide within one run.
+      - name: Upload unsigned Windows installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: Seren-Desktop-Windows-x64-unsigned.exe
+          path: src-tauri/target/release/bundle/nsis/*.exe
+
+  build:
+    needs: [create-release, windows-app-e2e]
     env:
       NODE_OPTIONS: '--max-old-space-size=4096'
     strategy:
@@ -1492,7 +1539,7 @@ jobs:
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
 
   windows-app-e2e:
-    needs: build
+    needs: [create-release, windows-e2e-preflight-build]
     runs-on: ubuntu-latest
     env:
       WINDOWS_E2E_INSTANCE_ID: ${{ secrets.WINDOWS_E2E_INSTANCE_ID }}
@@ -1513,10 +1560,15 @@ jobs:
       - name: Download signed Windows installer
         uses: actions/download-artifact@v8
         with:
-          name: Seren-Desktop-Windows-x64.exe
+          name: Seren-Desktop-Windows-x64-unsigned.exe
           path: windows-artifact
 
+      # The signed build now runs AFTER this gate, so its budget-state artifact
+      # does not exist yet. The preflight installer is always unsigned, so the
+      # stage step below treats a missing budget state as signing_blocked=true
+      # and the box accepts the unsigned artifact.
       - name: Download Windows signing budget state
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: windows-signing-budget-state
@@ -1689,10 +1741,13 @@ jobs:
           fi
           budget_state="windows-signing-budget-state/windows-signing-budget-state.json"
           if [ ! -f "$budget_state" ]; then
-            echo "::error::Windows signing budget state artifact is missing"
-            exit 1
+            # No signed build ran before this gate: the preflight installer is
+            # unsigned, so the box must accept an unsigned artifact.
+            echo "No signing budget state (pre-signing e2e gate); treating the installer as unsigned"
+            signing_blocked="true"
+          else
+            signing_blocked="$(jq -r 'if .blocked == true then "true" else "false" end' "$budget_state")"
           fi
-          signing_blocked="$(jq -r 'if .blocked == true then "true" else "false" end' "$budget_state")"
           payload="$RUNNER_TEMP/windows-e2e-payload.zip"
           # The box drives the installed app over CDP; it does not run the app
           # from source, so it needs only the test driver's two deps
