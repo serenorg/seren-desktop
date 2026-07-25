@@ -199,13 +199,18 @@ export function createSynchronousSpawnCoordinator({
   const inFlight = new Map();
 
   const reemitReady = (session) => {
+    // Read the LIVE status: the session object is mutated in place, so a joiner
+    // whose continuation runs after the session has gone busy is caught here and
+    // never re-broadcasts a stale "ready" that would flip a running turn back to
+    // idle on mobile (#3350). Keep the payload minimal — the coordination layer
+    // must work for any session shape (a joiner's resolved session is not always
+    // a full Codex session, so buildSessionStatus's nested reads would throw).
     if (session?.status !== "ready") return;
-    // Emit the full live status payload (model/mode included), read from the
-    // live session object's current status rather than a hand-built "ready".
-    // The session is mutated in place, so a joiner whose continuation runs after
-    // the session has gone busy is caught by the guard above and never flips a
-    // running turn back to idle on mobile (#3350).
-    emit("provider://session-status", buildSessionStatus(session));
+    emit("provider://session-status", {
+      sessionId: session.id,
+      status: "ready",
+      agentSessionId: session.agentSessionId,
+    });
   };
 
   return function coordinateSpawn(params = {}) {
