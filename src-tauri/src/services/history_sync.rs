@@ -46,7 +46,7 @@ pub struct HistorySyncConfig {
 pub struct HistorySyncLock(std::sync::Arc<tokio::sync::Mutex<()>>);
 
 impl HistorySyncLock {
-    fn handle(app: &AppHandle) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    pub(crate) fn handle(app: &AppHandle) -> std::sync::Arc<tokio::sync::Mutex<()>> {
         app.state::<HistorySyncLock>().0.clone()
     }
 }
@@ -1920,12 +1920,40 @@ fn apply_remote_meeting_speaker_assignment(conn: &Connection, row: PgRow) -> rus
 }
 
 fn delete_conversation_local(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    // Delete every child row that references this conversation (directly or via
+    // messages) before the conversation itself. The bundled SQLite enforces
+    // foreign keys, and PULL_ORDER applies `conversations` before `meetings`, so
+    // omitting any of these aborts the pull and wedges cross-device sync — the
+    // remote delete then never lands on this device (#3348).
+    conn.execute(
+        "DELETE FROM eval_signals
+         WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?1)",
+        params![id],
+    )?;
     conn.execute(
         "DELETE FROM message_events WHERE conversation_id = ?1",
         params![id],
     )?;
     conn.execute(
         "DELETE FROM messages WHERE conversation_id = ?1",
+        params![id],
+    )?;
+    // meetings.agent_conversation_id references conversations(id) with no
+    // cascade; the meeting's own tombstone may not have been applied yet.
+    let meeting_ids = conn
+        .prepare("SELECT id FROM meetings WHERE agent_conversation_id = ?1")?
+        .query_map(params![id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for meeting_id in &meeting_ids {
+        delete_meeting_local(conn, meeting_id)?;
+    }
+    conn.execute(
+        "DELETE FROM plan_subtasks
+         WHERE plan_id IN (SELECT id FROM orchestration_plans WHERE conversation_id = ?1)",
+        params![id],
+    )?;
+    conn.execute(
+        "DELETE FROM orchestration_plans WHERE conversation_id = ?1",
         params![id],
     )?;
     conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;

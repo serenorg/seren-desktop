@@ -966,6 +966,10 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
+    // Hold the history-sync lock so an in-flight pull cannot re-insert this
+    // conversation after we delete it locally (#3345).
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let index_id = id.clone();
     let (transcript_targets, meetings) = run_db(app.clone(), move |conn| {
         let ids = vec![id];
@@ -2457,6 +2461,14 @@ pub(crate) fn clear_conversation_history_records(
         "DELETE FROM messages WHERE conversation_id = ?1",
         params![conversation_id],
     )?;
+    // The verbatim prompts the user typed live in `input_history`, not
+    // `messages`. Clearing a conversation's history must remove them too, or the
+    // raw prompts survive a "Clear history" (#3348), matching the delete and
+    // clear-all paths.
+    tx.execute(
+        "DELETE FROM input_history WHERE conversation_id = ?1",
+        params![conversation_id],
+    )?;
     tx.commit()?;
     Ok(())
 }
@@ -2538,12 +2550,23 @@ pub(crate) fn clear_all_history_records(conn: &Connection) -> rusqlite::Result<V
     conn.execute("DELETE FROM thread_skill_override_state", [])?;
     conn.execute("DELETE FROM message_events", [])?;
     conn.execute("DELETE FROM messages", [])?;
+    // Recorded meetings reference a conversation via `meetings
+    // .agent_conversation_id`, an enforced foreign key with no ON DELETE
+    // CASCADE. Clear them before the conversations or the delete aborts for any
+    // user who routed a meeting to an agent conversation (#3345), matching the
+    // erase-all path which clears meetings before the conversation delete.
+    crate::commands::audio::clear_all_meetings(conn)?;
     conn.execute("DELETE FROM conversations", [])?;
     Ok(conversation_ids)
 }
 
 #[tauri::command]
 pub async fn clear_all_history(app: AppHandle) -> Result<(), String> {
+    // Hold the history-sync lock across the local erase so an in-flight pull
+    // cannot re-insert the conversations/messages we are clearing (#3345).
+    // `run_history_sync_once` acquires the same lock.
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let conversation_ids = run_db(app.clone(), |conn| {
         let ids = clear_all_history_records(conn)?;
         // Reclaim and zero the freed pages so no cleared content lingers in the
@@ -2594,6 +2617,10 @@ pub async fn erase_all_conversation_data(
     app: AppHandle,
     authorization_state: State<'_, crate::tool_authorization::ToolAuthorizationState>,
 ) -> Result<Vec<EraseTargetReport>, String> {
+    // Hold the history-sync lock across the erase so an in-flight pull cannot
+    // resurrect erased rows locally (#3345). run_history_sync_once holds it too.
+    let sync_lock = crate::services::history_sync::HistorySyncLock::handle(&app);
+    let _sync_guard = sync_lock.lock().await;
     let mut reports = Vec::new();
 
     // Local chat.db: capture each agent conversation's transcript identity
@@ -2627,6 +2654,9 @@ pub async fn erase_all_conversation_data(
     let mut erased_conversation_ids: Vec<String> = Vec::new();
     // Cloud-note ids captured before deletion, erased from seren-notes below.
     let mut meeting_note_ids: Vec<String> = Vec::new();
+    // When the chat.db step fails, no ids were captured, so the cloud erases are
+    // not genuinely attempted — they must not report a false green "0 erased".
+    let chat_failed = chat_result.is_err();
     let transcript_targets = match chat_result {
         Ok((conversation_ids, targets, meetings_removed, note_ids)) => {
             meeting_note_ids = note_ids;
@@ -2650,12 +2680,17 @@ pub async fn erase_all_conversation_data(
         }
         Err(err) => {
             reports.push(EraseTargetReport::new("local_chat_db", "failed", Some(err)));
-            // The meeting purge shares the chat.db transaction path, so a chat.db
-            // failure means it did not run either — report it honestly.
+            // clear_all_meetings commits per meeting before the conversation
+            // delete, so on a chat.db failure the meeting state is uncertain —
+            // some may already be gone. Report that honestly rather than
+            // asserting either outcome (#3348).
             reports.push(EraseTargetReport::new(
                 "meeting_recordings",
                 "failed",
-                Some("chat.db erase failed; meeting recordings were not removed".to_string()),
+                Some(
+                    "chat.db erase failed; some meeting recordings may have been removed before the failure"
+                        .to_string(),
+                ),
             ));
             Vec::new()
         }
@@ -2732,8 +2767,14 @@ pub async fn erase_all_conversation_data(
     // (offline / unauthenticated memory service) the target is `failed`, not a
     // false green `ok` that implies the retained cloud transcripts are gone.
     let memory_counts = erase_memory_sources(&app, &erased_conversation_ids).await;
-    let (memory_status, memory_detail) =
-        cloud_memory_erase_report(&memory_counts, erased_conversation_ids.len());
+    let (memory_status, memory_detail) = if chat_failed {
+        (
+            "failed",
+            "chat.db erase failed; retained cloud memory sources were not attempted".to_string(),
+        )
+    } else {
+        cloud_memory_erase_report(&memory_counts, erased_conversation_ids.len())
+    };
     reports.push(EraseTargetReport::new(
         "cloud_memories",
         memory_status,
@@ -2745,7 +2786,12 @@ pub async fn erase_all_conversation_data(
     let note_total = meeting_note_ids.len();
     let note_counts =
         crate::audio::seren_notes_publish::erase_meeting_notes(&app, &meeting_note_ids).await;
-    let (notes_status, notes_detail) = if note_counts.failed == 0 {
+    let (notes_status, notes_detail) = if chat_failed {
+        (
+            "failed",
+            "chat.db erase failed; cloud meeting notes were not attempted".to_string(),
+        )
+    } else if note_counts.failed == 0 {
         (
             "ok",
             format!("{} cloud meeting note(s) erased", note_counts.deleted),
