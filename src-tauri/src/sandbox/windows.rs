@@ -360,6 +360,14 @@ mod platform {
         let base_token = HandleGuard::new(base_token);
         let logon_sid = logon_sid(base_token.get())?;
         let world_sid = world_sid()?;
+        // Restricting SID set for the write-restricted token. Note that keeping
+        // World (Everyone) here means a write to an object whose DACL grants
+        // Everyone write (world-writable temp/shared locations) is still
+        // permitted — write-confinement is to the workspace plus any
+        // Everyone-writable object, not the workspace alone. This matches the
+        // pinned Codex restricted-token design; tightening it (dropping World)
+        // needs on-box validation that the agent's own toolchain still runs and
+        // is tracked as sandbox hardening (#3347).
         let restricted = [
             SID_AND_ATTRIBUTES {
                 Sid: capability,

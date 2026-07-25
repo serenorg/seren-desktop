@@ -105,6 +105,43 @@ fn sandbox_deny_read_canary_is_denied() {
     assert!(!String::from_utf8_lossy(&output.stdout).contains("do not read"));
 }
 
+// A credential directory that sits INSIDE the writable workspace root must not
+// be writable either: workspace-write allows writes to the workspace, so
+// without an explicit write-deny a deny_read path nested in the workspace (e.g.
+// the user opens ~ as the project) stays a persistence vector (#3347).
+#[test]
+fn sandbox_deny_read_path_inside_workspace_is_not_writable() {
+    let workspace = tempdir().expect("workspace tempdir");
+    let creds = workspace.path().join("dot-ssh");
+    fs::create_dir_all(&creds).expect("creds dir");
+    let target = creds.join("authorized_keys");
+    let sandbox = policy(
+        SandboxMode::WorkspaceWrite,
+        workspace.path(),
+        &[creds.clone()],
+        true,
+    );
+
+    let output = run_shell(
+        &sandbox,
+        "/bin/sh",
+        format!(
+            "if printf pwned > {} 2>/dev/null; then echo WROTE; else echo DENIED; fi",
+            shell_literal(&target)
+        ),
+    );
+
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("DENIED"),
+        "write to a deny_read dir inside the workspace must be denied: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        fs::read_to_string(&target).unwrap_or_default().is_empty(),
+        "the credential file must not have been written"
+    );
+}
+
 #[test]
 fn sandbox_grandchild_write_cannot_escape() {
     let workspace = tempdir().expect("workspace tempdir");
