@@ -440,6 +440,7 @@ import {
   getCachedModelContextWindow,
   recordModelContextWindow,
 } from "@/services/modelContextCache";
+import { postNotification } from "@/services/notifications";
 import type {
   AgentEvent,
   AgentInfo,
@@ -952,27 +953,14 @@ function subscribeToCliScanRejections(): void {
       console.warn(
         `[cli-updater] scan rejected for ${rejection.packageName} v${rejection.to}; flags=${rejection.flags.join(",")}`,
       );
-      // System notification — minimum surface required by #1646. Falls
-      // back silently when the platform denies permission.
-      try {
-        if (typeof Notification !== "undefined") {
-          if (Notification.permission === "granted") {
-            new Notification("Seren blocked a CLI update", {
-              body: `${rejection.label} ${rejection.to} was rejected by the local supply-chain scanner. You stay on your previous version.`,
-            });
-          } else if (Notification.permission !== "denied") {
-            void Notification.requestPermission().then((perm) => {
-              if (perm === "granted") {
-                new Notification("Seren blocked a CLI update", {
-                  body: `${rejection.label} ${rejection.to} was rejected by the local supply-chain scanner. You stay on your previous version.`,
-                });
-              }
-            });
-          }
-        }
-      } catch {
-        // Silent — best-effort surface, never fail the subscriber.
-      }
+      // System notification — minimum surface required by #1646. Routed
+      // through the native plugin because the WebView Notification API is
+      // denied by default in this app's macOS webview (#3301). Falls back
+      // silently when the platform denies permission.
+      void postNotification(
+        "Seren blocked a CLI update",
+        `${rejection.label} ${rejection.to} was rejected by the local supply-chain scanner. You stay on your previous version.`,
+      );
     },
   );
 }
@@ -1023,21 +1011,16 @@ function applyCliUpdateAction(payload: unknown, notify = true): void {
   console.warn(
     `[cli-updater] action required for ${action.packageName}; reason=${action.reason}`,
   );
-  try {
-    if (
-      notify &&
-      typeof Notification !== "undefined" &&
-      Notification.permission === "granted"
-    ) {
-      const notification = new Notification(`${action.label} needs attention`, {
-        body: "Seren kept the previous verified version. Retry or review the official installation instructions in Seren.",
-      });
-      notification.onclick = () => {
-        void openExternalLink(action.officialInstructionsUrl);
-      };
-    }
-  } catch {
-    // Best-effort OS notification; the in-app recovery card remains.
+  // Routed through the native plugin because the WebView Notification API is
+  // denied by default in this app's macOS webview (#3301). The click-to-open
+  // affordance is intentionally dropped: the plugin's desktop notifications
+  // fire-and-forget with no click/action event, and the in-app recovery card
+  // already links to the official instructions the body text names.
+  if (notify) {
+    void postNotification(
+      `${action.label} needs attention`,
+      "Seren kept the previous verified version. Retry or review the official installation instructions in Seren.",
+    );
   }
 }
 
