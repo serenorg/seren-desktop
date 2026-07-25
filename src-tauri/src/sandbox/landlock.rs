@@ -44,19 +44,28 @@ mod linux {
         allowed_paths.extend(argument_file_paths.iter().cloned());
         validate_deny_read(policy, &allowed_paths)?;
 
-        // V7 is the complete filesystem access set known to this crate. HardRequirement is
-        // intentional: a kernel that cannot represent one of these controls must not silently
-        // receive a weaker policy.
+        // Hard-require the first Landlock version — supported on every kernel that has Landlock at
+        // all (>= 5.13) — then best-effort every newer right. HardRequirement on the full V7 set
+        // would reject any kernel below 6.10 (the ABI that introduces the newest AccessFs right,
+        // IoctlDev), i.e. Ubuntu 22.04/24.04 and Debian 12 — the bulk of deployed desktops — which
+        // fails the launch closed instead of enforcing what the kernel can. BestEffort silently
+        // drops the rights the running kernel lacks while still enforcing everything it supports;
+        // FullyEnforced below still rejects a kernel with no Landlock at all.
         let abi = ABI::V7;
         let mut ruleset = Ruleset::default()
             .set_compatibility(CompatLevel::HardRequirement)
+            .handle_access(AccessFs::from_all(ABI::V1))
+            .map_err(|error| SandboxError::Landlock(error.to_string()))?
+            .set_compatibility(CompatLevel::BestEffort)
             .handle_access(AccessFs::from_all(abi))
             .map_err(|error| SandboxError::Landlock(error.to_string()))?;
 
         if !policy.network_enabled {
-            // No NetPort rules are added, so every handled TCP bind/connect is denied. ABI V4 is
-            // the first Landlock ABI that can enforce both TCP rights.
+            // No NetPort rules are added, so every handled TCP bind/connect is denied. AccessNet
+            // arrives in ABI V4 (kernel 6.7); best-effort so an older kernel drops the network
+            // handle rather than failing the whole launch, matching the filesystem handling above.
             ruleset = ruleset
+                .set_compatibility(CompatLevel::BestEffort)
                 .handle_access(AccessNet::from_all(ABI::V4))
                 .map_err(|error| SandboxError::Landlock(error.to_string()))?;
         }
@@ -91,11 +100,16 @@ mod linux {
         let status = created
             .restrict_self()
             .map_err(|error| SandboxError::Landlock(error.to_string()))?;
-        if status.ruleset != RulesetStatus::FullyEnforced {
-            return Err(SandboxError::Landlock(format!(
-                "Landlock ruleset was not fully enforced: {:?}",
-                status.ruleset
-            )));
+        // `PartiallyEnforced` is the expected result on a kernel that supports Landlock but not
+        // every V7 access right (e.g. 6.7-6.9 without IoctlDev): the workspace confinement from the
+        // hard-required V1 floor is enforced, only the newest rights the kernel never had are
+        // dropped. `NotEnforced` means the kernel has no Landlock at all — but the HardRequirement
+        // V1 handle above already errors before we reach here on such a kernel, so this rejects it
+        // defensively rather than running unconfined.
+        if status.ruleset == RulesetStatus::NotEnforced {
+            return Err(SandboxError::Landlock(
+                "Landlock is unavailable on this kernel; refusing to run unconfined".to_string(),
+            ));
         }
 
         Ok(())
