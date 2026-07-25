@@ -1102,6 +1102,87 @@ mod dispatch_identity_tests {
 }
 
 #[cfg(test)]
+mod dispatch_enforcement_tests {
+    use super::*;
+    use crate::tool_authorization::{
+        ToolAuthorizationState, ToolRoute, binding_for_publisher_args,
+    };
+
+    fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+        app.manage(McpState::default());
+        app.manage(ToolAuthorizationState::new(std::path::PathBuf::from(
+            ":memory:",
+        )));
+        app
+    }
+
+    /// #3193-F: the stdio MCP transport redeems a dispatch handle before it ever
+    /// looks up the server slot, so a call that skipped the gate (no handle) or a
+    /// handle minted for a different tool is refused at the command entrypoint —
+    /// no child process is reached. Driven through `mcp_call_tool` itself so the
+    /// wrapper's enforcement is proven, not only the shared consume path.
+    #[tokio::test]
+    async fn mcp_call_tool_refuses_missing_forged_and_mismatched_handles() {
+        let app = mock_app();
+        let args = serde_json::json!({ "q": "hello" });
+
+        // No handle → refuse before any server lookup.
+        assert!(
+            mcp_call_tool(
+                app.state(),
+                app.state(),
+                "srv".into(),
+                "search".into(),
+                args.clone(),
+                None,
+            )
+            .await
+            .is_err()
+        );
+
+        // Forged handle → refuse.
+        assert!(
+            mcp_call_tool(
+                app.state(),
+                app.state(),
+                "srv".into(),
+                "search".into(),
+                args.clone(),
+                Some("not-a-real-handle".into()),
+            )
+            .await
+            .is_err()
+        );
+
+        // A handle minted for a different tool cannot be redeemed for this one.
+        let wrong_tool = app
+            .state::<ToolAuthorizationState>()
+            .mint_dispatch_handle_for_test(
+                ToolRoute::Mcp,
+                "srv",
+                "other_tool",
+                &binding_for_publisher_args(&args),
+            )
+            .expect("test handle mints");
+        assert!(
+            mcp_call_tool(
+                app.state(),
+                app.state(),
+                "srv".into(),
+                "search".into(),
+                args.clone(),
+                Some(wrong_tool),
+            )
+            .await
+            .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
 #[cfg(unix)]
 mod tests {
     use super::*;
