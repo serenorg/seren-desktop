@@ -19,6 +19,12 @@ export function resolveGrokBinary({
   arch = process.arch,
   home = os.homedir(),
   appData = process.env.APPDATA ?? "",
+  // Absolute install locations outside the caller's control, checked last.
+  // Injectable so a hermetic test can supply an empty list and assert the bare
+  // "grok" fallback without a real system grok on the host tainting the result.
+  systemPaths = platform === "win32"
+    ? []
+    : ["/usr/local/bin/grok", "/opt/homebrew/bin/grok"],
 } = {}) {
   const nodeDir = path.dirname(execPath);
   const executableName = platform === "win32" ? "grok.exe" : "grok";
@@ -64,8 +70,7 @@ export function resolveGrokBinary({
     path.join(home, ".grok", "bin", "grok"),
     ...(isSymlink(embeddedShim) ? [embeddedShim] : []),
     path.join(home, ".local", "bin", "grok"),
-    "/usr/local/bin/grok",
-    "/opt/homebrew/bin/grok",
+    ...systemPaths,
   ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
