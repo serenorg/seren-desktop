@@ -11,7 +11,10 @@ import {
 } from "solid-js";
 import { ApprovalActions } from "@/components/approvals/ApprovalActions";
 import { cancelOrchestration } from "@/services/orchestrator";
-import { grantCapabilityLease } from "@/services/tool-authorization";
+import {
+  grantCapabilityLease,
+  type LeaseBudgets,
+} from "@/services/tool-authorization";
 import { conversationStore } from "@/stores/conversation.store";
 
 interface ShellApprovalRequest {
@@ -137,7 +140,7 @@ export const ShellApproval: Component = () => {
    */
   const handleApproveForTask = async (
     durationSecs: number,
-    maxCalls: number,
+    budgets: LeaseBudgets,
   ) => {
     const req = request();
     const program = leaseProgram();
@@ -154,7 +157,7 @@ export const ShellApproval: Component = () => {
           `Task lease: "${program}" commands`,
           durationSecs,
           { commandRules: [{ program }] },
-          { maxCalls },
+          budgets,
         );
       } catch (err) {
         console.error(

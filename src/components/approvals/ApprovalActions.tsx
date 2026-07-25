@@ -2,6 +2,8 @@
 // ABOUTME: this task with editable limits, deny, skip action, and stop task.
 
 import { type Component, createSignal, Show } from "solid-js";
+import { leaseBudgetsFromInputs } from "@/components/approvals/leaseBudgets";
+import type { LeaseBudgets } from "@/services/tool-authorization";
 
 /** Requested lease lifetimes the editor offers, in hours. */
 const DURATION_CHOICES_HOURS = [1, 4, 8, 24];
@@ -17,7 +19,7 @@ interface ApprovalActionsProps {
   /** Human summary of what an approve-for-this-task lease will cover. */
   leaseSummary: string;
   onApproveOnce: () => void;
-  onApproveForTask: (durationSecs: number, maxCalls: number) => void;
+  onApproveForTask: (durationSecs: number, budgets: LeaseBudgets) => void;
   onDeny: () => void;
   onSkip: () => void;
   onStopTask: () => void;
@@ -25,8 +27,10 @@ interface ApprovalActionsProps {
 
 /**
  * The five decisions every approval surface offers (#3193 §7). "Approve for
- * this task" expands an inline editor for the lease's requested duration and
- * call budget before granting, so the user reviews the limits they hand out.
+ * this task" expands an inline editor for the lease's requested duration, call
+ * budget, and optional monetary cap before granting, so the user reviews the
+ * limits they hand out. A blank spend cap leaves the lease with no monetary
+ * allowance, so a priced call still escalates rather than running unbounded.
  */
 export const ApprovalActions: Component<ApprovalActionsProps> = (props) => {
   const [showLeaseEditor, setShowLeaseEditor] = createSignal(false);
@@ -34,13 +38,17 @@ export const ApprovalActions: Component<ApprovalActionsProps> = (props) => {
     DEFAULT_DURATION_HOURS,
   );
   const [maxCalls, setMaxCalls] = createSignal(DEFAULT_MAX_CALLS);
+  // Whole currency units the lease may spend; blank ("") = no monetary allowance.
+  const [maxSpend, setMaxSpend] = createSignal("");
 
   const secondaryButton =
     "px-4 py-2.5 text-[0.9rem] font-medium rounded-md cursor-pointer transition-all duration-150 bg-transparent text-foreground border border-border hover:bg-surface-1 hover:border-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed";
 
   const grantLease = () => {
-    const calls = Math.max(1, Math.floor(maxCalls()));
-    props.onApproveForTask(durationHours() * 3600, calls);
+    props.onApproveForTask(
+      durationHours() * 3600,
+      leaseBudgetsFromInputs(maxCalls(), maxSpend()),
+    );
   };
 
   return (
@@ -79,6 +87,20 @@ export const ApprovalActions: Component<ApprovalActionsProps> = (props) => {
                 }
                 disabled={props.isProcessing}
               />
+            </label>
+            <label class="flex items-center gap-2 text-[0.85rem] text-muted-foreground">
+              Max spend
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="none"
+                class="bg-surface-1 border border-border rounded-md px-2 py-1.5 text-foreground w-24"
+                value={maxSpend()}
+                onInput={(event) => setMaxSpend(event.currentTarget.value)}
+                disabled={props.isProcessing}
+              />
+              <span class="text-[0.75rem]">USDC</span>
             </label>
             <button
               type="button"
