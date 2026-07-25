@@ -8,6 +8,10 @@ const walletMocks = vi.hoisted(() => ({
   markWalletNotificationRead: vi.fn(),
 }));
 
+const notificationMocks = vi.hoisted(() => ({
+  postNotification: vi.fn(),
+}));
+
 vi.mock("@/services/dailyClaim", () => ({
   claimDailyCredits: vi.fn(),
   fetchDailyEligibility: vi.fn(),
@@ -18,37 +22,25 @@ vi.mock("@/services/wallet", () => ({
   markWalletNotificationRead: walletMocks.markWalletNotificationRead,
 }));
 
+vi.mock("@/services/notifications", () => ({
+  postNotification: notificationMocks.postNotification,
+}));
+
 import { refreshBalance, resetWalletState } from "@/stores/wallet.store";
 
-interface NotificationCall {
-  title: string;
-  body: string | undefined;
-}
-
 describe("wallet received-transfer notification batches", () => {
-  const notificationCalls: NotificationCall[] = [];
-
   beforeEach(() => {
-    notificationCalls.length = 0;
     walletMocks.fetchBalance.mockReset();
     walletMocks.markWalletNotificationRead.mockReset();
     walletMocks.markWalletNotificationRead.mockResolvedValue(undefined);
+    notificationMocks.postNotification.mockReset();
+    notificationMocks.postNotification.mockResolvedValue(undefined);
     resetWalletState();
 
     // Pin the clock inside the 24h notify window for the fixture timestamps below.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-05-20T22:33:00Z"));
 
-    class MockNotification {
-      static permission = "granted";
-      static requestPermission = vi.fn();
-
-      constructor(title: string, options?: NotificationOptions) {
-        notificationCalls.push({ title, body: options?.body });
-      }
-    }
-
-    vi.stubGlobal("Notification", MockNotification);
     vi.stubGlobal("localStorage", {
       getItem: () => null,
       setItem: vi.fn(),
@@ -101,12 +93,22 @@ describe("wallet received-transfer notification batches", () => {
 
     await vi.waitFor(() => {
       expect(walletMocks.markWalletNotificationRead).toHaveBeenCalledTimes(3);
-      expect(notificationCalls).toHaveLength(3);
+      expect(notificationMocks.postNotification).toHaveBeenCalledTimes(3);
     });
 
     expect(walletMocks.markWalletNotificationRead.mock.calls.map(([id]) => id))
       .toEqual(["notification-old", "notification-mid", "notification-new"]);
-    expect(notificationCalls.map((call) => call.body)).toEqual([
+    // Native path posts (title, body); assert both fire oldest-first.
+    expect(
+      notificationMocks.postNotification.mock.calls.map(([title]) => title),
+    ).toEqual([
+      "SerenBucks received",
+      "SerenBucks received",
+      "SerenBucks received",
+    ]);
+    expect(
+      notificationMocks.postNotification.mock.calls.map(([, body]) => body),
+    ).toEqual([
       "Old Sender sent $1.00",
       "Mid Sender sent $2.00",
       "New Sender sent $3.00",
