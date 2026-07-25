@@ -362,6 +362,62 @@ fn spawn_memory_source_erase_best_effort(app: &AppHandle, conversation_ids: Vec<
     });
 }
 
+/// Erase every recorded meeting captured in the given conversations — linked via
+/// `meetings.agent_conversation_id` — from chat.db, returning the meeting ids so
+/// the caller can drop their transcript search vectors (a separate DB). The
+/// meeting rows still carry the conversation id after `delete_conversation_records`
+/// because no FK cascade is configured, so this runs on the same connection.
+/// Reuses `delete_meeting_record`, which enqueues sync tombstones for remote
+/// erasure, so a per-conversation delete matches the per-meeting delete.
+fn cascade_delete_linked_meetings(
+    conn: &Connection,
+    conversation_ids: &[String],
+) -> rusqlite::Result<Vec<String>> {
+    if conversation_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = conversation_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT id FROM meetings WHERE agent_conversation_id IN ({placeholders})");
+    let mut stmt = conn.prepare(&sql)?;
+    let meeting_ids = stmt
+        .query_map(rusqlite::params_from_iter(conversation_ids), |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    drop(stmt);
+    for id in &meeting_ids {
+        crate::commands::audio::delete_meeting_record(conn, id)?;
+    }
+    Ok(meeting_ids)
+}
+
+/// Clear the transcript search vectors for the given meetings from the separate
+/// transcript index DB. Best-effort and never fatal: a missing or unreachable
+/// index is logged, not surfaced, matching the CLI-transcript cascade.
+fn delete_meeting_transcript_vectors_best_effort(app: &AppHandle, meeting_ids: &[String]) {
+    if meeting_ids.is_empty() {
+        return;
+    }
+    match crate::services::transcript_vectors::open_transcript_db(app) {
+        Ok(conn) => {
+            for id in meeting_ids {
+                if let Err(err) =
+                    crate::services::transcript_vectors::delete_meeting_chunks(&conn, id)
+                {
+                    log::warn!("[Delete] Failed to clear transcript vectors for meeting {id}: {err}");
+                }
+            }
+        }
+        Err(err) => {
+            log::warn!("[Delete] Failed to open transcript index for meeting-vector cleanup: {err}")
+        }
+    }
+}
+
 async fn refresh_conversation_index_meta_best_effort(
     app: AppHandle,
     conversation_id: String,
@@ -896,16 +952,25 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
     let index_id = id.clone();
-    let transcript_targets = run_db(app.clone(), move |conn| {
-        let targets = collect_agent_transcript_targets(conn, std::slice::from_ref(&id))?;
-        delete_conversation_records(conn, &[id])?;
+    let (transcript_targets, meeting_ids) = run_db(app.clone(), move |conn| {
+        let ids = vec![id];
+        let targets = collect_agent_transcript_targets(conn, &ids)?;
+        // Recorded meetings captured in this conversation are communications
+        // too (#3316). Erase them BEFORE the conversation: `meetings
+        // .agent_conversation_id` is a foreign key with no ON DELETE CASCADE and
+        // the bundled SQLite enforces foreign keys, so deleting the conversation
+        // while a meeting still references it would fail. Returns the meeting ids
+        // so the transcript search vectors (a separate DB) can be cleared below.
+        let meeting_ids = cascade_delete_linked_meetings(conn, &ids)?;
+        delete_conversation_records(conn, &ids)?;
         vacuum_database(conn)?;
-        Ok(targets)
+        Ok((targets, meeting_ids))
     })
     .await?;
     delete_conversation_index_best_effort(&app, &index_id);
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
+    delete_meeting_transcript_vectors_best_effort(&app, &meeting_ids);
     spawn_memory_source_erase_best_effort(&app, vec![index_id]);
     Ok(())
 }
@@ -915,23 +980,27 @@ pub async fn delete_conversations_by_employee(
     app: AppHandle,
     employee_id: String,
 ) -> Result<i64, String> {
-    let (deleted, conversation_ids, transcript_targets) = run_db(app.clone(), move |conn| {
-        let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
-        let conversation_ids = stmt
-            .query_map(params![employee_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        drop(stmt);
-        let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
-        let deleted = delete_conversation_records(conn, &conversation_ids)?;
-        vacuum_database(conn)?;
-        Ok((deleted as i64, conversation_ids, targets))
-    })
-    .await?;
+    let (deleted, conversation_ids, transcript_targets, meeting_ids) =
+        run_db(app.clone(), move |conn| {
+            let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
+            let conversation_ids = stmt
+                .query_map(params![employee_id], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            drop(stmt);
+            let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
+            // Meetings first — the conversations FK is enforced (see delete_conversation).
+            let meeting_ids = cascade_delete_linked_meetings(conn, &conversation_ids)?;
+            let deleted = delete_conversation_records(conn, &conversation_ids)?;
+            vacuum_database(conn)?;
+            Ok((deleted as i64, conversation_ids, targets, meeting_ids))
+        })
+        .await?;
     for conversation_id in &conversation_ids {
         delete_conversation_index_best_effort(&app, conversation_id);
     }
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
+    delete_meeting_transcript_vectors_best_effort(&app, &meeting_ids);
     spawn_memory_source_erase_best_effort(&app, conversation_ids);
     Ok(deleted)
 }
@@ -2481,11 +2550,15 @@ pub async fn erase_all_conversation_data(
             .query_map([], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?;
         let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
-        delete_conversation_records(conn, &conversation_ids)?;
         // Recorded meetings are communications too (#3314): erase every meeting
-        // and its transcript segments / speaker assignments before the VACUUM so
-        // the freed transcript pages are reclaimed in the same pass.
+        // and its transcript segments / speaker assignments. This runs BEFORE the
+        // conversation delete because `meetings.agent_conversation_id` is an
+        // enforced foreign key with no ON DELETE CASCADE — deleting a
+        // conversation while a linked meeting still references it would fail
+        // (#3316). The VACUUM then reclaims the freed transcript pages in the
+        // same pass.
         let meetings_removed = crate::commands::audio::clear_all_meetings(conn)?;
+        delete_conversation_records(conn, &conversation_ids)?;
         vacuum_database(conn)?;
         Ok((conversation_ids, targets, meetings_removed))
     })
@@ -2647,6 +2720,7 @@ mod tests {
         MemorySourceEraseCounts, MemorySourceEraseResponse,
         archive_agent_conversation_in_db, archive_happy_provider_session_in_db,
         claim_happy_provider_session_owner_in_db,
+        cascade_delete_linked_meetings,
         claim_happy_provider_session_owner_with_provenance_in_db, clear_all_history_records,
         cloud_memory_erase_report, collect_agent_transcript_targets, conversation_source_uri,
         delete_conversation_records, emit_happy_archive_event,
@@ -2860,6 +2934,97 @@ mod tests {
                 .unwrap();
             assert_eq!(remaining, 0, "{table} must be empty after clear-all");
         }
+    }
+
+    // Deleting a conversation must cascade to the recorded meeting captured in
+    // it (linked via meetings.agent_conversation_id, #3316) — segments, speaker
+    // assignments, and the meeting row — while leaving an unrelated meeting
+    // intact. Guards the local half of the cascade (transcript vectors live in a
+    // separate DB cleared by the command wrapper).
+    #[test]
+    fn deleting_conversation_cascades_to_its_linked_meeting() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind) VALUES
+               ('c1', 't', 0, 'agent'),
+               ('c2', 't', 0, 'agent')",
+            [],
+        )
+        .unwrap();
+        // mtg1 belongs to the deleted conversation; mtg2 to a surviving one.
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, status, created_at, updated_at, agent_conversation_id)
+             VALUES
+               ('mtg1', 'Linked', 1, 'completed', 1, 1, 'c1'),
+               ('mtg2', 'Other',  1, 'completed', 1, 1, 'c2')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO transcript_segments
+               (id, meeting_id, seq, speaker, text, start_ms, end_ms, status, created_at)
+             VALUES
+               ('seg1', 'mtg1', 0, 'A', 'linked secret', 0, 1, 'final', 1),
+               ('seg2', 'mtg2', 0, 'A', 'keep me',       0, 1, 'final', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO meeting_speaker_assignments
+               (id, meeting_id, source, source_key, display_name, scope, created_at, updated_at)
+             VALUES ('asn1', 'mtg1', 'manual', 'A', 'Alice', 'meeting', 1, 1)",
+            [],
+        )
+        .unwrap();
+
+        // The bundled SQLite enforces foreign keys, and meetings.agent_conversation_id
+        // has no ON DELETE CASCADE — so the meeting MUST be erased before the
+        // conversation or the conversation delete fails. This mirrors the command.
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(fk, 1, "bundled SQLite is expected to enforce foreign keys");
+
+        let ids = vec!["c1".to_string()];
+        let erased = cascade_delete_linked_meetings(&conn, &ids).unwrap();
+        assert_eq!(erased, vec!["mtg1".to_string()]);
+        delete_conversation_records(&conn, &ids).unwrap();
+
+        // The linked meeting and its transcript are gone.
+        let mtg1: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM meetings WHERE id = 'mtg1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mtg1, 0, "linked meeting must be removed");
+        let seg1: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id = 'mtg1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(seg1, 0, "linked meeting segments must be removed");
+        let asn1: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM meeting_speaker_assignments WHERE meeting_id = 'mtg1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(asn1, 0, "linked meeting speaker assignments must be removed");
+
+        // The unrelated meeting is untouched.
+        let mtg2: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM meetings WHERE id = 'mtg2'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mtg2, 1, "unrelated meeting must survive");
     }
 
     #[test]
