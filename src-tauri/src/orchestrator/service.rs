@@ -1162,6 +1162,15 @@ async fn execute_multi_task(
                                     .or_default()
                                     .push_str(text);
                             }
+                            // Settle any approval the host suspended for this
+                            // conversation and append the same disclosure notice
+                            // the single-task path adds before the subtask's
+                            // completion is persisted and forwarded. Without this a
+                            // decomposed subtask completes with an approval still
+                            // pending, leaving the thread stuck on "waiting for
+                            // approval" until the continuation's TTL or a reload.
+                            let worker_event =
+                                guard_completion(&app_for_events, &conv_id, worker_event);
                             if matches!(worker_event, WorkerEvent::Complete { .. }) {
                                 let message_id = format!("{}:{}", assistant_message_id_for_events, subtask_id);
                                 let streamed_content = streamed_by_subtask
