@@ -234,26 +234,6 @@ pub async fn execute_shell_command_streaming<R: Runtime>(
     result
 }
 
-/// Execute an AI tool shell command with optional stored Seren auth injection.
-///
-/// `inject_seren_credentials = None` uses the same narrow auto-detect policy as
-/// the Tauri command so skill-local commands keep working without exposing the
-/// key to ordinary commands such as `ls`.
-pub async fn execute_shell_command_for_tool<R: Runtime>(
-    app: &AppHandle<R>,
-    command: String,
-    timeout_secs: Option<u64>,
-    inject_seren_credentials: Option<bool>,
-) -> Result<CommandResult, String> {
-    let api_key = if should_inject_seren_credentials(&command, inject_seren_credentials) {
-        read_stored_seren_api_key(app)?
-    } else {
-        None
-    };
-
-    execute_shell_command_inner(command, timeout_secs, api_key.as_deref(), None).await
-}
-
 pub async fn execute_shell_command_without_seren_credentials(
     command: String,
     timeout_secs: Option<u64>,
