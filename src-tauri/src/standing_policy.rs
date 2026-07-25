@@ -61,6 +61,12 @@ fn fresh_budgets(budgets: &LeaseBudgets) -> LeaseBudgets {
         max_spend_micros: budgets.max_spend_micros,
         spend_used_micros: 0,
         asset: budgets.asset.clone(),
+        // The policy's rate limit carries over, with a fresh (unopened) window
+        // so each conversation gets the policy's full per-window allowance.
+        max_calls_per_window: budgets.max_calls_per_window,
+        window_secs: budgets.window_secs,
+        window_ends_at: None,
+        calls_in_window: 0,
     }
 }
 
@@ -112,6 +118,7 @@ mod tests {
                 max_spend_micros: Some(5_000_000),
                 spend_used_micros: 777,
                 asset: Some("USDC".to_string()),
+                ..Default::default()
             },
             created_at: "2026-07-24T00:00:00Z".to_string(),
             updated_at: "2026-07-24T00:00:00Z".to_string(),
