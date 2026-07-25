@@ -80,6 +80,14 @@
       "embedded-runtime/": "embedded-runtime/",
       "mcp-servers/playwright-stealth/": "mcp-servers/playwright-stealth/"
     },
+    "linux": {
+      "deb": {
+        "depends": [
+          "bubblewrap",
+          "socat"
+        ]
+      }
+    },
     "macOS": {
       "entitlements": "entitlements.plist",
       "minimumSystemVersion": "10.13"

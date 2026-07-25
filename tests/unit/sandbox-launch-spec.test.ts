@@ -40,68 +40,68 @@ describe("trusted sandbox launch spec (#3230)", () => {
     }
   });
 
-  it("passes the requested mode, network flag, and root to the binary", () => {
+  it("passes the requested mode, network flag, and root to the binary", async () => {
     installSpecBinary(
       'printf \'{"kind":"seatbelt","profile":"mode=%s network=%s root=%s"}\\n\' "$2" "$3" "$4"',
     );
 
-    expect(
+    await expect(
       resolveSandboxLaunchSpec({
         sandboxMode: "read-only",
         cwd: "/tmp/project",
         networkEnabled: false,
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       kind: "seatbelt",
       profile: "mode=read-only network=false root=/tmp/project",
     });
   });
 
-  it("blocks the launch when the trusted binary is unavailable", () => {
+  it("blocks the launch when the trusted binary is unavailable", async () => {
     delete process.env.SEREN_SANDBOX_SPEC_BIN;
 
-    expect(() =>
+    await expect(
       resolveSandboxLaunchSpec({
         sandboxMode: "workspace-write",
         cwd: "/tmp/project",
         networkEnabled: false,
       }),
-    ).toThrow(/trusted sandbox spec binary is unavailable/);
+    ).rejects.toThrow(/trusted sandbox spec binary is unavailable/);
   });
 
-  it("blocks the launch when the trusted binary fails", () => {
+  it("blocks the launch when the trusted binary fails", async () => {
     installSpecBinary('echo "unsupported sandbox mode" >&2\nexit 70');
 
-    expect(() =>
+    await expect(
       resolveSandboxLaunchSpec({
         sandboxMode: "workspace-write",
         cwd: "/tmp/project",
         networkEnabled: true,
       }),
-    ).toThrow(/unsupported sandbox mode/);
+    ).rejects.toThrow(/unsupported sandbox mode/);
   });
 
-  it("rejects a spec shape the Rust builder never emits", () => {
+  it("rejects a spec shape the Rust builder never emits", async () => {
     installSpecBinary('printf \'{"kind":"anything-goes"}\\n\'');
 
-    expect(() =>
+    await expect(
       resolveSandboxLaunchSpec({
         sandboxMode: "workspace-write",
         cwd: "/tmp/project",
         networkEnabled: true,
       }),
-    ).toThrow(/unrecognized sandbox launch spec/);
+    ).rejects.toThrow(/unrecognized sandbox launch spec/);
   });
 
-  it("leaves full-access sessions without a spec", () => {
+  it("leaves full-access sessions without a spec", async () => {
     installSpecBinary('echo "the binary must not be consulted" >&2\nexit 70');
 
-    expect(
+    await expect(
       resolveSandboxLaunchSpec({
         sandboxMode: "full-access",
         cwd: "/tmp/project",
         networkEnabled: true,
       }),
-    ).toBeNull();
+    ).resolves.toBeNull();
   });
 });

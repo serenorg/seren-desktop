@@ -200,11 +200,12 @@ export function createSynchronousSpawnCoordinator({
 
   const reemitReady = (session) => {
     if (session?.status !== "ready") return;
-    emit("provider://session-status", {
-      sessionId: session.id,
-      status: "ready",
-      agentSessionId: session.agentSessionId,
-    });
+    // Emit the full live status payload (model/mode included), read from the
+    // live session object's current status rather than a hand-built "ready".
+    // The session is mutated in place, so a joiner whose continuation runs after
+    // the session has gone busy is caught by the guard above and never flips a
+    // running turn back to idle on mobile (#3350).
+    emit("provider://session-status", buildSessionStatus(session));
   };
 
   return function coordinateSpawn(params = {}) {
@@ -1745,16 +1746,17 @@ export function createProviderHandlers({
     // or replace the boundary and no caller has to know how to build it. #3230.
     const { sandboxProfile: _callerSuppliedSpec, ...sanitizedParams } =
       callerParams;
+    const sandboxProfile =
+      sanitizedParams.agentType === "claude-code"
+        ? await resolveSandboxLaunchSpec({
+            sandboxMode: sanitizedParams.sandboxMode,
+            cwd: sanitizedParams.cwd,
+            networkEnabled: sanitizedParams.networkEnabled,
+          })
+        : null;
     const params = {
       ...sanitizedParams,
-      sandboxProfile:
-        sanitizedParams.agentType === "claude-code"
-          ? resolveSandboxLaunchSpec({
-              sandboxMode: sanitizedParams.sandboxMode,
-              cwd: sanitizedParams.cwd,
-              networkEnabled: sanitizedParams.networkEnabled,
-            })
-          : null,
+      sandboxProfile,
     };
 
     const {

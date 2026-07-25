@@ -1664,13 +1664,19 @@ created if missing.",
             );
             return (format!("Failed to request tool execution: {}", e), true);
         }
-        log::debug!(
-            "[ChatModelWorker] Tool request emitted, waiting for frontend result (no timeout)"
-        );
+        log::debug!("[ChatModelWorker] Tool request emitted, waiting for frontend result");
 
-        // Wait for the frontend to submit the result (no timeout — user may need time to review)
-        match rx.await {
-            Ok(result) => {
+        // Bound the wait. A call registered by a still-running worker *after* a
+        // main-view reload (its response arrived post-drain) has no renderer to
+        // submit or drain it, and an unbounded await would hang the worker — and
+        // leak its tokio task — forever (#3350). The frontend's own 5-minute
+        // approval timeout settles a live request well before this, so a genuine
+        // long human review is never cut off; this only backstops the
+        // renderer-gone case.
+        const FRONTEND_TOOL_RESULT_TIMEOUT: std::time::Duration =
+            std::time::Duration::from_secs(8 * 60);
+        match tokio::time::timeout(FRONTEND_TOOL_RESULT_TIMEOUT, rx).await {
+            Ok(Ok(result)) => {
                 log::info!(
                     "[ChatModelWorker] Frontend tool completed: {} (is_error={}, result_len={})",
                     name,
@@ -1679,13 +1685,25 @@ created if missing.",
                 );
                 (result.content, result.is_error)
             }
-            Err(_) => {
+            Ok(Err(_)) => {
                 // Sender was dropped (bridge cleaned up or cancelled)
                 log::warn!(
                     "[ChatModelWorker] Tool result channel closed for {} — bridge cleaned up or cancelled",
                     name
                 );
                 ("Tool execution was cancelled".to_string(), true)
+            }
+            Err(_elapsed) => {
+                log::warn!(
+                    "[ChatModelWorker] Frontend tool result timed out for {} — the app view likely reloaded before it returned",
+                    name
+                );
+                (
+                    "Tool execution was interrupted: no result returned before the wait elapsed \
+                     (the app view may have reloaded). The action did not complete; ask again to retry."
+                        .to_string(),
+                    true,
+                )
             }
         }
     }
