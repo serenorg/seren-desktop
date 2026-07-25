@@ -2482,8 +2482,12 @@ pub async fn erase_all_conversation_data(
             .collect::<rusqlite::Result<Vec<String>>>()?;
         let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
         delete_conversation_records(conn, &conversation_ids)?;
+        // Recorded meetings are communications too (#3314): erase every meeting
+        // and its transcript segments / speaker assignments before the VACUUM so
+        // the freed transcript pages are reclaimed in the same pass.
+        let meetings_removed = crate::commands::audio::clear_all_meetings(conn)?;
         vacuum_database(conn)?;
-        Ok((conversation_ids, targets))
+        Ok((conversation_ids, targets, meetings_removed))
     })
     .await;
 
@@ -2491,7 +2495,7 @@ pub async fn erase_all_conversation_data(
     // conversation's retained cloud-memory sources below.
     let mut erased_conversation_ids: Vec<String> = Vec::new();
     let transcript_targets = match chat_result {
-        Ok((conversation_ids, targets)) => {
+        Ok((conversation_ids, targets, meetings_removed)) => {
             reports.push(EraseTargetReport::new(
                 "local_chat_db",
                 "ok",
@@ -2500,14 +2504,45 @@ pub async fn erase_all_conversation_data(
                     conversation_ids.len()
                 )),
             ));
+            reports.push(EraseTargetReport::new(
+                "meeting_recordings",
+                "ok",
+                Some(format!(
+                    "{meetings_removed} recorded meeting(s) and their transcript segments removed"
+                )),
+            ));
             erased_conversation_ids = conversation_ids;
             targets
         }
         Err(err) => {
             reports.push(EraseTargetReport::new("local_chat_db", "failed", Some(err)));
+            // The meeting purge shares the chat.db transaction path, so a chat.db
+            // failure means it did not run either — report it honestly.
+            reports.push(EraseTargetReport::new(
+                "meeting_recordings",
+                "failed",
+                Some("chat.db erase failed; meeting recordings were not removed".to_string()),
+            ));
             Vec::new()
         }
     };
+
+    // Transcript search index (separate vector DB): clear every chunk/embedding
+    // and reclaim the freed pages, matching the conversation-index target.
+    let transcript_index_result =
+        crate::services::transcript_vectors::open_transcript_db(&app).and_then(|conn| {
+            crate::services::transcript_vectors::clear_all_chunks(&conn)?;
+            vacuum_database(&conn)?;
+            Ok(())
+        });
+    match transcript_index_result {
+        Ok(()) => reports.push(EraseTargetReport::new("transcript_search_index", "ok", None)),
+        Err(err) => reports.push(EraseTargetReport::new(
+            "transcript_search_index",
+            "failed",
+            Some(err.to_string()),
+        )),
+    }
 
     // Conversation index: clear all chunks and reclaim the freed pages.
     let index_result = open_index_db(&app).and_then(|conn| {
@@ -3082,6 +3117,73 @@ mod tests {
                         .windows(CANARY.len())
                         .any(|window| window == CANARY.as_bytes()),
                     "cleared input_history canary remained in {}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    // Live no-mocks proof against a real on-disk `chat.db`: erasing all recorded
+    // meetings (#3314) must leave no recoverable verbatim transcript text in the
+    // file. Runs the real `clear_all_meetings` + VACUUM the erase-all flow uses.
+    #[test]
+    fn true_deletion_erase_all_meetings_removes_transcript_content_from_chat_db_file() {
+        const CANARY: &str = "meeting-canary-4b8e1d2c-77a9-4f30-b6e1-5c9d0a2f13ab";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("chat.db");
+        let wal_path = temp_dir.path().join("chat.db-wal");
+
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            configure_connection(&conn).unwrap();
+            setup_schema(&conn).unwrap();
+            conn.execute(
+                "INSERT INTO meetings (id, title, started_at, status, created_at, updated_at)
+                 VALUES ('mtg1', 'Board call', 1, 'completed', 1, 1)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO transcript_segments
+                   (id, meeting_id, seq, speaker, text, start_ms, end_ms, status, created_at)
+                 VALUES ('seg1', 'mtg1', 0, 'A', ?1, 0, 1000, 'final', 1)",
+                params![CANARY],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO meeting_speaker_assignments
+                   (id, meeting_id, source, source_key, display_name, scope, created_at, updated_at)
+                 VALUES ('asn1', 'mtg1', 'manual', 'A', 'Alice', 'meeting', 1, 1)",
+                [],
+            )
+            .unwrap();
+            // Land the canary in the main db file before the erase.
+            crate::services::database::checkpoint_wal(
+                &conn,
+                crate::services::database::WalCheckpointMode::Truncate,
+            )
+            .unwrap();
+
+            let removed = crate::commands::audio::clear_all_meetings(&conn).unwrap();
+            assert_eq!(removed, 1, "one meeting should be removed");
+            vacuum_database(&conn).unwrap();
+
+            for table in ["meetings", "transcript_segments", "meeting_speaker_assignments"] {
+                let remaining: i64 = conn
+                    .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))
+                    .unwrap();
+                assert_eq!(remaining, 0, "{table} must be empty after erase-all");
+            }
+        }
+
+        for path in [&db_path, &wal_path] {
+            if path.exists() {
+                let bytes = std::fs::read(path).unwrap();
+                assert!(
+                    !bytes
+                        .windows(CANARY.len())
+                        .any(|window| window == CANARY.as_bytes()),
+                    "erased transcript canary remained in {}",
                     path.display()
                 );
             }

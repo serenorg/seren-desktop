@@ -1711,6 +1711,22 @@ pub fn delete_meeting_record(conn: &Connection, id: &str) -> Result<usize> {
     Ok(deleted)
 }
 
+/// Erase every recorded meeting (with its transcript segments and speaker
+/// assignments) from `chat.db` in the full-erase flow, enqueueing sync
+/// tombstones so the delete propagates to the remote replica. Returns the
+/// number of meetings removed. The transcript vector index lives in a separate
+/// DB and is cleared by the caller.
+pub fn clear_all_meetings(conn: &Connection) -> Result<usize> {
+    let meeting_ids = conn
+        .prepare("SELECT id FROM meetings")?
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    for id in &meeting_ids {
+        delete_meeting_record(conn, id)?;
+    }
+    Ok(meeting_ids.len())
+}
+
 pub fn update_meeting_status_record(
     conn: &Connection,
     id: &str,

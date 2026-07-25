@@ -104,6 +104,17 @@ pub fn delete_meeting_chunks(conn: &Connection, meeting_id: &str) -> Result<()> 
     Ok(())
 }
 
+/// Remove every indexed transcript chunk and its embedding in the full-erase
+/// flow. `secure_delete=ON` on this connection zeroes the freed rows; the
+/// caller VACUUMs to reclaim the pages.
+pub fn clear_all_chunks(conn: &Connection) -> Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM transcript_embeddings", [])?;
+    tx.execute("DELETE FROM transcript_chunks", [])?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Insert one transcript chunk and its embedding, returning the chunk id.
 pub fn insert_transcript_chunk(
     conn: &Connection,
