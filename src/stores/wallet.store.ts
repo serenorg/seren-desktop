@@ -8,6 +8,7 @@ import {
   type DailyClaimResponse,
   fetchDailyEligibility,
 } from "@/services/dailyClaim";
+import { postNotification } from "@/services/notifications";
 import {
   fetchBalance,
   markWalletNotificationRead,
@@ -242,29 +243,12 @@ export function markLatestReceivedTransferSeen(
 async function notifyReceivedTransfer(
   transfer: LatestReceivedTransfer,
 ): Promise<void> {
-  try {
-    if (typeof Notification === "undefined") {
-      return;
-    }
-
-    const title = "SerenBucks received";
-    const body = `${transfer.sender_display_name || transfer.sender_email} sent ${transfer.amount_usd}`;
-
-    if (Notification.permission === "granted") {
-      new Notification(title, { body });
-      return;
-    }
-
-    if (Notification.permission !== "denied") {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        new Notification(title, { body });
-      }
-    }
-  } catch (error) {
-    console.warn("[Wallet Store] Failed to show transfer notification:", error);
-    // Notification support varies by runtime; balance refresh should not fail.
-  }
+  const title = "SerenBucks received";
+  const body = `${transfer.sender_display_name || transfer.sender_email} sent ${transfer.amount_usd}`;
+  // The Web Notification API is denied by default in this app's macOS WebView,
+  // so OS banners must route through the native plugin. postNotification owns
+  // the permission gate and swallows failures, so balance refresh cannot break.
+  await postNotification(title, body);
 }
 
 async function handleReceivedTransferNotification(
