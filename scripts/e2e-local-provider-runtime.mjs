@@ -1,5 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WebSocket } from "ws";
@@ -26,6 +29,42 @@ const REQUESTED_RUNTIMES = (
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+
+// A bounded claude-code spawn resolves its OS sandbox launch spec from the
+// trusted app binary via SEREN_SANDBOX_SPEC_BIN (#3230). The packaged app sets
+// this in provider_runtime.rs; this harness must set it too, or every bounded
+// launch fails closed with "the trusted sandbox spec binary is unavailable".
+function ensureSandboxSpecBin() {
+  if (
+    typeof process.env.SEREN_SANDBOX_SPEC_BIN === "string" &&
+    process.env.SEREN_SANDBOX_SPEC_BIN.trim().length > 0
+  ) {
+    return; // respect an explicit override
+  }
+  const rootDir = fileURLToPath(ROOT);
+  const exe = process.platform === "win32" ? ".exe" : "";
+  const candidates = [];
+  for (const profile of ["release", "debug"]) {
+    for (const name of ["Seren", "seren-desktop"]) {
+      candidates.push(join(rootDir, "src-tauri", "target", profile, name + exe));
+    }
+  }
+  const found = candidates.find((path) => existsSync(path));
+  if (found) {
+    process.env.SEREN_SANDBOX_SPEC_BIN = found;
+    console.log(`[runtime-e2e] sandbox spec binary: ${found}`);
+    return;
+  }
+  if (REQUESTED_AGENTS.includes("claude-code")) {
+    throw new Error(
+      "The app binary is not built, so bounded claude-code spawns cannot " +
+        "resolve a sandbox launch spec. Build it first " +
+        "(cargo build --manifest-path src-tauri/Cargo.toml) or set " +
+        "SEREN_SANDBOX_SPEC_BIN. Looked in:\n  " +
+        candidates.join("\n  "),
+    );
+  }
+}
 
 function isAuthRequiredError(message) {
   const lower = String(message).toLowerCase();
@@ -404,6 +443,7 @@ async function runRuntime(runtime) {
 }
 
 async function main() {
+  ensureSandboxSpecBin();
   const browserLocal = startProcess(
     process.execPath,
     [
