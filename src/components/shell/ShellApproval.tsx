@@ -10,10 +10,13 @@ import {
   Show,
 } from "solid-js";
 import { ApprovalActions } from "@/components/approvals/ApprovalActions";
+import { shellLeasePredicates } from "@/components/shell/shellLease";
 import { cancelOrchestration } from "@/services/orchestrator";
 import {
+  type CommandRule,
   grantCapabilityLease,
   type LeaseBudgets,
+  proposeCapabilityBundle,
 } from "@/services/tool-authorization";
 import { conversationStore } from "@/stores/conversation.store";
 
@@ -36,6 +39,24 @@ function commandProgram(command: string): string | null {
 export const ShellApproval: Component = () => {
   const [request, setRequest] = createSignal<ShellApprovalRequest | null>(null);
   const [isProcessing, setIsProcessing] = createSignal(false);
+  // The derived coding toolchain (cargo/pnpm/npm/node/git), owned by the host so
+  // the renderer never hard-codes it; empty until loaded / if the load fails.
+  const [toolchainRules, setToolchainRules] = createSignal<CommandRule[]>([]);
+  // Opt-in: extend a coding-command task lease to the whole toolchain. Default
+  // off — a single "Approve for this task" never silently broadens beyond the
+  // one blocked program.
+  const [coverToolchain, setCoverToolchain] = createSignal(false);
+
+  onMount(async () => {
+    // Load the host's coding toolchain once so the opt-in can offer it without
+    // the renderer defining which programs a coding lease covers.
+    try {
+      const bundle = await proposeCapabilityBundle({ profile: "coding" });
+      setToolchainRules(bundle.predicates.commandRules ?? []);
+    } catch (err) {
+      console.error("[ShellApproval] Failed to load coding toolchain:", err);
+    }
+  });
 
   onMount(async () => {
     const unlisten = await listen<ShellApprovalRequest>(
@@ -128,8 +149,25 @@ export const ShellApproval: Component = () => {
     return req ? commandProgram(req.command) : null;
   };
 
+  /** Whether the blocked program is part of the host's coding toolchain — i.e. the
+   * opt-in to extend the lease to the whole toolchain is meaningful. */
+  const isCodingToolchain = () => {
+    const program = leaseProgram();
+    return (
+      program !== null && toolchainRules().some((r) => r.program === program)
+    );
+  };
+
+  const toolchainNames = () =>
+    toolchainRules()
+      .map((r) => r.program)
+      .join(", ");
+
   const leaseSummary = () => {
     const program = leaseProgram();
+    if (coverToolchain() && isCodingToolchain()) {
+      return `coding toolchain commands (${toolchainNames()})`;
+    }
     return program ? `"${program}" commands` : "this command";
   };
 
@@ -154,9 +192,9 @@ export const ShellApproval: Component = () => {
       try {
         await grantCapabilityLease(
           conversationId,
-          `Task lease: "${program}" commands`,
+          `Task lease: ${leaseSummary()}`,
           durationSecs,
-          { commandRules: [{ program }] },
+          shellLeasePredicates(program, coverToolchain(), toolchainRules()),
           budgets,
         );
       } catch (err) {
@@ -203,6 +241,28 @@ export const ShellApproval: Component = () => {
                 <strong>Warning:</strong> This command will execute on your
                 machine. Review it carefully before approving.
               </div>
+
+              <Show when={isCodingToolchain()}>
+                <label class="mt-4 flex items-start gap-2 text-[0.85rem] text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    class="mt-0.5"
+                    checked={coverToolchain()}
+                    onChange={(event) =>
+                      setCoverToolchain(event.currentTarget.checked)
+                    }
+                    disabled={isProcessing()}
+                  />
+                  <span>
+                    When approving for this task, cover the whole coding
+                    toolchain ({toolchainNames()}) instead of just{" "}
+                    <span class="font-[var(--font-mono)]">
+                      {leaseProgram()}
+                    </span>
+                    , so a coding run does not re-prompt on each tool.
+                  </span>
+                </label>
+              </Show>
             </div>
 
             <ApprovalActions
