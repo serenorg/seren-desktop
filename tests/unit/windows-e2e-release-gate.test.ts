@@ -348,6 +348,41 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("initialModelId");
   });
 
+  it("installs the agent CLIs where the app's production resolver looks (run 30159367572)", () => {
+    // The harness provisions a portable toolchain Node whose npm global prefix
+    // is the scratch Node dir, but the installed app resolves agent CLIs from
+    // %APPDATA%\npm (resolveInstalledCodexBinary candidate #1). Pin the install
+    // prefix to %APPDATA%\npm so the app can actually see the codex it installed;
+    // otherwise the codex journey dies with "not installed in a verifiable
+    // location" while the box demonstrably has the CLI.
+    expect(taskUserRunner).toContain("npm_config_prefix");
+    expect(taskUserRunner).toContain("appDataNpmPrefix");
+    expect(agentRegistry).toContain('path.join(appData, "npm", "codex.cmd")');
+  });
+
+  it("keeps codex credentials required under Bedrock — Bedrock waives only Claude (run 30159367572)", () => {
+    // Bedrock authenticates only the claude-code journey (AWS credential chain).
+    // The credential validator must skip the Claude login-file check when
+    // CLAUDE_CODE_USE_BEDROCK is set, but codex has no Bedrock path, so its
+    // archived .codex/auth.json stays required for the codex/claude-codex
+    // journeys. Regression guard: the Bedrock backend block must NOT blanket
+    // force SEREN_E2E_AGENT_CREDENTIALS_REQUIRED=0 (that silently let the codex
+    // journey run uncertified across releases).
+    expect(taskUserRunner).toContain("claudeViaBedrock");
+    expect(taskUserRunner).toContain("requiresClaude -and -not");
+    // Scope to the Bedrock backend block via anchors unique to it (the explicit
+    // -AllowMissingAgentCredentials escape hatch elsewhere legitimately still
+    // sets the flag to 0, so a whole-file assertion would be wrong).
+    const bedrockBlock = taskUserRunner.slice(
+      taskUserRunner.indexOf('"CLAUDE_CODE_USE_BEDROCK", "1"'),
+      taskUserRunner.indexOf("Configured Bedrock agent backend"),
+    );
+    expect(bedrockBlock.length).toBeGreaterThan(0);
+    expect(bedrockBlock).not.toContain(
+      'SetEnvironmentVariable("SEREN_E2E_AGENT_CREDENTIALS_REQUIRED", "0"',
+    );
+  });
+
   it("allows unsigned release walkthroughs only for an explicit MAX_SIGNATURES block", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
     expect(runner).toContain("[switch]$AllowUnsignedBudgetBlockedArtifact");
