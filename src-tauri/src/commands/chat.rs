@@ -362,19 +362,29 @@ fn spawn_memory_source_erase_best_effort(app: &AppHandle, conversation_ids: Vec<
     });
 }
 
+/// Ids removed by the linked-meeting cascade: the meeting ids (to drop the
+/// separate transcript vector index) and the published seren-notes ids (to
+/// erase the cloud notes, #3317). Both are captured before the rows are deleted.
+#[derive(Default)]
+pub(crate) struct LinkedMeetingErasure {
+    pub meeting_ids: Vec<String>,
+    pub note_ids: Vec<String>,
+}
+
 /// Erase every recorded meeting captured in the given conversations — linked via
 /// `meetings.agent_conversation_id` — from chat.db, returning the meeting ids so
-/// the caller can drop their transcript search vectors (a separate DB). The
-/// meeting rows still carry the conversation id after `delete_conversation_records`
-/// because no FK cascade is configured, so this runs on the same connection.
-/// Reuses `delete_meeting_record`, which enqueues sync tombstones for remote
-/// erasure, so a per-conversation delete matches the per-meeting delete.
+/// the caller can drop their transcript search vectors and cloud notes (both in
+/// separate stores). Runs before `delete_conversation_records`: the enforced
+/// `meetings.agent_conversation_id` FK (no ON DELETE CASCADE) would otherwise
+/// fail the conversation delete. Reuses `delete_meeting_record`, which enqueues
+/// sync tombstones for remote erasure, so a per-conversation delete matches the
+/// per-meeting delete.
 fn cascade_delete_linked_meetings(
     conn: &Connection,
     conversation_ids: &[String],
-) -> rusqlite::Result<Vec<String>> {
+) -> rusqlite::Result<LinkedMeetingErasure> {
     if conversation_ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(LinkedMeetingErasure::default());
     }
     let placeholders = conversation_ids
         .iter()
@@ -389,10 +399,15 @@ fn cascade_delete_linked_meetings(
         })?
         .collect::<rusqlite::Result<Vec<String>>>()?;
     drop(stmt);
+    // Capture cloud-note ids before the rows are deleted.
+    let note_ids = crate::commands::audio::collect_meeting_note_ids(conn, &meeting_ids)?;
     for id in &meeting_ids {
         crate::commands::audio::delete_meeting_record(conn, id)?;
     }
-    Ok(meeting_ids)
+    Ok(LinkedMeetingErasure {
+        meeting_ids,
+        note_ids,
+    })
 }
 
 /// Clear the transcript search vectors for the given meetings from the separate
@@ -952,25 +967,27 @@ pub async fn archive_conversation(app: AppHandle, id: String) -> Result<(), Stri
 #[tauri::command]
 pub async fn delete_conversation(app: AppHandle, id: String) -> Result<(), String> {
     let index_id = id.clone();
-    let (transcript_targets, meeting_ids) = run_db(app.clone(), move |conn| {
+    let (transcript_targets, meetings) = run_db(app.clone(), move |conn| {
         let ids = vec![id];
         let targets = collect_agent_transcript_targets(conn, &ids)?;
         // Recorded meetings captured in this conversation are communications
         // too (#3316). Erase them BEFORE the conversation: `meetings
         // .agent_conversation_id` is a foreign key with no ON DELETE CASCADE and
         // the bundled SQLite enforces foreign keys, so deleting the conversation
-        // while a meeting still references it would fail. Returns the meeting ids
-        // so the transcript search vectors (a separate DB) can be cleared below.
-        let meeting_ids = cascade_delete_linked_meetings(conn, &ids)?;
+        // while a meeting still references it would fail. Returns the meeting +
+        // cloud-note ids so the transcript vectors and cloud notes (both in
+        // separate stores) can be cleared below.
+        let meetings = cascade_delete_linked_meetings(conn, &ids)?;
         delete_conversation_records(conn, &ids)?;
         vacuum_database(conn)?;
-        Ok((targets, meeting_ids))
+        Ok((targets, meetings))
     })
     .await?;
     delete_conversation_index_best_effort(&app, &index_id);
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
-    delete_meeting_transcript_vectors_best_effort(&app, &meeting_ids);
+    delete_meeting_transcript_vectors_best_effort(&app, &meetings.meeting_ids);
+    crate::commands::audio::spawn_seren_note_deletes_best_effort(&app, meetings.note_ids);
     spawn_memory_source_erase_best_effort(&app, vec![index_id]);
     Ok(())
 }
@@ -980,7 +997,7 @@ pub async fn delete_conversations_by_employee(
     app: AppHandle,
     employee_id: String,
 ) -> Result<i64, String> {
-    let (deleted, conversation_ids, transcript_targets, meeting_ids) =
+    let (deleted, conversation_ids, transcript_targets, meetings) =
         run_db(app.clone(), move |conn| {
             let mut stmt = conn.prepare("SELECT id FROM conversations WHERE employee_id = ?1")?;
             let conversation_ids = stmt
@@ -989,10 +1006,10 @@ pub async fn delete_conversations_by_employee(
             drop(stmt);
             let targets = collect_agent_transcript_targets(conn, &conversation_ids)?;
             // Meetings first — the conversations FK is enforced (see delete_conversation).
-            let meeting_ids = cascade_delete_linked_meetings(conn, &conversation_ids)?;
+            let meetings = cascade_delete_linked_meetings(conn, &conversation_ids)?;
             let deleted = delete_conversation_records(conn, &conversation_ids)?;
             vacuum_database(conn)?;
-            Ok((deleted as i64, conversation_ids, targets, meeting_ids))
+            Ok((deleted as i64, conversation_ids, targets, meetings))
         })
         .await?;
     for conversation_id in &conversation_ids {
@@ -1000,7 +1017,8 @@ pub async fn delete_conversations_by_employee(
     }
     vacuum_conversation_index_best_effort(&app);
     delete_agent_transcripts_best_effort(&transcript_targets);
-    delete_meeting_transcript_vectors_best_effort(&app, &meeting_ids);
+    delete_meeting_transcript_vectors_best_effort(&app, &meetings.meeting_ids);
+    crate::commands::audio::spawn_seren_note_deletes_best_effort(&app, meetings.note_ids);
     spawn_memory_source_erase_best_effort(&app, conversation_ids);
     Ok(deleted)
 }
@@ -2557,18 +2575,24 @@ pub async fn erase_all_conversation_data(
         // conversation while a linked meeting still references it would fail
         // (#3316). The VACUUM then reclaims the freed transcript pages in the
         // same pass.
+        // Capture published cloud-note ids before the meeting rows are deleted
+        // so the remote seren-notes copies can be erased too (#3317).
+        let meeting_note_ids = crate::commands::audio::collect_all_meeting_note_ids(conn)?;
         let meetings_removed = crate::commands::audio::clear_all_meetings(conn)?;
         delete_conversation_records(conn, &conversation_ids)?;
         vacuum_database(conn)?;
-        Ok((conversation_ids, targets, meetings_removed))
+        Ok((conversation_ids, targets, meetings_removed, meeting_note_ids))
     })
     .await;
 
     // Conversation ids captured before deletion, reused to erase each
     // conversation's retained cloud-memory sources below.
     let mut erased_conversation_ids: Vec<String> = Vec::new();
+    // Cloud-note ids captured before deletion, erased from seren-notes below.
+    let mut meeting_note_ids: Vec<String> = Vec::new();
     let transcript_targets = match chat_result {
-        Ok((conversation_ids, targets, meetings_removed)) => {
+        Ok((conversation_ids, targets, meetings_removed, note_ids)) => {
+            meeting_note_ids = note_ids;
             reports.push(EraseTargetReport::new(
                 "local_chat_db",
                 "ok",
@@ -2677,6 +2701,39 @@ pub async fn erase_all_conversation_data(
         "cloud_memories",
         memory_status,
         Some(memory_detail),
+    ));
+    // Cloud meeting notes: erase the seren-notes copies of the deleted meetings.
+    // Reported honestly — any failure (offline / signed out) means notes may
+    // remain, so the target is `failed`, not a false green `ok` (#3317).
+    let note_total = meeting_note_ids.len();
+    let note_counts =
+        crate::audio::seren_notes_publish::erase_meeting_notes(&app, &meeting_note_ids).await;
+    let (notes_status, notes_detail) = if note_counts.failed == 0 {
+        (
+            "ok",
+            format!("{} cloud meeting note(s) erased", note_counts.deleted),
+        )
+    } else if note_counts.not_authenticated {
+        (
+            "failed",
+            format!(
+                "signed out of the notes service — {} of {note_total} cloud meeting note(s) may remain",
+                note_counts.failed
+            ),
+        )
+    } else {
+        (
+            "failed",
+            format!(
+                "{} of {note_total} cloud meeting note(s) could not be erased (notes service unreachable) — {} erased before the failure(s)",
+                note_counts.failed, note_counts.deleted
+            ),
+        )
+    };
+    reports.push(EraseTargetReport::new(
+        "cloud_meeting_notes",
+        notes_status,
+        Some(notes_detail),
     ));
     reports.push(EraseTargetReport::new(
         "claude_agent_preferences",
@@ -2987,7 +3044,7 @@ mod tests {
 
         let ids = vec!["c1".to_string()];
         let erased = cascade_delete_linked_meetings(&conn, &ids).unwrap();
-        assert_eq!(erased, vec!["mtg1".to_string()]);
+        assert_eq!(erased.meeting_ids, vec!["mtg1".to_string()]);
         delete_conversation_records(&conn, &ids).unwrap();
 
         // The linked meeting and its transcript are gone.
@@ -3025,6 +3082,42 @@ mod tests {
             )
             .unwrap();
         assert_eq!(mtg2, 1, "unrelated meeting must survive");
+    }
+
+    // The linked-meeting cascade must capture each meeting's published
+    // seren-notes id BEFORE deleting the row, so the cloud note can be erased
+    // (#3317). Only meetings that actually have a published note contribute an
+    // id — a meeting with no cloud note must not.
+    #[test]
+    fn cascade_captures_linked_meeting_cloud_note_ids_before_deleting_rows() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind) VALUES ('c1', 't', 0, 'agent')",
+            [],
+        )
+        .unwrap();
+        let note_uuid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+        conn.execute(
+            "INSERT INTO meetings
+               (id, title, started_at, status, created_at, updated_at, agent_conversation_id, seren_notes_id)
+             VALUES ('mtg1', 'Published', 1, 'completed', 1, 1, 'c1', ?1)",
+            params![note_uuid],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO meetings
+               (id, title, started_at, status, created_at, updated_at, agent_conversation_id)
+             VALUES ('mtg2', 'Unpublished', 1, 'completed', 1, 1, 'c1')",
+            [],
+        )
+        .unwrap();
+
+        let erased = cascade_delete_linked_meetings(&conn, &["c1".to_string()]).unwrap();
+        let mut mids = erased.meeting_ids.clone();
+        mids.sort();
+        assert_eq!(mids, vec!["mtg1".to_string(), "mtg2".to_string()]);
+        // Only the meeting with a published note yields a cloud-note id to erase.
+        assert_eq!(erased.note_ids, vec![note_uuid.to_string()]);
     }
 
     #[test]

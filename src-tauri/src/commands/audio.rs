@@ -71,11 +71,15 @@ pub async fn list_meetings(app: AppHandle, limit: Option<i32>) -> Result<Vec<Mee
 #[tauri::command]
 pub async fn delete_meeting(app: AppHandle, id: String) -> Result<(), String> {
     let deleted_id = id.clone();
-    run_db(app.clone(), move |conn| {
+    // Capture the published cloud-note id before the row is deleted so the
+    // remote note can be erased too (#3317).
+    let note_ids = run_db(app.clone(), move |conn| {
+        let note_ids = collect_meeting_note_ids(conn, std::slice::from_ref(&id))?;
         delete_meeting_record(conn, &id)?;
-        Ok(())
+        Ok(note_ids)
     })
     .await?;
+    spawn_seren_note_deletes_best_effort(&app, note_ids);
     // Drop the transcript search index for this meeting too, so a delete can't
     // orphan its vectors. Best-effort: a missing index isn't a delete failure.
     let app_for_index = app.clone();
@@ -1725,6 +1729,50 @@ pub fn clear_all_meetings(conn: &Connection) -> Result<usize> {
         delete_meeting_record(conn, id)?;
     }
     Ok(meeting_ids.len())
+}
+
+/// The published seren-notes ids for the given meetings that have a cloud note.
+/// Captured before the meeting rows are deleted so the caller can erase the
+/// matching cloud notes (#3317).
+pub fn collect_meeting_note_ids(conn: &Connection, meeting_ids: &[String]) -> Result<Vec<String>> {
+    if meeting_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = meeting_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT seren_notes_id FROM meetings
+         WHERE id IN ({placeholders}) AND seren_notes_id IS NOT NULL"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let ids = stmt
+        .query_map(rusqlite::params_from_iter(meeting_ids), |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
+/// Every published seren-notes id across all meetings, for the full-erase flow.
+pub fn collect_all_meeting_note_ids(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT seren_notes_id FROM meetings WHERE seren_notes_id IS NOT NULL")?;
+    let ids = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(ids)
+}
+
+/// Fire-and-forget erase of the given meetings' published cloud notes so an
+/// interactive delete stays responsive. The local delete has committed; this
+/// cleans up the remote copy in the background. Non-fatal by design.
+pub fn spawn_seren_note_deletes_best_effort(app: &AppHandle, note_ids: Vec<String>) {
+    if note_ids.is_empty() {
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::audio::seren_notes_publish::erase_meeting_notes(&app, &note_ids).await;
+    });
 }
 
 pub fn update_meeting_status_record(

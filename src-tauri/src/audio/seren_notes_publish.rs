@@ -373,6 +373,93 @@ fn parse_update_response_body(text: &str) -> Result<(), PublishError> {
     Ok(())
 }
 
+/// Delete a meeting's published cloud note so a deleted recording leaves no
+/// verbatim residue on `seren-notes` (#3317). A 404 is treated as success — the
+/// note is already gone, which is the desired end state (idempotent). Verified
+/// live against the real service: `DELETE /notes/{id}` returns 204 and a
+/// subsequent GET returns 404.
+pub async fn delete_meeting_note(app: &AppHandle, note_id: &str) -> Result<(), PublishError> {
+    if !has_stored_credentials(app) {
+        return Err(PublishError::NotAuthenticated);
+    }
+    if !is_uuid(note_id) {
+        return Err(PublishError::Other(format!(
+            "refusing to DELETE seren-notes with non-uuid note id: {note_id}"
+        )));
+    }
+    let client = Client::new();
+    let url = format!("{PUBLISH_URL}/{note_id}");
+    publish_with_retry(&RETRY_BACKOFFS, || attempt_delete_note(app, &client, &url)).await
+}
+
+/// Summed outcome of erasing a batch of published cloud notes. `deleted` and
+/// `failed` partition the batch; `not_authenticated` records that the batch was
+/// cut short because the user is signed out (the remaining notes could not be
+/// erased under this identity).
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct MeetingNoteEraseCounts {
+    pub deleted: usize,
+    pub failed: usize,
+    pub not_authenticated: bool,
+}
+
+/// Erase each published cloud note, returning per-outcome counts so the caller
+/// can report honestly. Stops early on `NotAuthenticated`: the remaining notes
+/// cannot be erased under this identity, and every unerased note is counted as
+/// `failed` so the caller never reports a false-clean result.
+pub async fn erase_meeting_notes(app: &AppHandle, note_ids: &[String]) -> MeetingNoteEraseCounts {
+    let mut counts = MeetingNoteEraseCounts::default();
+    for (idx, note_id) in note_ids.iter().enumerate() {
+        match delete_meeting_note(app, note_id).await {
+            Ok(()) => counts.deleted += 1,
+            Err(PublishError::NotAuthenticated) => {
+                counts.failed += note_ids.len() - idx;
+                counts.not_authenticated = true;
+                break;
+            }
+            Err(err) => {
+                counts.failed += 1;
+                log::warn!(
+                    "[meeting] seren-notes note delete failed for {note_id}: {}",
+                    err.into_message()
+                );
+            }
+        }
+    }
+    counts
+}
+
+async fn attempt_delete_note(
+    app: &AppHandle,
+    client: &Client,
+    url: &str,
+) -> Result<(), PublishError> {
+    let response = authenticated_request(app, client, |c, token| c.delete(url).bearer_auth(token))
+        .await
+        .map_err(PublishError::Other)?;
+    let status = response.status();
+    let text = response
+        .text()
+        .await
+        .map_err(|err| PublishError::Other(format!("seren-notes read body failed: {err}")))?;
+    if status.as_u16() == 408 || status.is_server_error() {
+        return Err(PublishError::Server {
+            status: status.as_u16(),
+            body: text,
+        });
+    }
+    // 404 = already deleted = the intended end state (idempotent).
+    if status.as_u16() == 404 {
+        return Ok(());
+    }
+    if !status.is_success() {
+        return Err(PublishError::Other(format!(
+            "seren-notes delete returned {status}: {text}"
+        )));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
