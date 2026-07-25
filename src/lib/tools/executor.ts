@@ -896,6 +896,7 @@ async function requestShellApproval(
   command: string,
   timeoutSecs: number,
   link?: ApprovalLink,
+  leaseCommand?: string,
 ): Promise<GatewayApprovalResult> {
   const approvalId = `shell-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -907,6 +908,10 @@ async function requestShellApproval(
     await emit("shell-command-approval-request", {
       approvalId,
       command,
+      // When the displayed command is a preview, the gate authorized a
+      // different string; carry it so the modal's task-lease program key
+      // matches the gate's command-rule (see the skill-script call site).
+      leaseCommand: leaseCommand ?? command,
       timeoutSecs,
       threadId: link?.threadId ?? conversationStore.activeConversationId,
       continuationId: link?.continuationId,
@@ -1193,7 +1198,8 @@ export async function executeTool(
           args,
           conversationId,
           toolCall.id,
-          (link) => requestShellApproval(preview, timeoutSecs, link),
+          (link) =>
+            requestShellApproval(preview, timeoutSecs, link, argv.join(" ")),
         );
         if (!auth.approved) {
           return auth.toolResult;
