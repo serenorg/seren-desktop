@@ -23,6 +23,10 @@ import { conversationStore } from "@/stores/conversation.store";
 interface ShellApprovalRequest {
   approvalId: string;
   command: string;
+  // The command the gate authorized, when it differs from the displayed one:
+  // a skill script shows a `cwd> argv` preview but is gated on `argv.join(" ")`.
+  // The lease's program key must come from this, not the display string.
+  leaseCommand?: string;
   timeoutSecs: number;
   threadId?: string | null;
 }
@@ -146,7 +150,8 @@ export const ShellApproval: Component = () => {
 
   const leaseProgram = () => {
     const req = request();
-    return req ? commandProgram(req.command) : null;
+    if (!req) return null;
+    return commandProgram(req.leaseCommand ?? req.command);
   };
 
   /** Whether the blocked program is part of the host's coding toolchain — i.e. the

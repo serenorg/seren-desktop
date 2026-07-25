@@ -318,7 +318,10 @@ export const GatewayToolApproval: Component = () => {
   /** For a web fetch, the lease predicate is the target host, not a publisher. */
   const webFetchHost = (): string | null => {
     const req = request();
-    if (req?.toolName !== "seren_web_fetch") return null;
+    // The gate authorizes web fetches under the tool name "web_fetch" (route
+    // "web"); matching "seren_web_fetch" here never fired, so the modal built a
+    // publisher lease that the gate's network-host rule could never cover.
+    if (req?.toolName !== "web_fetch") return null;
     const url = req.args.url;
     if (typeof url !== "string") return null;
     try {
@@ -344,10 +347,16 @@ export const GatewayToolApproval: Component = () => {
     if (!req || isProcessing() || needsConnectionChoice()) return;
 
     const host = webFetchHost();
+    // The gate resolves a lease's target from `args.connection_id` only. A
+    // model-originated call carries no connection_id at authorization time (the
+    // executor injects it afterwards), so pinning the lease to the selected
+    // connection produced a target the gate could never match — every later
+    // call re-prompted. Leave the target open when the call names no connection,
+    // yielding a publisher-scoped lease the gate does cover.
     const target =
       typeof req.args.connection_id === "string"
         ? req.args.connection_id
-        : (selectedConnection()?.id ?? undefined);
+        : undefined;
     const predicates: LeasePredicates = host
       ? { networkHosts: [host] }
       : {
