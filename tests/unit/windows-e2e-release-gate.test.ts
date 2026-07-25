@@ -383,6 +383,16 @@ describe("Windows production e2e release gate", () => {
     );
   });
 
+  it("does not assign the read-only $HOME automatic variable in the credential validator", () => {
+    // $HOME is a read-only PowerShell automatic variable; assigning it aborts
+    // the whole task ("Cannot overwrite variable HOME because it is read-only").
+    // The validator only runs when credentials are required, so this stayed
+    // latent until #3375 turned validation on and the first real release run
+    // crashed here. The profile root must be held in a normal variable.
+    expect(taskUserRunner).not.toMatch(/\$home\s*=/);
+    expect(taskUserRunner).toContain("$profileHome = [Environment]::GetEnvironmentVariable");
+  });
+
   it("allows unsigned release walkthroughs only for an explicit MAX_SIGNATURES block", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
     expect(runner).toContain("[switch]$AllowUnsignedBudgetBlockedArtifact");

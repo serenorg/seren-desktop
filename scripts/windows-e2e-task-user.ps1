@@ -336,14 +336,18 @@ function Get-MissingAgentCredentialNames() {
   # Claude login file. Codex has no Bedrock equivalent and still requires its
   # archived credential file whenever the codex/claude-codex journeys run.
   `$claudeViaBedrock = Convert-EnvFlag (Get-EnvValue "CLAUDE_CODE_USE_BEDROCK") `$false
-  `$home = [Environment]::GetEnvironmentVariable("USERPROFILE")
+  # NOT `$home: that is a read-only PowerShell automatic variable and assigning
+  # to it aborts the whole task ("Cannot overwrite variable HOME"). This path is
+  # only reached when credentials are required (previously the Bedrock backend
+  # forced them off, so the crash stayed latent until #3375 enabled validation).
+  `$profileHome = [Environment]::GetEnvironmentVariable("USERPROFILE")
   `$appData = [Environment]::GetEnvironmentVariable("APPDATA")
   `$missing = @()
 
   if (`$requiresClaude -and -not `$claudeViaBedrock) {
     `$claudePaths = @(
-      (Join-Path `$home ".claude\.credentials.json"),
-      (Join-Path `$home ".claude.json")
+      (Join-Path `$profileHome ".claude\.credentials.json"),
+      (Join-Path `$profileHome ".claude.json")
     )
     if (-not [string]::IsNullOrWhiteSpace(`$appData)) {
       `$claudePaths += @(
@@ -359,8 +363,8 @@ function Get-MissingAgentCredentialNames() {
   if (`$requiresCodex) {
     `$codexHasEnvKey = -not [string]::IsNullOrWhiteSpace((Get-EnvValue "OPENAI_API_KEY"))
     `$codexPaths = @(
-      (Join-Path `$home ".codex\auth.json"),
-      (Join-Path `$home ".codex\credentials.json")
+      (Join-Path `$profileHome ".codex\auth.json"),
+      (Join-Path `$profileHome ".codex\credentials.json")
     )
     if (-not [string]::IsNullOrWhiteSpace(`$appData)) {
       `$codexPaths += @(
