@@ -207,6 +207,17 @@ export const privacyStore = {
       .filter(([, flags]) => flags.privileged || flags.excludeHistorySync)
       .map(([id]) => id);
   },
+
+  /**
+   * Drop every per-conversation privacy entry and persist the empty state, for
+   * the "erase all data" flow. privacy.json holds identifying data (including
+   * free-text counsel direction), so it must not survive an erase-all (#3348).
+   */
+  async clearAll(): Promise<void> {
+    erasedConversationIds.clear();
+    setPrivacyState("conversations", {});
+    await saveStoredPrivacy();
+  },
 };
 
 export { privacyState };
