@@ -1389,7 +1389,7 @@ created if missing.",
         let Ok(arguments) = serde_json::to_string(&args) else {
             return ("Failed to serialize authorized file operation.".to_string(), true);
         };
-        Self::execute_tool_with_app(Some(app), name, &arguments).await
+        Self::execute_local_tool(name, &arguments).await
     }
 
     /// Track repeated identical parse-error tool calls within a single
@@ -1517,16 +1517,14 @@ created if missing.",
     /// Returns (result_content, is_error).
     #[cfg(test)]
     async fn execute_tool(name: &str, arguments: &str) -> (String, bool) {
-        Self::execute_tool_with_app(None, name, arguments).await
+        Self::execute_local_tool(name, arguments).await
     }
 
-    /// Execute a local tool with app context when secure storage is needed.
+    /// Execute a local file tool by name. Only the project-root-gated file tools
+    /// run in this loop; every side-effecting tool routes to the frontend where
+    /// the host gate mints and the transport enforces a dispatch handle (#3193-F).
     /// Returns (result_content, is_error).
-    async fn execute_tool_with_app(
-        app: Option<&tauri::AppHandle>,
-        name: &str,
-        arguments: &str,
-    ) -> (String, bool) {
+    async fn execute_local_tool(name: &str, arguments: &str) -> (String, bool) {
         let args: serde_json::Value = match serde_json::from_str(arguments) {
             Ok(v) => v,
             Err(e) => {
@@ -1611,66 +1609,11 @@ created if missing.",
                     Err(e) => (e, true),
                 }
             }
-            "seren_web_fetch" => {
-                let url = args["url"].as_str().unwrap_or("").to_string();
-                if url.is_empty() {
-                    return ("Missing required parameter: url".to_string(), true);
-                }
-                let timeout_ms = args["timeout_ms"].as_u64();
-                match crate::commands::web::fetch_web_content(url, timeout_ms).await {
-                    Ok(fetch_result) => (fetch_result.content, false),
-                    Err(e) => (e, true),
-                }
-            }
-            "execute_command" => {
-                let command = args["command"].as_str().unwrap_or("").to_string();
-                if command.is_empty() {
-                    return ("Missing required parameter: command".to_string(), true);
-                }
-                let timeout_secs = args["timeout_secs"].as_u64();
-                let inject_seren_credentials =
-                    args.get("inject_seren_credentials").and_then(|v| v.as_bool());
-                let command_result = if let Some(app) = app {
-                    crate::shell::execute_shell_command_for_tool(
-                        app,
-                        command,
-                        timeout_secs,
-                        inject_seren_credentials,
-                    )
-                    .await
-                } else {
-                    crate::shell::execute_shell_command_without_seren_credentials(
-                        command,
-                        timeout_secs,
-                    )
-                    .await
-                };
-                match command_result {
-                    Ok(cmd_result) => {
-                        let mut output = String::new();
-                        if !cmd_result.stdout.is_empty() {
-                            output.push_str(&cmd_result.stdout);
-                        }
-                        if !cmd_result.stderr.is_empty() {
-                            if !output.is_empty() {
-                                output.push('\n');
-                            }
-                            output.push_str("stderr: ");
-                            output.push_str(&cmd_result.stderr);
-                        }
-                        if cmd_result.timed_out {
-                            output = format!("Command timed out.\n{}", output);
-                        }
-                        if output.is_empty() {
-                            output = "(no output)".to_string();
-                        }
-                        let is_error =
-                            cmd_result.timed_out || cmd_result.exit_code.map_or(true, |c| c != 0);
-                        (output, is_error)
-                    }
-                    Err(e) => (e, true),
-                }
-            }
+            // `seren_web_fetch` (open-world egress) and `execute_command` are
+            // deliberately absent here: they are not `is_local_tool`, so the
+            // dispatcher routes them to the frontend where the host gate mints and
+            // the transport enforces a dispatch handle (#3193-F). Executing them in
+            // this loop would bypass that gate, so an unrecognized name fails closed.
             _ => (
                 format!("Tool '{}' is not available in chat mode", name),
                 true,
@@ -2103,7 +2046,7 @@ impl Worker for ChatModelWorker {
                                 Err(message) => (message.clone(), true),
                             }
                         } else if Self::is_local_tool(&tc.name) {
-                            Self::execute_tool_with_app(Some(app), &tc.name, &tc.arguments).await
+                            Self::execute_local_tool(&tc.name, &tc.arguments).await
                         } else {
                             // Route non-local tools (gateway__, mcp__)
                             // to the frontend for execution via the tool bridge.
