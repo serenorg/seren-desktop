@@ -135,6 +135,7 @@ pub fn grant_capability_lease(
     predicates: LeasePredicates,
     budgets: LeaseBudgets,
 ) -> Result<CapabilityLease, String> {
+    budgets.validate()?;
     state.grant_lease(&conversation_id, &label, duration_secs, predicates, budgets)
 }
 
@@ -179,6 +180,7 @@ pub fn create_standing_policy(
     state: State<'_, ToolAuthorizationState>,
     input: StandingPolicyInput,
 ) -> Result<StandingPolicy, String> {
+    input.budgets.validate()?;
     state.create_standing_policy(input)
 }
 

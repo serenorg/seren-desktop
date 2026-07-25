@@ -111,6 +111,21 @@ pub struct LeaseBudgets {
 }
 
 impl LeaseBudgets {
+    /// Reject a rate limit that can never fire. `max_calls_per_window` only
+    /// applies while a window is open, and a window is only opened when
+    /// `window_secs` is set — so a per-window cap with no window length (or a
+    /// window length with no cap) is silently unenforced. Require both or
+    /// neither at grant time rather than accepting the misconfiguration (#3349).
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_calls_per_window.is_some() != self.window_secs.is_some() {
+            return Err(
+                "a rate limit needs both max_calls_per_window and window_secs, or neither"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// Whether charging `cost_micros` for one more call at `now` stays within
     /// budget. `now` is an RFC3339 UTC instant, compared lexicographically
     /// against the rate window's end.
@@ -593,6 +608,34 @@ mod tests {
     const NOW: &str = "2026-07-24T00:00:00Z";
     const LATER: &str = "2026-07-24T04:00:00Z";
     const PAST: &str = "2026-07-23T00:00:00Z";
+
+    #[test]
+    fn validate_rejects_a_rate_cap_that_can_never_fire() {
+        // A per-window cap with no window length (or vice versa) is silently
+        // unenforced, so grant-time validation must reject it.
+        let cap_without_window = LeaseBudgets {
+            max_calls_per_window: Some(5),
+            window_secs: None,
+            ..LeaseBudgets::default()
+        };
+        assert!(cap_without_window.validate().is_err());
+
+        let window_without_cap = LeaseBudgets {
+            max_calls_per_window: None,
+            window_secs: Some(60),
+            ..LeaseBudgets::default()
+        };
+        assert!(window_without_cap.validate().is_err());
+
+        let both = LeaseBudgets {
+            max_calls_per_window: Some(5),
+            window_secs: Some(60),
+            ..LeaseBudgets::default()
+        };
+        assert!(both.validate().is_ok());
+
+        assert!(LeaseBudgets::default().validate().is_ok());
+    }
 
     fn lease(predicates: LeasePredicates, budgets: LeaseBudgets) -> CapabilityLease {
         CapabilityLease {
