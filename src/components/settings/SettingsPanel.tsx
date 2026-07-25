@@ -2485,6 +2485,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   />
                   <button
                     type="button"
+                    data-testid="erase-all-data"
                     disabled={eraseAllBusy() || eraseAllConfirm() !== "ERASE"}
                     class="px-3 py-1.5 text-[0.8rem] rounded-md border border-destructive/60 bg-destructive/10 text-destructive hover:bg-destructive/15 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleEraseAllData}

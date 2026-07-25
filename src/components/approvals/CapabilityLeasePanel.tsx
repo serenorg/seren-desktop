@@ -184,6 +184,7 @@ export const CapabilityLeasePanel: Component<CapabilityLeasePanelProps> = (
                   <Show when={leaseIsActive(lease)}>
                     <button
                       type="button"
+                      data-testid="capability-lease-revoke"
                       class="ml-auto px-2.5 py-1 text-[0.78rem] font-medium rounded-md cursor-pointer bg-transparent text-destructive border border-destructive/40 hover:bg-destructive/10 disabled:opacity-50"
                       onClick={() => void handleRevoke(lease)}
                       disabled={revokingId() !== null}

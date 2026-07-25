@@ -17,6 +17,8 @@ interface ValidationCommand {
   key?: string;
   timeoutMs?: number;
   native?: boolean;
+  invokeName?: string;
+  invokeArgs?: Record<string, unknown>;
 }
 
 interface ValidationReply {
@@ -105,6 +107,10 @@ async function handleCommand(command: ValidationCommand): Promise<unknown> {
     case "click":
       findElement(command.selector).click();
       return { clicked: command.selector };
+    case "contextmenu":
+      return contextmenu(command.selector);
+    case "readState":
+      return readState(command.invokeName, command.invokeArgs);
     case "fill":
       return fill(command.selector, command.value ?? "");
     case "press":
@@ -151,6 +157,43 @@ function fill(selector: string | undefined, value: string): { filled: string } {
   );
   element.dispatchEvent(new Event("change", { bubbles: true }));
   return { filled: selector ?? "" };
+}
+
+/** Read-only Tauri commands a validation scenario may invoke to assert a
+ * server-side outcome (audit rows written, lease charged, approvals pending).
+ * A small allowlist keeps the control channel read-only — no mutating or
+ * credential-bearing command is reachable. #3355. */
+const READ_STATE_ALLOWLIST = new Set([
+  "list_authorization_audit",
+  "list_capability_leases",
+  "list_pending_approvals",
+]);
+
+async function readState(
+  name: string | undefined,
+  args: Record<string, unknown> | undefined,
+): Promise<unknown> {
+  if (!name) throw new Error("readState requires invokeName");
+  if (!READ_STATE_ALLOWLIST.has(name)) {
+    throw new Error(
+      `readState command is not on the read-only allowlist: ${name}`,
+    );
+  }
+  return invoke(name, args ?? {});
+}
+
+function contextmenu(selector: string | undefined): { contextmenu: string } {
+  const element = findElement(selector);
+  // Right button + a real contextmenu event, so SolidJS onContextMenu handlers
+  // (conversation delete, etc.) open exactly as they do for a user right-click.
+  element.dispatchEvent(
+    new MouseEvent("contextmenu", {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    }),
+  );
+  return { contextmenu: selector ?? "" };
 }
 
 function press(key: string): { pressed: string } {

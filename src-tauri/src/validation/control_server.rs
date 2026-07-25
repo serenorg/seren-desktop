@@ -101,6 +101,12 @@ struct ControlCommand {
     timeout_ms: Option<u64>,
     #[serde(default)]
     native: Option<bool>,
+    // readState: the read-only Tauri command to invoke and its arguments. The
+    // renderer enforces a read-only allowlist before invoking (#3355).
+    #[serde(default)]
+    invoke_name: Option<String>,
+    #[serde(default)]
+    invoke_args: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +127,12 @@ struct IncomingCommand {
     timeout_ms: Option<u64>,
     #[serde(default)]
     native: Option<bool>,
+    // readState: the read-only Tauri command to invoke and its arguments. The
+    // renderer enforces a read-only allowlist before invoking (#3355).
+    #[serde(default)]
+    invoke_name: Option<String>,
+    #[serde(default)]
+    invoke_args: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -255,6 +267,8 @@ fn handle_request(
         key: incoming.key,
         timeout_ms: incoming.timeout_ms,
         native: incoming.native,
+        invoke_name: incoming.invoke_name,
+        invoke_args: incoming.invoke_args,
     };
     let (tx, rx) = mpsc::channel();
 
@@ -297,12 +311,19 @@ fn is_allowed_command(command: &str) -> bool {
         command,
         "navigate"
             | "click"
+            // Right-click a selector to open a context menu (conversation delete
+            // and other context-menu flows are otherwise undrivable). #3355.
+            | "contextmenu"
             | "fill"
             | "press"
             | "waitFor"
             | "dumpText"
             | "screenshot"
             | "setRootPath"
+            // Read a server-side outcome via a read-only allowlisted Tauri
+            // command (audit rows, lease charge, pending approvals). The
+            // renderer enforces the read-only allowlist. #3355.
+            | "readState"
     )
 }
 

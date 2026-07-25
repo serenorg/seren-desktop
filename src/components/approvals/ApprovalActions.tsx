@@ -158,6 +158,7 @@ export const ApprovalActions: Component<ApprovalActionsProps> = (props) => {
           </button>
           <button
             type="button"
+            data-testid="approval-approve-once"
             class="px-5 py-2.5 text-[0.9rem] font-medium border-none rounded-md cursor-pointer transition-all duration-150 bg-accent text-primary-foreground hover:bg-primary/85 hover:shadow-[var(--glow-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={() => props.onApproveOnce()}
             disabled={props.isProcessing || props.approveDisabled}
