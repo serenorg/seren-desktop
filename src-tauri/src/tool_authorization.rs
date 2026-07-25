@@ -1453,6 +1453,7 @@ impl ToolAuthorizationState {
                 created_at: now.clone(),
                 expires_at: timestamp_plus_seconds(conn, ttl_secs.max(1))?,
                 resolved_at: None,
+                disclosed_at: None,
             };
             approval_continuation::insert_continuation(conn, &row)?;
             // A deduped retry reuses the pending record above and is deliberately
@@ -1707,9 +1708,15 @@ impl ToolAuthorizationState {
                     &now,
                 );
             }
+            // Roll every settled-but-undisclosed lapse (the orphans just expired,
+            // plus any denials/skips/expiries from this turn) into the final
+            // summary, exactly once.
+            let disclosed =
+                approval_continuation::disclose_settled(conn, conversation_id, &now)?;
             let rows = approval_continuation::read_continuations(conn, conversation_id)?;
             Ok(CompletionSettlement {
                 newly_expired: expired.len(),
+                disclosed,
                 summary: approval_continuation::summarize(&rows),
             })
         })
@@ -3147,11 +3154,13 @@ mod tests {
         assert_eq!(settlement.summary.unresolved, 0);
         assert_eq!(settlement.summary.expired, 1);
         assert!(settlement.summary.can_complete());
+        // The expired-on-completion block is rolled up into the final summary once.
+        assert_eq!(settlement.disclosed.expired, 1);
         let notice = settlement
             .completion_notice()
             .expect("an expired-on-completion block is disclosed");
-        assert!(notice.contains("still awaiting approval"));
-        assert!(notice.contains("expired"));
+        assert!(notice.contains("not performed"));
+        assert!(notice.contains("1 expired"));
 
         // Host-owned and terminal: the store now reports the task runnable (no
         // stranded `waiting_for_approval`), and the block is `expired`, not `denied`.
@@ -3348,6 +3357,26 @@ mod tests {
         assert_eq!(summary.unresolved, 0);
         assert!(summary.can_complete());
         assert!(summary.has_disclosable());
+
+        // §7: the task's final summary rolls up every un-performed action —
+        // denied, skipped, and expired — enumerated once.
+        let settlement = s.settle_conversation_on_completion("conv-a").unwrap();
+        assert_eq!(settlement.disclosed.denied, 1);
+        assert_eq!(settlement.disclosed.skipped, 1);
+        assert_eq!(settlement.disclosed.expired, 1);
+        let notice = settlement
+            .completion_notice()
+            .expect("settled lapses are disclosed in the final summary");
+        assert!(notice.contains("3 actions"));
+        assert!(notice.contains("1 denied"));
+        assert!(notice.contains("1 skipped"));
+        assert!(notice.contains("1 expired"));
+
+        // Exactly once: a later clean completion of the same conversation
+        // re-discloses nothing (no prompt/notice storm across turns).
+        let again = s.settle_conversation_on_completion("conv-a").unwrap();
+        assert_eq!(again.disclosed.total(), 0);
+        assert_eq!(again.completion_notice(), None);
     }
 
     /// An expired block no longer holds the task and is not a dedup target for a
