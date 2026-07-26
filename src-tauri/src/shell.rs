@@ -33,6 +33,7 @@ fn consume_subprocess_handle<R: Runtime>(
         tool_name,
         binding,
     )
+    .map(|_| ())
 }
 
 /// Tauri event channel for streaming Bash stdout/stderr while the command

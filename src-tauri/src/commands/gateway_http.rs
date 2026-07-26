@@ -92,6 +92,8 @@ fn normalize_path(path: &str) -> String {
 /// Renderer-supplied dispatch-handle header (#3193-F). Always stripped before
 /// the request leaves the app; consumed only for publisher tool dispatch.
 const AUTH_HANDLE_HEADER: &str = "x-seren-auth-handle";
+const CHARGED_COST_MICROS_HEADER: &str = "x-seren-charged-cost-micros";
+const CHARGED_COST_ASSET_HEADER: &str = "x-seren-charged-cost-asset";
 
 /// Detect the publisher tool-dispatch surface:
 /// `/publishers/{slug}/_mcp/tools/{tool}`. Returns the decoded publisher slug
@@ -108,6 +110,29 @@ fn publisher_dispatch_target(url: &Url) -> Option<(String, String)> {
     }
 }
 
+fn settled_gateway_charge(
+    headers: &HeaderMap,
+) -> Option<crate::tool_authorization::SettledGatewayCharge> {
+    let micros = headers
+        .get(CHARGED_COST_MICROS_HEADER)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()?;
+    let asset = headers
+        .get(CHARGED_COST_ASSET_HEADER)?
+        .to_str()
+        .ok()?
+        .trim();
+    if asset.is_empty() {
+        return None;
+    }
+    Some(crate::tool_authorization::SettledGatewayCharge {
+        micros,
+        asset: asset.to_string(),
+    })
+}
+
 /// #3193-F: a publisher tool dispatch through the HTTP bridge must redeem a
 /// live host-minted handle for the exact publisher, tool, and body payload —
 /// the same rule the MCP transport enforces, so neither wire shape can be used
@@ -117,23 +142,26 @@ fn enforce_publisher_dispatch<R: tauri::Runtime>(
     url: &Url,
     body: Option<&str>,
     auth_handle: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Option<(String, crate::tool_authorization::DispatchRedemption)>, String> {
     let Some((publisher, tool)) = publisher_dispatch_target(url) else {
-        return Ok(());
+        return Ok(None);
     };
     let body_args: serde_json::Value = match body {
         Some(raw) if !raw.trim().is_empty() => serde_json::from_str(raw)
             .map_err(|_| "Dispatch refused: publisher tool body was not valid JSON.".to_string())?,
         _ => serde_json::json!({}),
     };
-    app.state::<crate::tool_authorization::ToolAuthorizationState>()
+    let handle = auth_handle.unwrap_or_default();
+    let redemption = app
+        .state::<crate::tool_authorization::ToolAuthorizationState>()
         .consume_dispatch_handle(
-            auth_handle.unwrap_or_default(),
+            handle,
             crate::tool_authorization::ToolRoute::Gateway,
             &publisher,
             &tool,
             &crate::tool_authorization::binding_for_publisher_args(&body_args),
-        )
+        )?;
+    Ok(Some((handle.to_string(), redemption)))
 }
 
 fn should_skip_stored_auth(path: &str) -> bool {
@@ -256,7 +284,8 @@ pub async fn gateway_http_start(
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(AUTH_HANDLE_HEADER))
         .map(|(_, value)| value.clone());
-    enforce_publisher_dispatch(&app, &url, request.body.as_deref(), auth_handle.as_deref())?;
+    let dispatch_handle =
+        enforce_publisher_dispatch(&app, &url, request.body.as_deref(), auth_handle.as_deref())?;
     let headers = build_header_map(&request.headers)?;
     let body = request.body.clone();
 
@@ -281,6 +310,20 @@ pub async fn gateway_http_start(
             .await
             .map_err(|e| format!("Gateway request failed: {}", e))?
     };
+
+    if response.status().is_success()
+        && let Some((handle, redemption)) = dispatch_handle.as_ref()
+    {
+        let charge = settled_gateway_charge(response.headers());
+        // The upstream call already settled, so a bookkeeping failure must not
+        // discard the paid response and invite a duplicate paid retry.
+        if let Err(err) = app
+            .state::<crate::tool_authorization::ToolAuthorizationState>()
+            .complete_gateway_dispatch(handle, charge.as_ref(), redemption)
+        {
+            log::error!("[gateway-http] Failed to complete gateway dispatch: {}", err);
+        }
+    }
 
     let meta = GatewayHttpResponseMeta {
         status: response.status().as_u16(),
@@ -413,6 +456,22 @@ mod tests {
         let headers = build_header_map(&raw).unwrap();
         assert!(!headers.contains_key(AUTH_HANDLE_HEADER));
         assert!(headers.contains_key("accept"));
+    }
+
+    #[test]
+    fn settled_charge_requires_complete_gateway_metadata() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CHARGED_COST_MICROS_HEADER, HeaderValue::from_static("1250000"));
+        assert_eq!(settled_gateway_charge(&headers), None);
+
+        headers.insert(CHARGED_COST_ASSET_HEADER, HeaderValue::from_static("USDC"));
+        assert_eq!(
+            settled_gateway_charge(&headers),
+            Some(crate::tool_authorization::SettledGatewayCharge {
+                micros: 1_250_000,
+                asset: "USDC".to_string(),
+            })
+        );
     }
 
     /// #3193-F: only the publisher tool-dispatch surface demands a dispatch

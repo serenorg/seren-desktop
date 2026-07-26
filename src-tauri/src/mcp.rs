@@ -798,9 +798,32 @@ use tokio::sync::RwLock;
 /// The second type parameter is the handler - we use () which implements ClientHandler
 type HttpMcpClient = rmcp::service::RunningService<rmcp::RoleClient, ()>;
 
+struct HttpMcpConnection {
+    client: Arc<HttpMcpClient>,
+    settlement_trusted: bool,
+}
+
+/// Origin that may report settled Gateway charges. Settlement metadata is
+/// host-trusted state, so it is accepted from this origin only and never from
+/// a renderer-chosen server name or tool name.
+const HOSTED_MCP_SETTLEMENT_ORIGIN: &str = "https://mcp.serendb.com";
+
+/// True when `url` is served by the hosted Seren MCP origin.
+fn is_hosted_mcp_settlement_origin(url: &str) -> bool {
+    let (Ok(parsed), Ok(trusted)) = (
+        url::Url::parse(url),
+        url::Url::parse(HOSTED_MCP_SETTLEMENT_ORIGIN),
+    ) else {
+        return false;
+    };
+    parsed.scheme() == trusted.scheme()
+        && parsed.host_str() == trusted.host_str()
+        && parsed.port_or_known_default() == trusted.port_or_known_default()
+}
+
 /// State for HTTP MCP connections
 pub struct HttpMcpState {
-    clients: RwLock<HashMap<String, Arc<HttpMcpClient>>>,
+    clients: RwLock<HashMap<String, HttpMcpConnection>>,
 }
 
 impl HttpMcpState {
@@ -841,6 +864,8 @@ pub async fn mcp_connect_http(
         reqwest::Client::new()
     };
 
+    let settlement_trusted = is_hosted_mcp_settlement_origin(&url);
+
     // Build transport config with URL
     let config = StreamableHttpClientTransportConfig {
         uri: url.into(),
@@ -880,7 +905,13 @@ pub async fn mcp_connect_http(
 
     // Store the client
     let mut clients = state.clients.write().await;
-    clients.insert(server_name, Arc::new(client));
+    clients.insert(
+        server_name,
+        HttpMcpConnection {
+            client: Arc::new(client),
+            settlement_trusted,
+        },
+    );
 
     Ok(init_result)
 }
@@ -892,9 +923,9 @@ pub async fn mcp_disconnect_http(
     server_name: String,
 ) -> Result<(), String> {
     let mut clients = state.clients.write().await;
-    if let Some(client) = clients.remove(&server_name) {
-        // Client will be dropped and connection closed
-        drop(client);
+    if let Some(connection) = clients.remove(&server_name) {
+        // Dropping the client closes its connection.
+        drop(connection);
     }
     Ok(())
 }
@@ -905,10 +936,15 @@ pub async fn mcp_list_tools_http(
     state: State<'_, HttpMcpState>,
     server_name: String,
 ) -> Result<Vec<McpTool>, String> {
-    let clients = state.clients.read().await;
-    let client = clients
-        .get(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
+    let client = {
+        let clients = state.clients.read().await;
+        Arc::clone(
+            &clients
+                .get(&server_name)
+                .ok_or_else(|| format!("Server '{}' not connected", server_name))?
+                .client,
+        )
+    };
 
     let tools_result = client
         .list_tools(None)
@@ -979,6 +1015,21 @@ pub(crate) fn http_dispatch_identity(
     )
 }
 
+fn settled_gateway_charge_from_meta(
+    meta: Option<&rmcp::model::Meta>,
+) -> Option<crate::tool_authorization::SettledGatewayCharge> {
+    let charge = meta?.0.get("seren/settledCharge")?;
+    let micros = charge.get("micros")?.as_u64()?;
+    let asset = charge.get("asset")?.as_str()?.trim();
+    if asset.is_empty() {
+        return None;
+    }
+    Some(crate::tool_authorization::SettledGatewayCharge {
+        micros,
+        asset: asset.to_string(),
+    })
+}
+
 /// Call a tool on an HTTP MCP server.
 ///
 /// #3193-F: like the stdio transport, this refuses to execute without a live
@@ -995,17 +1046,23 @@ pub async fn mcp_call_tool_http(
     auth_handle: Option<String>,
 ) -> Result<McpToolResult, String> {
     let (route, publisher, tool, bound_args) = http_dispatch_identity(&tool_name, &arguments);
-    authorization.consume_dispatch_handle(
+    let redemption = authorization.consume_dispatch_handle(
         auth_handle.as_deref().unwrap_or_default(),
         route,
         &publisher,
         &tool,
         &crate::tool_authorization::binding_for_publisher_args(&bound_args),
     )?;
-    let clients = state.clients.read().await;
-    let client = clients
-        .get(&server_name)
-        .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
+    let (client, settlement_trusted) = {
+        let clients = state.clients.read().await;
+        let connection = clients
+            .get(&server_name)
+            .ok_or_else(|| format!("Server '{}' not connected", server_name))?;
+        (
+            Arc::clone(&connection.client),
+            connection.settlement_trusted,
+        )
+    };
 
     let result = client
         .call_tool(
@@ -1014,6 +1071,26 @@ pub async fn mcp_call_tool_http(
         )
         .await
         .map_err(|e| format!("Failed to call tool: {}", e))?;
+
+    // Route classification comes from the renderer-supplied tool name, so it
+    // decides handle enforcement only. A reported charge is trusted solely
+    // because the transport is the hosted Seren MCP origin.
+    let settled_charge = settlement_trusted
+        .then(|| settled_gateway_charge_from_meta(result.meta.as_ref()))
+        .flatten();
+    if route == crate::tool_authorization::ToolRoute::Gateway
+        && !result.is_error.unwrap_or(false)
+    {
+        // The call already settled upstream, so a bookkeeping failure must not
+        // discard the paid response and invite a duplicate paid retry.
+        if let Err(err) = authorization.complete_gateway_dispatch(
+            auth_handle.as_deref().unwrap_or_default(),
+            settled_charge.as_ref(),
+            &redemption,
+        ) {
+            log::error!("[mcp] Failed to complete gateway dispatch: {}", err);
+        }
+    }
 
     Ok(McpToolResult {
         content: result
@@ -1179,6 +1256,52 @@ mod dispatch_enforcement_tests {
             .await
             .is_err()
         );
+    }
+
+    #[test]
+    fn settled_charge_uses_protocol_metadata_only() {
+        let meta = rmcp::model::Meta(
+            serde_json::json!({
+                "seren/settledCharge": {
+                    "micros": 1_250_000,
+                    "asset": "USDC"
+                }
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+
+        assert_eq!(
+            settled_gateway_charge_from_meta(Some(&meta)),
+            Some(crate::tool_authorization::SettledGatewayCharge {
+                micros: 1_250_000,
+                asset: "USDC".to_string(),
+            })
+        );
+        assert_eq!(settled_gateway_charge_from_meta(None), None);
+    }
+
+    /// A renderer picks both the server name and the tool name, so neither can
+    /// decide whether a reported charge is trustworthy. Only the hosted origin
+    /// may report settlement.
+    #[test]
+    fn only_the_hosted_mcp_origin_may_report_settlement() {
+        assert!(is_hosted_mcp_settlement_origin(
+            "https://mcp.serendb.com/mcp"
+        ));
+        assert!(is_hosted_mcp_settlement_origin(
+            "https://mcp.serendb.com:443/mcp"
+        ));
+
+        assert!(!is_hosted_mcp_settlement_origin("http://mcp.serendb.com/mcp"));
+        assert!(!is_hosted_mcp_settlement_origin(
+            "https://mcp.serendb.com.evil.test/mcp"
+        ));
+        assert!(!is_hosted_mcp_settlement_origin("https://evil.test/mcp"));
+        assert!(!is_hosted_mcp_settlement_origin("https://api.serendb.com/mcp"));
+        assert!(!is_hosted_mcp_settlement_origin("mcp.serendb.com/mcp"));
+        assert!(!is_hosted_mcp_settlement_origin("not a url"));
     }
 }
 

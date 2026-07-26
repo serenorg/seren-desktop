@@ -191,6 +191,19 @@ pub struct SpendReservation {
     pub reservation_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettledGatewayCharge {
+    pub micros: u64,
+    pub asset: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DispatchRedemption {
+    initial_gateway_dispatch: bool,
+    lease_id: Option<String>,
+}
+
 impl SpendReservation {
     fn charged(reservation_id: String) -> Self {
         Self {
@@ -235,6 +248,7 @@ const SPEND_RESERVATION_TTL_SECS: i64 = 3600;
 /// Redemptions per handle. Gateway operations legitimately re-dispatch after an
 /// x402 402 (signed-payment retry, or a SerenBucks retry) without re-consulting
 /// the gate, so one authorization covers the initial call plus those retries.
+/// A successful terminal response removes any unused allowance immediately.
 /// Every other route is strictly one dispatch per authorization.
 fn handle_uses_for_route(route: ToolRoute) -> i64 {
     match route {
@@ -848,7 +862,7 @@ impl ToolAuthorizationState {
         publisher_slug: &str,
         tool_name: &str,
         binding: &str,
-    ) -> Result<(), String> {
+    ) -> Result<DispatchRedemption, String> {
         const REFUSED: &str =
             "Dispatch refused: no valid host authorization for this operation.";
         if handle_id.trim().is_empty() {
@@ -902,7 +916,7 @@ impl ToolAuthorizationState {
             }
             // A lease-bound handle is only as alive as its lease: revocation or
             // expiry between authorize and dispatch must stop the dispatch.
-            if let Some(lease_id) = lease_id {
+            if let Some(lease_id) = lease_id.as_deref() {
                 let lease_json: Option<String> = conn
                     .query_row(
                         "SELECT lease_json FROM capability_leases WHERE id = ?1",
@@ -922,16 +936,88 @@ impl ToolAuthorizationState {
                     return Err(REFUSED.to_string());
                 }
             }
+            // Capture first-use provenance before decrementing so overlapping
+            // requests cannot change how a later settlement is classified.
+            let initial_gateway_dispatch =
+                route == ToolRoute::Gateway && uses_remaining == handle_uses_for_route(route);
             conn.execute(
                 "UPDATE dispatch_handles SET uses_remaining = uses_remaining - 1 WHERE id = ?1",
                 rusqlite::params![handle_id],
             )
             .map_err(|e| e.to_string())?;
+            // A Gateway response may settle on its final allowed dispatch. Keep
+            // that row until terminal completion records its lease charge.
             conn.execute(
-                "DELETE FROM dispatch_handles WHERE uses_remaining <= 0 OR expires_at <= ?1",
+                "DELETE FROM dispatch_handles \
+                 WHERE (uses_remaining <= 0 AND route != 'gateway') OR expires_at <= ?1",
                 rusqlite::params![now],
             )
             .map_err(|e| e.to_string())?;
+            Ok(DispatchRedemption {
+                initial_gateway_dispatch,
+                lease_id,
+            })
+        })
+    }
+
+    /// Complete a successful gateway dispatch and record trusted settlement
+    /// metadata against the exact lease that minted its handle.
+    pub fn complete_gateway_dispatch(
+        &self,
+        handle_id: &str,
+        charge: Option<&SettledGatewayCharge>,
+        redemption: &DispatchRedemption,
+    ) -> Result<(), String> {
+        if handle_id.trim().is_empty() {
+            return Ok(());
+        }
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+            if let (Some(lease_id), Some(charge)) = (redemption.lease_id.as_deref(), charge)
+                && redemption.initial_gateway_dispatch
+                && charge.micros > 0
+                && let Some(mut lease) = read_lease(&transaction, lease_id)?
+            {
+                let asset_matches = lease
+                    .budgets
+                    .asset
+                    .as_deref()
+                    .map(|expected| expected.eq_ignore_ascii_case(&charge.asset))
+                    .unwrap_or(true);
+                if asset_matches {
+                    lease.budgets.charge_spend(charge.micros);
+                    write_lease(&transaction, &lease)?;
+                } else {
+                    // The settled amount cannot be converted into the lease's
+                    // asset safely. Revoke the lease so later calls cannot keep
+                    // spending against an undercounted budget.
+                    lease.revoked = true;
+                    write_lease(&transaction, &lease)?;
+                    let now = current_timestamp(&transaction)?;
+                    audit(
+                        &transaction,
+                        &lease.conversation_id,
+                        AuditEvent::LeaseRevoked,
+                        &AuditContext::for_lease(&lease),
+                        &now,
+                    );
+                    log::warn!(
+                        "[tool-authorization] Revoked lease {} after settled gateway charge asset {} did not match {}",
+                        lease_id,
+                        charge.asset,
+                        lease.budgets.asset.as_deref().unwrap_or("unknown"),
+                    );
+                }
+            }
+
+            transaction
+                .execute(
+                    "DELETE FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![handle_id],
+                )
+                .map_err(|e| e.to_string())?;
+            transaction.commit().map_err(|e| e.to_string())?;
             Ok(())
         })
     }
@@ -3818,6 +3904,263 @@ mod tests {
                 .is_err(),
             "a spent handle must be refused"
         );
+    }
+
+    #[test]
+    fn terminal_dispatch_completion_removes_unused_redemptions() {
+        let s = state();
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let binding = binding_for_publisher_args(&args);
+
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding,
+            )
+            .unwrap();
+        s.complete_gateway_dispatch(&handle, None, &redemption)
+            .unwrap();
+
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn terminal_dispatch_records_settled_charge_on_its_lease() {
+        let s = state();
+        let mut budget = money_budget(10_000_000, "USDC");
+        budget.spend_used_micros = 8_000_000;
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            budget,
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+        assert!(redemption.initial_gateway_dispatch);
+
+        s.complete_gateway_dispatch(
+            &handle,
+            Some(&SettledGatewayCharge {
+                micros: 5_000_000,
+                asset: "USDC".to_string(),
+            }),
+            &redemption,
+        )
+        .unwrap();
+
+        assert_eq!(spend_used(&s), 13_000_000);
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn settled_charge_asset_mismatch_revokes_the_lease() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(10_000_000, "USDC"),
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+
+        s.complete_gateway_dispatch(
+            &handle,
+            Some(&SettledGatewayCharge {
+                micros: 5_000_000,
+                asset: "EUR".to_string(),
+            }),
+            &redemption,
+        )
+        .unwrap();
+
+        let leases = s.list_leases("conv-a").unwrap();
+        assert_eq!(leases.len(), 1);
+        assert!(leases[0].revoked);
+        assert_eq!(leases[0].budgets.spend_used_micros, 0);
+    }
+
+    #[test]
+    fn settled_charge_without_a_lease_still_completes_the_handle() {
+        let s = state();
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let binding = binding_for_publisher_args(&args);
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding,
+            )
+            .unwrap();
+
+        s.complete_gateway_dispatch(
+            &handle,
+            Some(&SettledGatewayCharge {
+                micros: 5_000_000,
+                asset: "USDC".to_string(),
+            }),
+            &redemption,
+        )
+        .unwrap();
+
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                &binding,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn prepaid_retry_does_not_duplicate_reserved_spend() {
+        let s = state();
+        let mut budget = money_budget(20_000_000, "USDC");
+        budget.spend_used_micros = 5_000_000;
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            budget,
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let binding = binding_for_publisher_args(&args);
+
+        let initial_redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding,
+            )
+            .unwrap();
+        assert!(initial_redemption.initial_gateway_dispatch);
+        let retry_redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding,
+            )
+            .unwrap();
+        assert!(!retry_redemption.initial_gateway_dispatch);
+        s.complete_gateway_dispatch(
+            &handle,
+            Some(&SettledGatewayCharge {
+                micros: 5_000_000,
+                asset: "USDC".to_string(),
+            }),
+            &retry_redemption,
+        )
+        .unwrap();
+
+        assert_eq!(spend_used(&s), 5_000_000);
     }
 
     /// A transport invoked with no handle, a forged handle, or an expired
