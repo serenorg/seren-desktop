@@ -43,4 +43,32 @@ describe("Claude spawn environment (#3194)", () => {
     expect(env[CANARY_ENV_NAME]).toBeUndefined();
     expect(Object.values(env)).not.toContain("canary-parent-secret");
   });
+
+  it("forwards Anthropic auth/model env so the CLI is not left 'Not logged in'", () => {
+    const keys = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    process.env.ANTHROPIC_AUTH_TOKEN = "sk-or-test-token";
+    process.env.ANTHROPIC_BASE_URL = "https://openrouter.ai/api";
+    process.env.ANTHROPIC_API_KEY = ""; // must survive as an empty string
+    try {
+      const env = buildClaudeSpawnEnv({
+        childEnv: {},
+        extendedPath: "/runtime/bin",
+        cwd: "/workspace/project",
+        sandboxMode: "workspace-write",
+        sandboxProfile: null,
+        approvalPolicy: "on-request",
+        autoApproveReads: true,
+        networkEnabled: true,
+      });
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBe("sk-or-test-token");
+      expect(env.ANTHROPIC_BASE_URL).toBe("https://openrouter.ai/api");
+      expect(env.ANTHROPIC_API_KEY).toBe("");
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
 });

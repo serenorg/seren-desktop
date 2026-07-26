@@ -279,6 +279,21 @@ const CLAUDE_PARENT_ENV_ALLOWLIST = [
   "SEREN_DESKTOP",
   "SEREN_EMBEDDED_NODE_BIN",
   "SEREN_PLAYWRIGHT_MCP_COMMAND",
+  // Claude Code authenticates and picks its model from these when there is no
+  // login file. Without them on the allowlist the spawned CLI never sees its
+  // credentials and reports "Not logged in": a direct or gateway API key
+  // (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL, e.g.
+  // OpenRouter), Bedrock (CLAUDE_CODE_USE_BEDROCK + AWS_REGION), and the model
+  // ids the CLI selects when --model is not decisive.
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
 ];
 
 function buildClaudeSpawnEnv({
