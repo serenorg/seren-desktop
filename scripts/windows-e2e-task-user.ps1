@@ -336,6 +336,9 @@ function Get-MissingAgentCredentialNames() {
   # Claude login file. Codex has no Bedrock equivalent and still requires its
   # archived credential file whenever the codex/claude-codex journeys run.
   `$claudeViaBedrock = Convert-EnvFlag (Get-EnvValue "CLAUDE_CODE_USE_BEDROCK") `$false
+  # claude-code can also authenticate via an Anthropic-compatible API token
+  # (ANTHROPIC_AUTH_TOKEN, e.g. OpenRouter), which needs no login file either.
+  `$claudeViaApiKey = -not [string]::IsNullOrWhiteSpace((Get-EnvValue "ANTHROPIC_AUTH_TOKEN"))
   # NOT `$home: that is a read-only PowerShell automatic variable and assigning
   # to it aborts the whole task ("Cannot overwrite variable HOME"). This path is
   # only reached when credentials are required (previously the Bedrock backend
@@ -344,7 +347,7 @@ function Get-MissingAgentCredentialNames() {
   `$appData = [Environment]::GetEnvironmentVariable("APPDATA")
   `$missing = @()
 
-  if (`$requiresClaude -and -not `$claudeViaBedrock) {
+  if (`$requiresClaude -and -not `$claudeViaBedrock -and -not `$claudeViaApiKey) {
     `$claudePaths = @(
       (Join-Path `$profileHome ".claude\.credentials.json"),
       (Join-Path `$profileHome ".claude.json")
@@ -444,7 +447,9 @@ try {
     "SEREN_E2E_AGENT_MODEL",
     "SEREN_E2E_AGENT_USE_BEDROCK",
     "SEREN_E2E_AGENT_BEDROCK_REGION",
-    "SEREN_E2E_AGENT_SMALL_FAST_MODEL"
+    "SEREN_E2E_AGENT_SMALL_FAST_MODEL",
+    "SEREN_E2E_ANTHROPIC_AUTH_TOKEN",
+    "SEREN_E2E_ANTHROPIC_BASE_URL"
   )
   foreach (`$name in `$secretNames) {
     `$parameterName = "`$secretPrefix/`$name"
@@ -502,6 +507,30 @@ try {
     # process as a backstop. #2452
     [Environment]::SetEnvironmentVariable("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1", "Process")
     Write-TaskLog "Configured Bedrock agent backend: region=`$bedrockRegion model=`$bedrockModel small=`$bedrockSmallModel"
+  } elseif (-not [string]::IsNullOrWhiteSpace((Get-EnvValue "SEREN_E2E_ANTHROPIC_AUTH_TOKEN"))) {
+    # Claude via an Anthropic-compatible API (OpenRouter's Anthropic Skin by
+    # default), used to certify the claude-code journey without the box's Bedrock
+    # instance role. claude-code speaks its native Messages API to the base URL.
+    # ANTHROPIC_API_KEY must be an EMPTY STRING (not unset) or the CLI falls back
+    # to authenticating against Anthropic directly. The model id (forwarded as
+    # --model) must be one the endpoint accepts (an OpenRouter id like
+    # anthropic/claude-haiku-4.5 for OpenRouter).
+    `$claudeBaseUrl = Get-EnvValue "SEREN_E2E_ANTHROPIC_BASE_URL"
+    if ([string]::IsNullOrWhiteSpace(`$claudeBaseUrl)) { `$claudeBaseUrl = "https://openrouter.ai/api" }
+    `$claudeModel = Get-EnvValue "SEREN_E2E_AGENT_MODEL"
+    `$claudeSmallModel = Get-EnvValue "SEREN_E2E_AGENT_SMALL_FAST_MODEL"
+    if ([string]::IsNullOrWhiteSpace(`$claudeSmallModel)) { `$claudeSmallModel = `$claudeModel }
+    [Environment]::SetEnvironmentVariable("ANTHROPIC_BASE_URL", `$claudeBaseUrl, "Process")
+    [Environment]::SetEnvironmentVariable("ANTHROPIC_AUTH_TOKEN", (Get-EnvValue "SEREN_E2E_ANTHROPIC_AUTH_TOKEN"), "Process")
+    [Environment]::SetEnvironmentVariable("ANTHROPIC_API_KEY", "", "Process")
+    if (-not [string]::IsNullOrWhiteSpace(`$claudeModel)) {
+      [Environment]::SetEnvironmentVariable("ANTHROPIC_MODEL", `$claudeModel, "Process")
+    }
+    if (-not [string]::IsNullOrWhiteSpace(`$claudeSmallModel)) {
+      [Environment]::SetEnvironmentVariable("ANTHROPIC_SMALL_FAST_MODEL", `$claudeSmallModel, "Process")
+    }
+    [Environment]::SetEnvironmentVariable("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1", "Process")
+    Write-TaskLog "Configured Anthropic-compatible API backend for claude-code: base=`$claudeBaseUrl model=`$claudeModel"
   }
   Import-AgentCredentialArchive
 

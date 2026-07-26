@@ -407,6 +407,21 @@ describe("Windows production e2e release gate", () => {
     expect(readiness).toContain("could not connect");
   });
 
+  it("certifies claude-code via an Anthropic-compatible API token when Bedrock is off", () => {
+    // Lets the e2e verify the claude-code journey without the box's Bedrock
+    // instance role (OpenRouter's Anthropic Skin). ANTHROPIC_API_KEY must be an
+    // empty string, not unset, or the CLI falls back to Anthropic directly.
+    expect(taskUserRunner).toContain("SEREN_E2E_ANTHROPIC_AUTH_TOKEN");
+    expect(taskUserRunner).toContain("ANTHROPIC_BASE_URL");
+    expect(taskUserRunner).toContain("openrouter.ai/api");
+    expect(taskUserRunner).toContain('SetEnvironmentVariable("ANTHROPIC_API_KEY", ""');
+    // The credential validator accepts the token in lieu of a login file.
+    expect(taskUserRunner).toContain("claudeViaApiKey");
+    expect(taskUserRunner).toContain(
+      "requiresClaude -and -not `$claudeViaBedrock -and -not `$claudeViaApiKey",
+    );
+  });
+
   it("allows unsigned release walkthroughs only for an explicit MAX_SIGNATURES block", () => {
     expect(runner).toContain("[switch]$AllowUnsignedPrArtifact");
     expect(runner).toContain("[switch]$AllowUnsignedBudgetBlockedArtifact");
