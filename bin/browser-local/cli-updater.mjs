@@ -196,15 +196,26 @@ export function classifyInstallChannel(resolvedPath, bareCommand) {
 export async function runInstalledVersion(resolvedPath, bareCommand) {
   if (resolvedPath === bareCommand) return null; // unresolved
   if (!existsSync(resolvedPath)) return null;
-  try {
-    const { stdout } = await execFileAsync(resolvedPath, ["--version"], {
-      timeout: VERSION_CMD_TIMEOUT_MS,
-      shell: process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd"),
-    });
-    return stdout.trim().match(SEMVER_EXTRACT_RE)?.[0] ?? null;
-  } catch {
-    return null;
+  // A single `--version` spawn can transiently fail on Windows — a loader
+  // hiccup / STATUS_DLL_INIT_FAILED in a constrained, elevated service session
+  // aborts the child before it prints anything. The path already resolved, so
+  // one failed spawn must not flake the whole "is this CLI installed" check
+  // into a false "not installed in a verifiable location". Retry a few times
+  // before concluding the binary is unusable; a real failure still fails. #3383.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const { stdout } = await execFileAsync(resolvedPath, ["--version"], {
+        timeout: VERSION_CMD_TIMEOUT_MS,
+        shell: process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd"),
+      });
+      return stdout.trim().match(SEMVER_EXTRACT_RE)?.[0] ?? null;
+    } catch {
+      if (attempt === maxAttempts) return null;
+      await new Promise((resolve) => setTimeout(resolve, 250 * attempt));
+    }
   }
+  return null;
 }
 
 /**
