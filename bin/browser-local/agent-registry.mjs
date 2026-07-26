@@ -263,6 +263,13 @@ function hasClaudeCredentials() {
   if (isClaudeBedrockConfigured()) {
     return true;
   }
+  // A direct or custom-endpoint API key authenticates the CLI too: a raw
+  // Anthropic key (ANTHROPIC_API_KEY) or an Anthropic-compatible proxy/gateway
+  // token (ANTHROPIC_AUTH_TOKEN, e.g. OpenRouter). Both are used directly by
+  // claude-code and need no login file. Empty strings do not count.
+  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) {
+    return true;
+  }
   const home = os.homedir();
   const appData = process.env.APPDATA;
   return hasAnyCredentialPath([
