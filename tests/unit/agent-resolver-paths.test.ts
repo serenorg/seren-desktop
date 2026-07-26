@@ -124,3 +124,19 @@ describe("#1665 — preference order preserved for Claude + Codex (regression gu
     expect(prefixIdx).toBeLessThan(usrLocalIdx);
   });
 });
+
+describe("#3377 — resolvers fall back to the dynamic npm global prefix", () => {
+  it.each([
+    "resolveInstalledCodexBinary",
+    "resolveInstalledClaudeBinary",
+    "resolveInstalledGeminiBinary",
+  ])(
+    "%s consults the dynamic prefix for custom / version-manager installs",
+    (name) => {
+      // Static candidate lists miss nvm/fnm/volta/portable-Node prefixes; the
+      // resolver must fall back to `npm prefix -g` before returning the bare
+      // command name.
+      expect(sliceFn(name)).toContain("resolveViaNpmGlobalPrefix");
+    },
+  );
+});

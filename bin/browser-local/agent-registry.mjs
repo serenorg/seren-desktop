@@ -1,7 +1,7 @@
 // ABOUTME: Browser-local agent registry for install/login/availability behaviors.
 // ABOUTME: Keeps provider metadata and per-agent setup logic separate from session runtime handling.
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import {
   accessSync,
   closeSync,
@@ -631,7 +631,7 @@ function resolveInstalledGeminiBinary() {
       }
     }
   }
-  return "gemini";
+  return resolveViaNpmGlobalPrefix("gemini.cmd", "gemini") ?? "gemini";
 }
 
 /**
@@ -704,7 +704,47 @@ export function resolveInstalledClaudeBinary() {
       }
     }
   }
-  return "claude";
+  return resolveViaNpmGlobalPrefix("claude.cmd", "claude") ?? "claude";
+}
+
+// The dynamic npm global prefix, queried once via the embedded npm. Covers
+// installs under a custom / version-manager prefix (nvm, fnm, volta, portable
+// Node, or an explicit `npm config set prefix`) that the static candidate lists
+// do not enumerate, so a CLI on a non-default prefix still resolves. #3377.
+let cachedNpmGlobalPrefix;
+function npmGlobalPrefixDir() {
+  if (cachedNpmGlobalPrefix !== undefined) return cachedNpmGlobalPrefix;
+  cachedNpmGlobalPrefix = null;
+  try {
+    const npmCliScript = resolveNpmCliScript();
+    const output = npmCliScript
+      ? execFileSync(process.execPath, [npmCliScript, "prefix", "-g"], {
+          timeout: 5000,
+          encoding: "utf8",
+        })
+      : execFileSync(
+          process.platform === "win32" ? "npm.cmd" : "npm",
+          ["prefix", "-g"],
+          { timeout: 5000, encoding: "utf8", shell: process.platform === "win32" },
+        );
+    const trimmed = output.trim();
+    if (trimmed) cachedNpmGlobalPrefix = trimmed;
+  } catch {
+    // No reachable npm / no global prefix; callers fall back to the bare command.
+  }
+  return cachedNpmGlobalPrefix;
+}
+
+// Resolve a CLI under the dynamic npm global prefix. On Windows a global bin
+// sits directly at <prefix>\<name>.cmd; on Unix at <prefix>/bin/<name>. #3377.
+function resolveViaNpmGlobalPrefix(windowsBin, unixBin) {
+  const prefix = npmGlobalPrefixDir();
+  if (!prefix) return null;
+  const candidate =
+    process.platform === "win32"
+      ? path.join(prefix, windowsBin)
+      : path.join(prefix, "bin", unixBin);
+  return existsSync(candidate) ? candidate : null;
 }
 
 /**
@@ -762,7 +802,7 @@ export function resolveInstalledCodexBinary() {
       }
     }
   }
-  return "codex";
+  return resolveViaNpmGlobalPrefix("codex.cmd", "codex") ?? "codex";
 }
 
 export function createBrowserLocalAgentRegistry({ emit }) {
