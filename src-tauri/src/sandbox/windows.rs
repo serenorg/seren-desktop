@@ -20,14 +20,21 @@ mod platform {
         SetEntriesInAclW, SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
     };
     use windows::Win32::Security::{
-        ACL, AdjustTokenPrivileges, AllocateAndInitializeSid, CopySid, CreateRestrictedToken,
-        CreateWellKnownSid, DACL_SECURITY_INFORMATION, DISABLE_MAX_PRIVILEGE, FreeSid,
-        GetLengthSid, GetTokenInformation, LUA_TOKEN, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW,
-        PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED, SECURITY_NT_AUTHORITY,
-        SID_AND_ATTRIBUTES, SUB_CONTAINERS_AND_OBJECTS_INHERIT, SetTokenInformation,
-        TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES, TOKEN_ADJUST_SESSIONID,
-        TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_GROUPS, TOKEN_PRIVILEGES,
-        TOKEN_QUERY, TokenDefaultDacl, TokenGroups, WRITE_RESTRICTED, WinWorldSid,
+        ACE_FLAGS, ACL, AdjustTokenPrivileges, AllocateAndInitializeSid, CONTAINER_INHERIT_ACE,
+        CopySid, CreateRestrictedToken, CreateWellKnownSid, DACL_SECURITY_INFORMATION,
+        DISABLE_MAX_PRIVILEGE, FreeSid, GetLengthSid, GetSecurityDescriptorDacl,
+        GetTokenInformation, GetUserObjectSecurity, InitializeSecurityDescriptor, LUA_TOKEN,
+        LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, NO_PROPAGATE_INHERIT_ACE, OBJECT_INHERIT_ACE,
+        PSECURITY_DESCRIPTOR, PSID, SE_PRIVILEGE_ENABLED,
+        SECURITY_DESCRIPTOR, SECURITY_NT_AUTHORITY, SID_AND_ATTRIBUTES,
+        SUB_CONTAINERS_AND_OBJECTS_INHERIT, SetSecurityDescriptorDacl, SetTokenInformation,
+        SetUserObjectSecurity, TOKEN_ACCESS_MASK, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES,
+        TOKEN_ADJUST_SESSIONID, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE,
+        TOKEN_GROUPS, TOKEN_PRIVILEGES, TOKEN_QUERY, TokenDefaultDacl, TokenGroups,
+        WRITE_RESTRICTED, WinWorldSid,
+    };
+    use windows::Win32::System::StationsAndDesktops::{
+        GetProcessWindowStation, GetThreadDesktop,
     };
     use windows::Win32::Storage::FileSystem::{
         DELETE, FILE_DELETE_CHILD, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -44,10 +51,10 @@ mod platform {
     use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
     use windows::Win32::System::Threading::{
         CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, GetCurrentProcess,
-        GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_CREATION_FLAGS,
+        GetCurrentThreadId, GetExitCodeProcess, INFINITE, OpenProcessToken, PROCESS_CREATION_FLAGS,
         PROCESS_INFORMATION, ResumeThread, STARTF_USESTDHANDLES, STARTUPINFOW, WaitForSingleObject,
     };
-    use windows::core::{PCWSTR, PWSTR};
+    use windows::core::{BOOL, PCWSTR, PWSTR};
 
     use super::super::policy::{SandboxError, SandboxMode, SandboxPolicy};
 
@@ -142,6 +149,165 @@ mod platform {
         }
     }
 
+    // Restores a window-station / desktop object's DACL when dropped, mirroring
+    // AclSnapshot for file objects. Held for the confined child's lifetime.
+    struct UserObjectAcl {
+        handle: HANDLE,
+        original: Vec<u8>,
+    }
+
+    impl Drop for UserObjectAcl {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = SetUserObjectSecurity(
+                    self.handle,
+                    &DACL_SECURITY_INFORMATION,
+                    PSECURITY_DESCRIPTOR(self.original.as_ptr() as *mut c_void),
+                );
+            }
+        }
+    }
+
+    // Grant `sid` full access to a window-station or desktop USER object so a
+    // restricted-token child can connect to win32k and initialize user32/gdi32.
+    // A restricted token derived from an elevated token in a non-interactive
+    // service session otherwise cannot reach the interactive desktop, so the
+    // loader aborts the child with STATUS_DLL_INIT_FAILED (0xC0000142) before
+    // main. The original DACL is captured and restored on drop; `inheritable`
+    // adds child-object inheritance so a window-station grant reaches its
+    // desktops. #3379.
+    fn grant_user_object_access(
+        handle: HANDLE,
+        sid: PSID,
+        inheritable: bool,
+    ) -> Result<UserObjectAcl, SandboxError> {
+        let dacl_info: u32 = DACL_SECURITY_INFORMATION.0;
+        let mut needed = 0u32;
+        unsafe {
+            let _ = GetUserObjectSecurity(handle, &dacl_info, None, 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(SandboxError::Windows(
+                "GetUserObjectSecurity size query returned zero".to_string(),
+            ));
+        }
+        let mut sd_buffer = vec![0u8; needed as usize];
+        unsafe {
+            GetUserObjectSecurity(
+                handle,
+                &dacl_info,
+                Some(PSECURITY_DESCRIPTOR(sd_buffer.as_mut_ptr() as *mut c_void)),
+                needed,
+                &mut needed,
+            )
+            .map_err(|error| {
+                SandboxError::Windows(format!("GetUserObjectSecurity failed: {error}"))
+            })?;
+        }
+        let original = sd_buffer.clone();
+
+        let mut present = BOOL(0);
+        let mut old_dacl: *mut ACL = std::ptr::null_mut();
+        let mut defaulted = BOOL(0);
+        unsafe {
+            GetSecurityDescriptorDacl(
+                PSECURITY_DESCRIPTOR(sd_buffer.as_mut_ptr() as *mut c_void),
+                &mut present,
+                &mut old_dacl,
+                &mut defaulted,
+            )
+            .map_err(|error| {
+                SandboxError::Windows(format!("GetSecurityDescriptorDacl failed: {error}"))
+            })?;
+        }
+
+        let inheritance = if inheritable {
+            ACE_FLAGS(OBJECT_INHERIT_ACE.0 | CONTAINER_INHERIT_ACE.0 | NO_PROPAGATE_INHERIT_ACE.0)
+        } else {
+            ACE_FLAGS(0)
+        };
+        let explicit = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: GENERIC_ALL.0,
+            grfAccessMode: GRANT_ACCESS,
+            grfInheritance: inheritance,
+            Trustee: trustee(sid),
+        };
+        let mut new_dacl: *mut ACL = std::ptr::null_mut();
+        let acl_result = unsafe {
+            SetEntriesInAclW(
+                Some(std::slice::from_ref(&explicit)),
+                (present.as_bool() && !old_dacl.is_null()).then_some(old_dacl as *const ACL),
+                &mut new_dacl,
+            )
+        };
+        if acl_result.0 != 0 {
+            return Err(SandboxError::Windows(format!(
+                "SetEntriesInAclW for user object failed: {}",
+                acl_result.0
+            )));
+        }
+
+        let mut descriptor = SECURITY_DESCRIPTOR::default();
+        let descriptor_ptr = PSECURITY_DESCRIPTOR(&mut descriptor as *mut _ as *mut c_void);
+        let build = unsafe {
+            InitializeSecurityDescriptor(descriptor_ptr, 1).and_then(|_| {
+                SetSecurityDescriptorDacl(descriptor_ptr, true, Some(new_dacl as *const ACL), false)
+            })
+        };
+        if let Err(error) = build {
+            unsafe {
+                if !new_dacl.is_null() {
+                    let _ = LocalFree(Some(HLOCAL(new_dacl as *mut _)));
+                }
+            }
+            return Err(SandboxError::Windows(format!(
+                "building user-object security descriptor failed: {error}"
+            )));
+        }
+        let set_result =
+            unsafe { SetUserObjectSecurity(handle, &DACL_SECURITY_INFORMATION, descriptor_ptr) };
+        unsafe {
+            if !new_dacl.is_null() {
+                let _ = LocalFree(Some(HLOCAL(new_dacl as *mut _)));
+            }
+        }
+        set_result.map_err(|error| {
+            SandboxError::Windows(format!("SetUserObjectSecurity failed: {error}"))
+        })?;
+
+        Ok(UserObjectAcl { handle, original })
+    }
+
+    // Grant the confined token access to the interactive window station and
+    // desktop for the child's lifetime. Best-effort: on any failure the child is
+    // still launched (it may already have access on a non-elevated interactive
+    // session), and the grants restore their original DACLs on drop. #3379.
+    fn grant_gui_object_access() -> Vec<UserObjectAcl> {
+        let mut grants = Vec::new();
+        let mut base_token = HANDLE::default();
+        let logon = unsafe {
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut base_token).is_err() {
+                return grants;
+            }
+            let base = HandleGuard::new(base_token);
+            match logon_sid(base.get()) {
+                Ok(sid) => sid,
+                Err(_) => return grants,
+            }
+        };
+        if let Ok(winsta) = unsafe { GetProcessWindowStation() } {
+            if let Ok(grant) = grant_user_object_access(HANDLE(winsta.0), logon.as_psid(), true) {
+                grants.push(grant);
+            }
+        }
+        if let Ok(desktop) = unsafe { GetThreadDesktop(GetCurrentThreadId()) } {
+            if let Ok(grant) = grant_user_object_access(HANDLE(desktop.0), logon.as_psid(), false) {
+                grants.push(grant);
+            }
+        }
+        grants
+    }
+
     pub fn apply_and_spawn_contained(
         policy: &SandboxPolicy,
         command: &str,
@@ -166,6 +332,8 @@ mod platform {
         }
 
         let token = create_restricted_token(capability.as_psid())?;
+        // Kept alive until the child has fully run; DACLs restore on drop.
+        let _gui_object_acls = grant_gui_object_access();
         let job = create_job()?;
         let (application_name, mut command_line) = command_line(command, args)?;
         let application_wide = wide(&application_name);
