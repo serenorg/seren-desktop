@@ -354,12 +354,46 @@ where
     .map_err(|err| format!("history sync task failed: {err}"))?
 }
 
+// Extract just the host[:port] from a postgres connection string, never the
+// credentials, so a connection error can name the endpoint without leaking the
+// password. Handles both URL (postgres://user:pass@host:port/db) and keyword
+// (host=... password=...) forms.
+fn connection_host(connection_string: &str) -> String {
+    let trimmed = connection_string.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix("postgres://")
+        .or_else(|| trimmed.strip_prefix("postgresql://"))
+    {
+        let after_at = rest.rsplit_once('@').map(|(_, h)| h).unwrap_or(rest);
+        let host = after_at.split(['/', '?']).next().unwrap_or(after_at);
+        return host.to_string();
+    }
+    for part in trimmed.split_whitespace() {
+        if let Some(host) = part.strip_prefix("host=") {
+            return host.to_string();
+        }
+    }
+    "<unknown>".to_string()
+}
+
 fn connect_client(connection_string: &str) -> Result<PgClient, String> {
     let tls = native_tls::TlsConnector::builder()
         .build()
         .map_err(|err| err.to_string())?;
     let tls = postgres_native_tls::MakeTlsConnector::new(tls);
-    let mut client = PgClient::connect(connection_string, tls).map_err(|err| err.to_string())?;
+    let mut client = PgClient::connect(connection_string, tls).map_err(|err| {
+        // Surface the full error chain (native_tls/SChannel detail) and the
+        // host so a TLS/connect failure is diagnosable instead of a bare
+        // "error performing TLS handshake". Credentials are never included. #3389.
+        use std::fmt::Write as _;
+        let mut detail = err.to_string();
+        let mut source = std::error::Error::source(&err);
+        while let Some(cause) = source {
+            let _ = write!(detail, " -> {cause}");
+            source = cause.source();
+        }
+        format!("{detail} [host={}]", connection_host(connection_string))
+    })?;
     // The idempotent history-sync DDL (CREATE ... IF NOT EXISTS) makes the
     // server emit a NOTICE per already-existing object on every sync tick, and
     // the sync `postgres` crate logs each at INFO (target `postgres::config`).
@@ -2076,6 +2110,19 @@ mod tests {
             result.is_err(),
             "expected a connection error from an unreachable host, got Ok"
         );
+    }
+
+    #[test]
+    fn connection_host_extracts_host_without_credentials() {
+        let url = "postgresql://user:s3cr3t@ep-cool-db.aws-us-east-2.example.tech:5432/windows_e2e_history?sslmode=require";
+        let host = connection_host(url);
+        assert_eq!(host, "ep-cool-db.aws-us-east-2.example.tech:5432");
+        assert!(!host.contains("s3cr3t"), "host must not leak the password");
+
+        let keyword = "host=db.example.tech port=5432 user=u password=s3cr3t dbname=h";
+        let host = connection_host(keyword);
+        assert_eq!(host, "db.example.tech");
+        assert!(!host.contains("s3cr3t"), "host must not leak the password");
     }
 
     #[test]
