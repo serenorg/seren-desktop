@@ -273,6 +273,218 @@ fn sandbox_windows_batch_wrapper_preserves_quoted_paths_and_arguments() {
     );
 }
 
+fn find_on_path(exe: &str) -> Option<PathBuf> {
+    env::var_os("PATH").and_then(|paths| {
+        env::split_paths(&paths)
+            .map(|dir| dir.join(exe))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// A restricted-token child that loads the GUI-subsystem DLLs (user32/gdi32,
+/// whose DllMain connects to win32k/CSRSS) must still start. node.exe statically
+/// imports them, so it reproduces the STATUS_DLL_INIT_FAILED (0xC0000142) crash
+/// claude-code hit on the release e2e (#3379). The existing canaries only spawn
+/// cmd.exe (console-only), so this loader path was never exercised.
+#[test]
+fn sandbox_windows_gui_dll_child_starts() {
+    // 0xC0000142 == 3221225794 == -1073741502 as i32 (how ExitStatus reports it).
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502;
+    let Some(node) = find_on_path("node.exe") else {
+        eprintln!("node.exe not on PATH; skipping GUI-DLL sandbox canary");
+        return;
+    };
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+
+    let output = sandbox_launcher_command(&policy, &workspace, &node)
+        .arg("-e")
+        .arg("process.exit(0)")
+        .output()
+        .expect("sandbox launcher starts");
+
+    assert_ne!(
+        output.status.code(),
+        Some(STATUS_DLL_INIT_FAILED),
+        "node crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the restricted-token \
+         sandbox: GUI DLL init was denied. stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        output.status.success(),
+        "node did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
+fn embedded_node_dir() -> Option<PathBuf> {
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
+    for candidate in [
+        base.join("win32-x64").join("node"),
+        base.join("win32-x64"),
+    ] {
+        if candidate.join("node.exe").is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Run a sandboxed child to completion with a timeout. Returns the exit code, or
+/// None if it was still running at the deadline (loaded fine, blocked on stdin).
+fn run_sandboxed_to_completion(cmd: &mut Command, timeout_secs: u64) -> Option<i32> {
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("sandbox launcher starts");
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("wait on sandboxed child") {
+            return status.code();
+        }
+        if start.elapsed() >= std::time::Duration::from_secs(timeout_secs) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Faithful repro of #3379: install the real claude-code CLI and run it through
+/// the restricted-token sandbox exactly as the provider runtime does — the full
+/// stream-json invocation, resolved through the app's EMBEDDED node. node.exe
+/// alone runs fine sandboxed, so this exercises claude-code's real startup
+/// module graph (bundled JS + native addons) under the confined token.
+///
+/// LOUD by design: a missing prerequisite panics rather than silently skipping,
+/// so a green result cannot hide a no-op (cargo hides passing-test output).
+#[test]
+fn sandbox_windows_claude_stream_json_starts() {
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502; // 0xC0000142 as i32
+    let npm = find_on_path("npm.cmd")
+        .or_else(|| find_on_path("npm.exe"))
+        .expect("npm must be on PATH in Windows CI (node/pnpm build ran first)");
+
+    let prefix = tempfile::tempdir().expect("claude install prefix");
+    let install = Command::new(&npm)
+        .args([
+            "install",
+            "-g",
+            "--no-fund",
+            "--no-audit",
+            "@anthropic-ai/claude-code@latest",
+        ])
+        .env("npm_config_prefix", prefix.path())
+        .output()
+        .expect("npm install runs");
+    assert!(
+        install.status.success(),
+        "npm install of claude-code failed: status={:?} stderr={}",
+        install.status,
+        String::from_utf8_lossy(&install.stderr),
+    );
+    let claude_cmd = prefix.path().join("claude.cmd");
+    assert!(
+        claude_cmd.is_file(),
+        "claude.cmd not installed at {}",
+        claude_cmd.display()
+    );
+
+    // Resolve claude's `node` through the app's embedded runtime, matching the
+    // real spawn's PATH. Fall back to the stock node already proven to work.
+    let mut child_path = String::new();
+    if let Some(dir) = embedded_node_dir() {
+        child_path.push_str(&dir.to_string_lossy());
+        child_path.push(';');
+    }
+    if let Some(existing) = env::var_os("PATH") {
+        child_path.push_str(&existing.to_string_lossy());
+    }
+
+    // The exact stream-json flag set the provider runtime passes (buildClaudeArgs).
+    let claude_args = [
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--include-partial-messages",
+        "--replay-user-messages",
+        "--permission-prompt-tool",
+        "stdio",
+        "--allow-dangerously-skip-permissions",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000000",
+    ];
+
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+    let mut cmd = sandbox_launcher_command(&policy, &workspace, &claude_cmd);
+    cmd.args(claude_args).env("PATH", &child_path);
+
+    // stdin is closed, so a healthy claude reaches EOF and exits; a loader crash
+    // exits 0xC0000142 before reading stdin. Timeout guards against a clean block.
+    let code = run_sandboxed_to_completion(&mut cmd, 90);
+
+    assert_ne!(
+        code,
+        Some(STATUS_DLL_INIT_FAILED),
+        "claude stream-json crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the \
+         restricted-token sandbox (#3379); exit code reproduced the release-e2e crash",
+    );
+}
+
+/// The real spawn runs the agent through the app's EMBEDDED node (bundled as a
+/// tauri resource), not the stock node on PATH. If that specific build is the
+/// differentiator behind #3379, it crashes here while stock node passes.
+#[test]
+fn sandbox_windows_embedded_node_starts() {
+    const STATUS_DLL_INIT_FAILED: i32 = -1_073_741_502; // 0xC0000142 as i32
+    let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("embedded-runtime");
+    let candidates = [
+        base.join("win32-x64").join("node").join("node.exe"),
+        base.join("win32-x64").join("node.exe"),
+    ];
+    let Some(embedded) = candidates.iter().find(|p| p.is_file()) else {
+        eprintln!(
+            "embedded node not staged under {}; skipping embedded-node canary",
+            base.display()
+        );
+        return;
+    };
+
+    let (_root, workspace) = workspace_fixture();
+    let policy = workspace_policy(SandboxMode::WorkspaceWrite, &workspace);
+    let output = sandbox_launcher_command(&policy, &workspace, embedded)
+        .arg("-e")
+        .arg("process.exit(0)")
+        .output()
+        .expect("sandbox launcher starts");
+
+    assert_ne!(
+        output.status.code(),
+        Some(STATUS_DLL_INIT_FAILED),
+        "EMBEDDED node crashed with STATUS_DLL_INIT_FAILED (0xC0000142) under the sandbox \
+         while stock node did not (#3379). stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        output.status.success(),
+        "embedded node did not exit cleanly under the sandbox: status={:?} stdout={} stderr={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 #[test]
 fn sandbox_windows_bad_arguments_exit_64() {
     let output = Command::new(env!("CARGO_BIN_EXE_Seren"))
