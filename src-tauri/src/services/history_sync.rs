@@ -376,14 +376,36 @@ fn connection_host(connection_string: &str) -> String {
     "<unknown>".to_string()
 }
 
+/// Build the Postgres TLS connector for history-sync.
+///
+/// Validates against the bundled Mozilla root set (`webpki-roots`) rather than
+/// the operating system trust store. On Windows, SChannel mis-builds Let's
+/// Encrypt's 2026 root hierarchy (ISRG Root YR): it AIA-chases into a longer,
+/// expired cross-signed path and rejects an otherwise-valid server certificate
+/// with CERT_E_EXPIRED, even when the box clock is correct and a valid short
+/// path to a trusted root exists. A bundled root set makes trust deterministic
+/// across every platform and process session and never wanders into the expired
+/// path. #3389.
+fn make_rustls_connector() -> Result<tokio_postgres_rustls::MakeRustlsConnect, String> {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    // Pin the crypto provider explicitly: this workspace compiles both the
+    // aws-lc-rs and ring rustls backends, so no process-default provider is
+    // installed and `ClientConfig::builder()` would panic at runtime. #3389.
+    let provider = std::sync::Arc::new(rustls::crypto::aws_lc_rs::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|err| format!("rustls provider init failed: {err}"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
+}
+
 fn connect_client(connection_string: &str) -> Result<PgClient, String> {
-    let tls = native_tls::TlsConnector::builder()
-        .build()
-        .map_err(|err| err.to_string())?;
-    let tls = postgres_native_tls::MakeTlsConnector::new(tls);
+    let tls = make_rustls_connector()?;
     let mut client = PgClient::connect(connection_string, tls).map_err(|err| {
-        // Surface the full error chain (native_tls/SChannel detail) and the
-        // host so a TLS/connect failure is diagnosable instead of a bare
+        // Surface the full error chain (rustls/webpki detail) and the host so a
+        // TLS/connect failure is diagnosable instead of a bare
         // "error performing TLS handshake". Credentials are never included. #3389.
         use std::fmt::Write as _;
         let mut detail = err.to_string();
