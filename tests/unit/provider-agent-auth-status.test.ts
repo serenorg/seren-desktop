@@ -19,6 +19,16 @@ describe("provider agent authentication status", () => {
     expect(registrySource).toContain('path.join(os.homedir(), ".grok", "auth.json")');
   });
 
+  it("treats a direct or custom-endpoint API token as claude-code auth", () => {
+    // claude-code uses ANTHROPIC_API_KEY (direct) or ANTHROPIC_AUTH_TOKEN (an
+    // Anthropic-compatible proxy/gateway such as OpenRouter) with no login file.
+    // The auth-status check must recognize them or provider_check_agent_authenticated
+    // falsely reports claude-code unauthenticated and the journey aborts before spawn.
+    expect(registrySource).toContain(
+      "process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN",
+    );
+  });
+
   it("exposes a provider_check_agent_authenticated RPC", () => {
     expect(runtimeSource).toContain("provider_check_agent_authenticated");
     expect(providersSource).toContain("checkAgentAuthenticated({ agentType })");
