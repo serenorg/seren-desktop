@@ -476,10 +476,6 @@ export type AgentRuntimePolicy = {
     process?: null | AgentProcessPolicy;
     resources?: null | AgentResourcePolicy;
     runtime_class?: null | AgentRuntimeClass;
-    /**
-     * Policy schema version. Must be `1` until a breaking field set is added.
-     */
-    version: number;
 };
 
 export type AgentSemanticMemoryPolicy = {
@@ -760,6 +756,10 @@ export type AgentToolErrorRecoveryPolicy = {
  */
 export type AgentToolRef = {
     kind: 'publisher';
+    /**
+     * OAuth connection fixed to this publisher for the deployment.
+     */
+    oauth_connection_id?: string | null;
     operation_id: string;
     permitted_actions?: Array<ActionLease>;
     publisher_slug: string;

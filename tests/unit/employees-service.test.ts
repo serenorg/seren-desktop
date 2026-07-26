@@ -336,7 +336,6 @@ describe("employees service", () => {
       runtime_adapter: "seren_agent",
       runtime_kind: "python",
       runtime_policy: {
-        version: 1,
         network: { default: "deny", egress_rules: [] },
       },
       secret_keys: [],

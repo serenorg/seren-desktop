@@ -19,6 +19,16 @@ describe("buildEmployeePolicyReviewSummary", () => {
     expect(summary.approvalRules).toContain("Read-only by default");
   });
 
+  it("summarizes a runtime policy that declares no restrictions", () => {
+    const summary = buildEmployeePolicyReviewSummary({
+      approvalPolicy: "read_only",
+      toolPresets: ["live_data"],
+      runtimePolicy: {},
+    });
+
+    expect(summary.runtimePolicy).toEqual(["Default managed runtime policy"]);
+  });
+
   it("summarizes an enabled Seren-managed semantic memory policy", () => {
     const summary = buildEmployeePolicyReviewSummary({
       approvalPolicy: "read_only",
@@ -46,7 +56,6 @@ describe("buildEmployeePolicyReviewSummary", () => {
       approvalPolicy: "allow_mutations",
       toolPresets: ["publisher_actions", "database"],
       runtimePolicy: {
-        version: 1,
         network: {
           default: "deny",
           blocked_request_inbox: true,
@@ -140,7 +149,6 @@ describe("buildEmployeePolicyReviewSummary", () => {
       ],
     });
 
-    expect(summary.runtimePolicy).toContain("Schema v1");
     expect(summary.runtimePolicy).toContain(
       "Network default deny; 1 egress rule; blocked egress inbox on",
     );

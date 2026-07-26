@@ -104,12 +104,14 @@ function formatToolRef(ref: AgentToolRef) {
   }
 }
 
+const DEFAULT_RUNTIME_POLICY_LINE = "Default managed runtime policy";
+
 function runtimePolicyLines(policy: AgentRuntimePolicy | null | undefined) {
   if (!policy) {
-    return ["Default managed runtime policy"];
+    return [DEFAULT_RUNTIME_POLICY_LINE];
   }
 
-  const lines = [`Schema v${policy.version}`];
+  const lines: string[] = [];
   if (policy.runtime_class) lines.push(`Runtime class ${policy.runtime_class}`);
   if (policy.network) {
     const egressRules = policy.network.egress_rules ?? [];
@@ -170,7 +172,9 @@ function runtimePolicyLines(policy: AgentRuntimePolicy | null | undefined) {
     lines.push(compactList(resourceParts, "Resource policy declared"));
   }
 
-  return lines;
+  // A policy that declares no section restricts nothing, so it reads the same
+  // as an absent policy rather than an empty review section.
+  return lines.length > 0 ? lines : [DEFAULT_RUNTIME_POLICY_LINE];
 }
 
 function memoryPolicyLines(policy: AgentMemoryPolicy | null | undefined) {
