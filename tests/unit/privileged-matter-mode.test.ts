@@ -49,7 +49,6 @@ describe("Privileged Matter Mode", () => {
       excludeMemory: false,
       excludeHistorySync: false,
       privileged: true,
-      counselDirection: "Counsel-directed analysis",
     });
   });
 
@@ -62,11 +61,7 @@ describe("Privileged Matter Mode", () => {
 
   it("honors the durable database privilege flag before privacy settings reload", () => {
     const restoredConversationId = "privileged-matter-restored-test";
-    privacyStore.hydrateConversationPrivilege(
-      restoredConversationId,
-      true,
-      "Counsel-directed analysis",
-    );
+    privacyStore.hydrateConversationPrivilege(restoredConversationId, true);
 
     expect(privacyStore.isPrivileged(restoredConversationId)).toBe(true);
     expect(privacyStore.isMemoryExcluded(restoredConversationId)).toBe(true);

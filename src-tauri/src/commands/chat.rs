@@ -652,7 +652,6 @@ pub struct Conversation {
     pub employee_id: Option<String>,
     #[serde(default)]
     pub privileged: bool,
-    pub counsel_direction: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -671,7 +670,6 @@ pub struct AgentConversation {
     pub is_archived: bool,
     #[serde(default)]
     pub privileged: bool,
-    pub counsel_direction: Option<String>,
 }
 
 /// Exact desktop record required to restore a provider process for a persisted
@@ -737,7 +735,6 @@ pub struct UnifiedConversationRow {
     // the durable SQLite value is hydrated immediately after the read.
     #[serde(default)]
     pub privileged: bool,
-    pub counsel_direction: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -783,7 +780,6 @@ pub async fn create_conversation(
         is_archived: false,
         employee_id: employee_id.clone(),
         privileged: false,
-        counsel_direction: None,
     };
 
     run_db(app, move |conn| {
@@ -852,7 +848,7 @@ pub async fn list_conversations(
                        c.employee_id, c.agent_type, c.agent_session_id,
                        c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
                        c.agent_metadata, c.project_id, c.privileged,
-                       c.counsel_direction, psr.provider AS runtime_provider,
+                       psr.provider AS runtime_provider,
                        {case} AS derived_kind
                 FROM conversations c
                 LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
@@ -867,7 +863,7 @@ pub async fn list_conversations(
                         ELSE agent_type END AS agent_type,
                    agent_session_id, agent_cwd, agent_model_id,
                    agent_permission_mode, agent_metadata, project_id,
-                   privileged, counsel_direction
+                   privileged
             FROM derived
             WHERE is_archived = 0
               AND (?1 IS NULL OR derived_kind = ?1)
@@ -903,7 +899,6 @@ pub async fn list_conversations(
                     agent_metadata: row.get(14)?,
                     project_id: row.get(15)?,
                     privileged: row.get::<_, i32>(16)? != 0,
-                    counsel_direction: row.get(17)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -925,7 +920,7 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                          THEN COALESCE(c.selected_provider, psr.provider)
                          ELSE c.selected_provider END AS selected_provider,
                     c.project_root, c.is_archived, c.employee_id,
-                    c.privileged, c.counsel_direction
+                    c.privileged
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
@@ -946,7 +941,6 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     is_archived: row.get::<_, i32>(6)? != 0,
                     employee_id: row.get(7)?,
                     privileged: row.get::<_, i32>(8)? != 0,
-                    counsel_direction: row.get(9)?,
                 })
             })
             .optional()?;
@@ -1000,20 +994,14 @@ pub async fn set_conversation_privileged(
     app: AppHandle,
     id: String,
     privileged: bool,
-    counsel_direction: Option<String>,
 ) -> Result<(), String> {
     let index_id = id.clone();
-    let normalized_direction = counsel_direction
-        .as_deref()
-        .map(str::trim)
-        .filter(|direction| !direction.is_empty())
-        .map(str::to_string);
     run_db(app.clone(), move |conn| {
         let changed = conn.execute(
             "UPDATE conversations
-             SET privileged = ?1, counsel_direction = ?2
-             WHERE id = ?3",
-            params![i32::from(privileged), normalized_direction, id],
+             SET privileged = ?1
+             WHERE id = ?2",
+            params![i32::from(privileged), id],
         )?;
         if changed == 0 {
             return Err(rusqlite::Error::QueryReturnedNoRows);
@@ -1176,7 +1164,6 @@ pub(crate) async fn create_agent_conversation_record(
         project_root: normalized_project_root.clone(),
         is_archived: false,
         privileged: false,
-        counsel_direction: None,
     };
 
     let persisted_convo = convo.clone();
@@ -1933,7 +1920,7 @@ pub async fn get_agent_conversation(
                     c.agent_session_id,
                     c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
                     c.agent_metadata, c.project_id, c.project_root, c.is_archived,
-                    c.privileged, c.counsel_direction
+                    c.privileged
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
@@ -1958,7 +1945,6 @@ pub async fn get_agent_conversation(
                     project_root: row.get(10)?,
                     is_archived: row.get::<_, i32>(11)? != 0,
                     privileged: row.get::<_, i32>(12)? != 0,
-                    counsel_direction: row.get(13)?,
                 })
             })
             .optional()?;
@@ -4310,7 +4296,6 @@ mod tests {
             project_root: None,
             is_archived: false,
             privileged: false,
-            counsel_direction: None,
         };
         assert!(upsert_agent_conversation_in_db(&conn, &late).unwrap());
 
@@ -4451,7 +4436,6 @@ mod tests {
             project_root: Some("/synthetic/project".to_string()),
             is_archived: false,
             privileged: false,
-            counsel_direction: None,
         };
 
         assert!(!upsert_agent_conversation_in_db(&conn, &conversation).unwrap());

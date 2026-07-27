@@ -37,7 +37,7 @@ pub struct PersistedMessage {
 /// Matter conversation. Keeping this at the database persistence chokepoint
 /// covers renderer, agent-runtime, and orchestrator writes alike.
 pub const PRIVILEGED_MATTER_STAMP: &str =
-    "Privileged & Confidential — Prepared in Anticipation of Litigation";
+    "Privileged & Confidential. Prepared at the Direction of Counsel.";
 
 pub const WAL_AUTOCHECKPOINT_PAGES: u32 = 200;
 const WAL_CHECKPOINT_INTERVAL_SECS: u64 = 10;
@@ -283,12 +283,12 @@ fn stamp_privileged_message_metadata(
 ) -> Result<Option<String>> {
     let privileged = conn
         .query_row(
-            "SELECT privileged, counsel_direction FROM conversations WHERE id = ?1",
+            "SELECT privileged FROM conversations WHERE id = ?1",
             rusqlite::params![conversation_id],
-            |row| Ok((row.get::<_, i32>(0)? != 0, row.get::<_, Option<String>>(1)?)),
+            |row| Ok(row.get::<_, i32>(0)? != 0),
         )
         .optional()?;
-    let Some((true, counsel_direction)) = privileged else {
+    let Some(true) = privileged else {
         return Ok(metadata.clone());
     };
 
@@ -315,16 +315,6 @@ fn stamp_privileged_message_metadata(
         "privileged_matter_stamp".to_string(),
         serde_json::Value::String(PRIVILEGED_MATTER_STAMP.to_string()),
     );
-    if let Some(direction) = counsel_direction
-        .as_deref()
-        .map(str::trim)
-        .filter(|direction| !direction.is_empty())
-    {
-        object.insert(
-            "counsel_direction".to_string(),
-            serde_json::Value::String(direction.to_string()),
-        );
-    }
     serde_json::to_string(&serde_json::Value::Object(object))
         .map(Some)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
@@ -752,8 +742,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             project_id TEXT,
             project_root TEXT,
             employee_id TEXT,
-            privileged INTEGER NOT NULL DEFAULT 0,
-            counsel_direction TEXT
+            privileged INTEGER NOT NULL DEFAULT 0
         )",
         [],
     )?;
@@ -1078,16 +1067,6 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     if !has_privileged {
         conn.execute(
             "ALTER TABLE conversations ADD COLUMN privileged INTEGER NOT NULL DEFAULT 0",
-            [],
-        )?;
-    }
-
-    let has_counsel_direction: bool = conn
-        .prepare("SELECT counsel_direction FROM conversations LIMIT 1")
-        .is_ok();
-    if !has_counsel_direction {
-        conn.execute(
-            "ALTER TABLE conversations ADD COLUMN counsel_direction TEXT",
             [],
         )?;
     }
@@ -1669,8 +1648,8 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         setup_schema(&conn).unwrap();
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, privileged, counsel_direction)
-             VALUES ('privileged', 'Matter', 1000, 1, 'Counsel-directed review')",
+            "INSERT INTO conversations (id, title, created_at, privileged)
+             VALUES ('privileged', 'Matter', 1000, 1)",
             [],
         )
         .unwrap();
@@ -1703,7 +1682,6 @@ mod tests {
                 metadata["privileged_matter_stamp"],
                 PRIVILEGED_MATTER_STAMP
             );
-            assert_eq!(metadata["counsel_direction"], "Counsel-directed review");
             assert_eq!(metadata["origin"], "orchestrator");
         }
     }
@@ -1735,7 +1713,7 @@ mod tests {
 
         conn.execute(
             "UPDATE conversations
-             SET privileged = 1, counsel_direction = 'Counsel-directed review'
+             SET privileged = 1
              WHERE id = 'retroactive'",
             [],
         )
@@ -1754,7 +1732,6 @@ mod tests {
             metadata["privileged_matter_stamp"],
             PRIVILEGED_MATTER_STAMP
         );
-        assert_eq!(metadata["counsel_direction"], "Counsel-directed review");
         assert_eq!(metadata["origin"], "before-toggle");
     }
 
@@ -2742,21 +2719,21 @@ mod tests {
         setup_schema(&conn).unwrap();
 
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, privileged, counsel_direction)
-             VALUES ('p1', 'Privileged', 1000, 1, 'Counsel-directed review')",
+            "INSERT INTO conversations (id, title, created_at, privileged)
+             VALUES ('p1', 'Privileged', 1000, 1)",
             [],
         )
         .unwrap();
-        let values: (i64, Option<String>) = conn
+        let privileged: i64 = conn
             .query_row(
-                "SELECT privileged, counsel_direction FROM conversations WHERE id = 'p1'",
+                "SELECT privileged FROM conversations WHERE id = 'p1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(values, (1, Some("Counsel-directed review".to_string())));
+        assert_eq!(privileged, 1);
 
-        // Re-running setup remains idempotent once both columns exist.
+        // Re-running setup remains idempotent once the column exists.
         setup_schema(&conn).unwrap();
     }
 

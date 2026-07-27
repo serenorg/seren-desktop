@@ -34,7 +34,6 @@ export interface Conversation {
   isArchived: boolean;
   employeeId: string | null;
   privileged?: boolean;
-  counselDirection?: string | null;
 }
 
 interface ConversationState {
@@ -102,7 +101,6 @@ function dbToConversation(db: DbConversation): Conversation {
     isArchived: db.is_archived,
     employeeId: db.employee_id ?? null,
     privileged: db.privileged,
-    counselDirection: db.counsel_direction,
   };
 }
 
@@ -117,7 +115,6 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     isArchived: row.is_archived,
     employeeId: row.employee_id,
     privileged: row.privileged,
-    counselDirection: row.counsel_direction,
   };
 }
 
@@ -675,7 +672,6 @@ export const conversationStore = {
         privacyStore.hydrateConversationPrivilege(
           conversation.id,
           conversation.privileged === true,
-          conversation.counselDirection,
         );
       }
 
