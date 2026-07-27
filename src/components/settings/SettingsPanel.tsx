@@ -1415,8 +1415,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                     Verified effective sandbox
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
-                    Reported by the trusted Rust sandbox module for the current
-                    project and network settings.
+                    Whether the OS sandbox can actually protect agent sessions
+                    with your current mode and network settings.
                   </span>
                 </div>
                 <Show
@@ -1450,57 +1450,63 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <Show when={agentSandboxStatus()}>
                 {(status) => (
                   <div class="mt-3 flex flex-col gap-2 text-[0.8rem]">
+                    {/* Full Access is a deliberate choice, not a failure: state
+                        plainly what it means and offer a one-click way back to a
+                        confined mode. */}
                     <Show when={status().effective_mode === "full-access"}>
                       <div
-                        class="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive"
+                        class="flex flex-col items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive"
                         role="alert"
                       >
-                        <span class="font-medium">
-                          Unconfined — no OS sandbox
+                        <span>
+                          <span class="font-medium">
+                            The agent is not sandboxed.
+                          </span>{" "}
+                          It can read and change any file on your computer and
+                          won't ask before acting.
                         </span>
-                        <span class="ml-1">
-                          The agent runs outside the trusted sandbox boundary.
-                        </span>
+                        <button
+                          type="button"
+                          class="rounded-md border border-destructive/50 px-2 py-1 text-[0.75rem] font-medium text-destructive transition-colors hover:bg-destructive/20"
+                          onClick={() =>
+                            handleStringChange(
+                              "agentSandboxMode",
+                              "workspace-write",
+                            )
+                          }
+                        >
+                          Confine to the project (Workspace Write)
+                        </button>
                       </div>
                     </Show>
-                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 rounded-md bg-surface-3/50 px-3 py-2 text-muted-foreground">
-                      <span>
-                        Backend:{" "}
-                        <strong class="font-medium text-foreground">
-                          {status().backend}
-                        </strong>
-                      </span>
-                      <span>
-                        Effective mode:{" "}
-                        <strong class="font-medium text-foreground">
-                          {status().effective_mode}
-                        </strong>
-                      </span>
-                      <span>
-                        Network:{" "}
-                        <strong class="font-medium text-foreground">
-                          {status().network_enabled ? "Enabled" : "Disabled"}
-                        </strong>
-                      </span>
-                      <span>
-                        Launch state:{" "}
-                        <strong class="font-medium text-foreground">
-                          {status().enforced_at_launch
-                            ? "Enforced"
-                            : "Not enforced"}
-                        </strong>
-                      </span>
-                    </div>
-                    <p class="m-0 text-muted-foreground leading-normal">
-                      {status().detail}
-                    </p>
-                    <Show when={!status().spec_available}>
+
+                    {/* Confined mode with a launch spec the host can build. */}
+                    <Show
+                      when={
+                        status().effective_mode !== "full-access" &&
+                        status().enforced_at_launch
+                      }
+                    >
+                      <p class="m-0 text-muted-foreground leading-normal">
+                        Agent sessions are confined by the OS sandbox before
+                        they start.
+                      </p>
+                    </Show>
+
+                    {/* The only genuinely actionable failure: a confined mode
+                        whose sandbox could not be prepared, so sessions block. */}
+                    <Show
+                      when={
+                        status().effective_mode !== "full-access" &&
+                        !status().spec_available
+                      }
+                    >
                       <p
                         class="m-0 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-warning"
                         role="alert"
                       >
-                        A bounded agent session would be blocked until this
-                        sandbox specification can be prepared.
+                        The OS sandbox couldn't be prepared, so agent sessions
+                        are blocked until it can start. {status().detail}
                       </p>
                     </Show>
                   </div>
