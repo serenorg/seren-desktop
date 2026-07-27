@@ -34,7 +34,7 @@ export type AgentType =
 export type UnlistenFn = () => void;
 
 /**
- * Explicit P0 allowlist for Privileged Matter Mode. Unknown providers are
+ * Explicit P0 allowlist for Privacy Mode. Unknown providers are
  * denied rather than inferred safe from a display name or marketing claim.
  */
 export const CONFIDENTIAL_SAFE_PROVIDERS = [
@@ -93,7 +93,7 @@ export function assertPrivilegedConversationProvider(
 ): void {
   if (!privileged || isConfidentialSafeProvider(providerId, options)) return;
   throw new Error(
-    `Privileged Matter Mode blocks ${providerId ?? "this provider"} for conversation ${conversationId}. Choose a local LM Studio endpoint instead.`,
+    `Privacy Mode blocks ${providerId ?? "this provider"} for conversation ${conversationId}. Choose a local LM Studio endpoint instead.`,
   );
 }
 

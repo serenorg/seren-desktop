@@ -1392,7 +1392,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
   const downloadChatHistory = async () => {
     if (isSaving()) return;
     if (isPrivilegedConversation()) {
-      alert("Cloud Notes export is disabled for Privileged Matter Mode.");
+      alert("Cloud Notes export is disabled for Privacy Mode.");
       return;
     }
     const messages = conversationMessages();
@@ -1541,7 +1541,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                 disabled={isSaving() || isPrivilegedConversation()}
                 title={
                   isPrivilegedConversation()
-                    ? "Cloud Notes export is disabled for Privileged Matter Mode"
+                    ? "Cloud Notes export is disabled for Privacy Mode"
                     : "Download chat history"
                 }
               >
@@ -1573,11 +1573,11 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             <div class="relative">
               <button
                 type="button"
-                class="bg-transparent border border-[#3a5650] text-[#9ce3c3] px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-[#172b25]"
+                class="bg-transparent border border-border text-muted-foreground px-2 py-1 rounded text-xs cursor-pointer transition-all hover:bg-surface-2 hover:text-foreground"
                 aria-expanded={showDataDestinations()}
                 onClick={() => setShowDataDestinations((open) => !open)}
               >
-                Destinations
+                Privacy
               </button>
               <Show when={showDataDestinations()}>
                 <div class="absolute right-0 top-full z-40 mt-2 w-[min(560px,calc(100vw-2rem))]">
@@ -1592,7 +1592,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           <aside
             class="shrink-0 border-b border-amber-400/30 bg-[linear-gradient(110deg,rgba(180,116,27,0.18),rgba(45,29,12,0.42))] px-4 py-2.5 text-amber-100"
             data-testid="privileged-matter-banner"
-            aria-label="Privileged Matter Mode enabled"
+            aria-label="Privacy Mode enabled"
           >
             <p class="m-0 text-xs font-semibold tracking-wide">
               {formatPrivilegedMatterStamp(counselDirection())}

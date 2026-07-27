@@ -43,7 +43,7 @@ describe("Privileged Matter provider gate", () => {
     ).toBe(false);
     expect(() =>
       assertPrivilegedConversationProvider("p1", true, "openai"),
-    ).toThrow("Privileged Matter Mode blocks openai");
+    ).toThrow("Privacy Mode blocks openai");
     expect(() =>
       assertPrivilegedConversationProvider("p1", true, "lmstudio", {
         lmStudioBaseUrl: "http://127.0.0.1:1234",
