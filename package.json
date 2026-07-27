@@ -77,7 +77,7 @@
     "happy": "1.2.0",
     "highlight.js": "^11.11.1",
     "marked": "^18.0.7",
-    "monaco-editor": "^0.56.0",
+    "monaco-editor": "^0.55.1",
     "pdfjs-dist": "^6.1.200",
     "qrcode": "^1.5.4",
     "solid-js": "^1.9.14",
