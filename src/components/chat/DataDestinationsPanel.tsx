@@ -129,14 +129,6 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
     privacyStore.setConversationPrivacy(id, { privileged: checked });
   };
 
-  const updateCounselDirection = (value: string) => {
-    const id = props.conversationId;
-    if (!id) return;
-    privacyStore.setConversationPrivacy(id, {
-      counselDirection: value.trim() || undefined,
-    });
-  };
-
   // In controls mode there is nothing actionable to show without a
   // conversation to scope the switches to.
   if (props.variant === "controls" && !props.conversationId) {
@@ -235,27 +227,6 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
                   </span>
                 </span>
               </label>
-              <Show when={privacyStore.isPrivileged(props.conversationId)}>
-                <label class="mt-2 block">
-                  <span class="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    Reason (optional)
-                  </span>
-                  <input
-                    type="text"
-                    class="mt-1 w-full rounded border border-border-strong bg-surface-2 px-2.5 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
-                    value={
-                      privacyStore.getConversationPrivacy(
-                        props.conversationId ?? "",
-                      ).counselDirection ?? ""
-                    }
-                    placeholder="e.g. Confidential review"
-                    onChange={(event) =>
-                      updateCounselDirection(event.currentTarget.value)
-                    }
-                    aria-label="Reason this conversation is private"
-                  />
-                </label>
-              </Show>
             </div>
             <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 transition-colors hover:border-border-hover">
               <input

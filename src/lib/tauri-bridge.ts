@@ -676,7 +676,6 @@ export interface Conversation {
   is_archived: boolean;
   employee_id: string | null;
   privileged: boolean;
-  counsel_direction: string | null;
 }
 
 /**
@@ -702,7 +701,6 @@ export interface AgentConversation {
   project_root: string | null;
   is_archived: boolean;
   privileged: boolean;
-  counsel_direction: string | null;
 }
 
 /**
@@ -729,7 +727,6 @@ export interface UnifiedConversationRow {
   agent_metadata: string | null;
   project_id: string | null;
   privileged: boolean;
-  counsel_direction: string | null;
 }
 
 /**
@@ -839,7 +836,6 @@ export async function updateConversation(
 export async function setConversationPrivileged(
   id: string,
   privileged: boolean,
-  counselDirection?: string | null,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -848,7 +844,6 @@ export async function setConversationPrivileged(
   await invoke("set_conversation_privileged", {
     id,
     privileged,
-    counselDirection: counselDirection ?? null,
   });
 }
 

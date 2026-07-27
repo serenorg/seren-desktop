@@ -99,7 +99,6 @@ export interface Conversation {
   selectedProvider: ProviderId | AgentType | null;
   isArchived: boolean;
   privileged?: boolean;
-  counselDirection?: string | null;
   compactedSummary?: CompactedSummary;
   /** Reasoning effort level: "minimal" | "low" | "medium" | "high" | "xhigh". */
   reasoningEffort?: string;
@@ -158,7 +157,6 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     selectedProvider: (row.selected_provider as ProviderId | AgentType) ?? null,
     isArchived: row.is_archived,
     privileged: row.privileged,
-    counselDirection: row.counsel_direction,
   };
 }
 

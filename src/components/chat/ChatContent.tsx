@@ -244,12 +244,6 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
       )?.privileged === true
     );
   };
-  const counselDirection = () => {
-    const id = conversationId();
-    return id
-      ? privacyStore.getConversationPrivacy(id).counselDirection
-      : undefined;
-  };
   const clearRecordedSession = () => {
     releaseRecordedSessionArtifacts?.();
     releaseRecordedSessionArtifacts = undefined;
@@ -1379,10 +1373,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     }
 
     const markdown = isPrivilegedConversation()
-      ? prependPrivilegedMatterStamp(
-          formatChatHistoryMarkdown(messages),
-          counselDirection(),
-        )
+      ? prependPrivilegedMatterStamp(formatChatHistoryMarkdown(messages))
       : formatChatHistoryMarkdown(messages);
 
     try {
@@ -1602,7 +1593,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
             aria-label="Privacy Mode enabled"
           >
             <p class="m-0 text-xs font-semibold tracking-wide">
-              {formatPrivilegedMatterStamp(counselDirection())}
+              {formatPrivilegedMatterStamp()}
             </p>
             <p class="m-0 mt-1 text-[11px] leading-relaxed text-amber-100/75">
               Memory, history sync, cloud Notes export, local search indexing,

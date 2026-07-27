@@ -306,9 +306,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     stopHistorySync();
     try {
       const reports = await eraseAllConversationData();
-      // Drop the renderer-side privacy.json entries (per-conversation flags and
-      // free-text counsel direction) so identifying data does not survive the
-      // erase-all (#3348).
+      // Drop the renderer-side privacy.json entries (per-conversation privacy
+      // flags) so they do not survive the erase-all (#3348).
       await privacyStore.clearAll();
       setEraseAllReports(reports);
       setEraseAllConfirm("");

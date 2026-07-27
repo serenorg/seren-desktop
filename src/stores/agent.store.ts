@@ -1686,7 +1686,6 @@ function unifiedRowToAgent(row: UnifiedConversationRow): DbAgentConversation {
     project_root: row.project_root,
     is_archived: row.is_archived,
     privileged: row.privileged,
-    counsel_direction: row.counsel_direction,
   };
 }
 
@@ -2883,7 +2882,6 @@ export const agentStore = {
         privacyStore.hydrateConversationPrivilege(
           conversation.id,
           conversation.privileged,
-          conversation.counsel_direction,
         );
       }
       setState(
@@ -2915,11 +2913,7 @@ export const agentStore = {
    */
   upsertAgentConversationFromDb(row: DbAgentConversation) {
     if (happyArchiveFence.isArchived(row.id)) return;
-    privacyStore.hydrateConversationPrivilege(
-      row.id,
-      row.privileged,
-      row.counsel_direction,
-    );
+    privacyStore.hydrateConversationPrivilege(row.id, row.privileged);
     setState("recentAgentConversations", (rows) => {
       const without = rows.filter((r) => r.id !== row.id);
       return [row, ...without];
@@ -2948,7 +2942,6 @@ export const agentStore = {
         privacyStore.hydrateConversationPrivilege(
           conversation.id,
           conversation.privileged,
-          conversation.counsel_direction,
         );
       }
 
@@ -4042,11 +4035,7 @@ export const agentStore = {
         // Non-fatal — the runtime is the source of truth for the live session.
       }
       if (convo?.privileged) {
-        privacyStore.hydrateConversationPrivilege(
-          convo.id,
-          true,
-          convo.counsel_direction,
-        );
+        privacyStore.hydrateConversationPrivilege(convo.id, true);
         try {
           providerService.assertPrivilegedConversationProvider(
             conversationId,
@@ -4289,11 +4278,7 @@ export const agentStore = {
       setState("error", "Agent conversation not found");
       return null;
     }
-    privacyStore.hydrateConversationPrivilege(
-      convo.id,
-      convo.privileged,
-      convo.counsel_direction,
-    );
+    privacyStore.hydrateConversationPrivilege(convo.id, convo.privileged);
     const agentType: AgentType =
       convo.agent_type === "codex" ||
       convo.agent_type === "claude-code" ||

@@ -13,8 +13,6 @@ export interface ConversationPrivacy {
   excludeHistorySync: boolean;
   /** Privileged conversations deny memory, history sync, notes export, and unsafe providers. */
   privileged: boolean;
-  /** Optional direction supplied by counsel and mirrored into the local chat DB. */
-  counselDirection?: string;
 }
 
 interface PrivacyState {
@@ -48,11 +46,6 @@ function normalizeConversations(
       excludeMemory: candidate.excludeMemory === true,
       excludeHistorySync: candidate.excludeHistorySync === true,
       privileged: candidate.privileged === true,
-      counselDirection:
-        typeof candidate.counselDirection === "string" &&
-        candidate.counselDirection.trim().length > 0
-          ? candidate.counselDirection.trim()
-          : undefined,
     };
   }
   return normalized;
@@ -162,18 +155,12 @@ export const privacyStore = {
    * A stale or unavailable privacy.json must never make a persisted privileged
    * conversation eligible for egress after an app restart.
    */
-  hydrateConversationPrivilege(
-    id: string,
-    privileged: boolean,
-    counselDirection?: string | null,
-  ): void {
+  hydrateConversationPrivilege(id: string, privileged: boolean): void {
     if (!id || !privileged) return;
     const current = flagsFor(id);
     setPrivacyState("conversations", id, {
       ...current,
       privileged: true,
-      counselDirection:
-        counselDirection?.trim() || current.counselDirection || undefined,
     });
   },
 
@@ -188,12 +175,8 @@ export const privacyStore = {
     };
     setPrivacyState("conversations", id, next);
     void saveStoredPrivacy();
-    if ("privileged" in updates || "counselDirection" in updates) {
-      void setConversationPrivileged(
-        id,
-        next.privileged,
-        next.counselDirection ?? null,
-      ).catch((error) => {
+    if ("privileged" in updates) {
+      void setConversationPrivileged(id, next.privileged).catch((error) => {
         console.warn(
           "[Privacy] Failed to persist Privacy Mode to the chat DB:",
           error,
@@ -210,8 +193,8 @@ export const privacyStore = {
 
   /**
    * Drop every per-conversation privacy entry and persist the empty state, for
-   * the "erase all data" flow. privacy.json holds identifying data (including
-   * free-text counsel direction), so it must not survive an erase-all (#3348).
+   * the "erase all data" flow. privacy.json maps conversation IDs to their
+   * privacy flags, so it must not survive an erase-all (#3348).
    */
   async clearAll(): Promise<void> {
     erasedConversationIds.clear();

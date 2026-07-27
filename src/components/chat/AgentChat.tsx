@@ -257,12 +257,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
   });
   const isPrivilegedConversation = () =>
     privacyStore.isPrivileged(activeAgentThread()?.id);
-  const counselDirection = () => {
-    const id = activeAgentThread()?.id;
-    return id
-      ? privacyStore.getConversationPrivacy(id).counselDirection
-      : undefined;
-  };
   const assertPrivilegedThreadProvider = () => {
     const thread = activeAgentThread();
     if (!thread) return;
@@ -816,7 +810,6 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           formatChatHistoryMarkdown(messages, {
             header: "# Agent Chat History",
           }),
-          counselDirection(),
         )
       : formatChatHistoryMarkdown(messages, {
           header: "# Agent Chat History",
@@ -1737,7 +1730,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           aria-label="Privacy Mode enabled"
         >
           <p class="m-0 text-xs font-semibold tracking-wide">
-            {formatPrivilegedMatterStamp(counselDirection())}
+            {formatPrivilegedMatterStamp()}
           </p>
           <p class="m-0 mt-1 text-[11px] leading-relaxed text-amber-100/75">
             Memory, history sync, cloud Notes export, local search indexing, and
