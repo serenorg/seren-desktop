@@ -82,6 +82,9 @@ describe("tool executor OAuth account routing", () => {
       if (cmd === "reserve_lease_spend") {
         return { outcome: "uncovered" };
       }
+      if (cmd === "renew_gateway_dispatch_handle") {
+        return "handle-retry";
+      }
       return undefined;
     });
   });
@@ -237,6 +240,9 @@ describe("tool executor OAuth account routing", () => {
             amount: "1000000",
             payTo: "0x0000000000000000000000000000000000000000",
             maxTimeoutSeconds: 60,
+            extra: {
+              settlementReceiptId: "9c1a3545-fc4f-4f48-a900-4a4c8f6ba015",
+            },
           },
         ],
       }),
@@ -285,8 +291,21 @@ describe("tool executor OAuth account routing", () => {
       },
       "handle-allow",
     );
-    // The x402 retry redeems the SAME host-minted handle — one authorization
-    // covers the dispatch plus its payment retry (#3193-F).
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "reserve_lease_spend",
+      expect.objectContaining({
+        exhaustedHandleId: "handle-allow",
+        receiptId: "9c1a3545-fc4f-4f48-a900-4a4c8f6ba015",
+      }),
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "renew_gateway_dispatch_handle",
+      {
+        exhaustedHandleId: "handle-allow",
+        receiptId: "9c1a3545-fc4f-4f48-a900-4a4c8f6ba015",
+      },
+    );
+    // The payment receipt authorizes one separately minted retry handle.
     expect(mocks.callGatewayTool).toHaveBeenNthCalledWith(
       2,
       "gmail",
@@ -296,7 +315,46 @@ describe("tool executor OAuth account routing", () => {
         connection_id: "conn-google-personal",
         _x402_payment: signedV2Payment,
       },
-      "handle-allow",
+      "handle-retry",
     );
+  });
+
+  it("requires a prepaid top-up instead of retrying an unreceipted charge", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.callGatewayTool.mockResolvedValueOnce({
+      result: "payment required",
+      is_error: true,
+      payment_proxy: {
+        payment_requirements: {
+          x402Version: 2,
+          accepts: [
+            {
+              scheme: "prepaid",
+              network: "seren:fiat",
+              asset: "serenbucks",
+              amount: "1000000",
+              payTo: "seren",
+              maxTimeoutSeconds: 60,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await executeTool(
+      {
+        id: "tool-call-prepaid",
+        type: "function",
+        function: {
+          name: "gateway__gmail__get_messages",
+          arguments: JSON.stringify({ q: "safe-read" }),
+        },
+      },
+      "thread-2",
+    );
+
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("Add funds");
+    expect(mocks.handlePaymentRequired).not.toHaveBeenCalled();
   });
 });

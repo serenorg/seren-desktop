@@ -73,34 +73,35 @@ pub fn record_tool_operation_decision(
 /// `reservationId` the renderer settles once the payment resolves; `"escalate"`
 /// tells the renderer to force an explicit approval (the silent budget cannot
 /// absorb this spend) rather than paying; `"uncovered"` means no lease applies and
-/// the renderer uses its own payment gate. Charging is host-owned and persisted —
+/// the renderer uses its own payment gate. Charging is host-owned and persisted;
 /// the renderer never supplies the amount charged.
 #[tauri::command]
 pub fn reserve_lease_spend(
     state: State<'_, ToolAuthorizationState>,
-    route: String,
+    exhausted_handle_id: String,
     publisher_slug: String,
     tool_name: String,
     conversation_id: String,
     context: Option<OperationContext>,
+    receipt_id: String,
     asset: String,
     cost_micros: u64,
 ) -> Result<SpendReservation, String> {
-    let route = ToolRoute::parse(&route)?;
     let context = context.unwrap_or_default();
     state.reserve_lease_spend(
-        route,
+        &exhausted_handle_id,
         &publisher_slug,
         &tool_name,
         &conversation_id,
         &context,
+        &receipt_id,
         &asset,
         cost_micros,
     )
 }
 
 /// Settle a spend reservation once its payment resolves (#3193-G). `settledMicros`
-/// omitted (`None`) releases the whole reservation — the payment never completed;
+/// omitted (`None`) releases the whole reservation because the payment never completed;
 /// a value reconciles the lease's spend from the reserved estimate to the amount
 /// actually paid. Idempotent: settling an unknown or already-settled reservation
 /// is a no-op.
@@ -111,6 +112,17 @@ pub fn settle_lease_spend(
     settled_micros: Option<u64>,
 ) -> Result<(), String> {
     state.settle_lease_spend(&reservation_id, settled_micros)
+}
+
+/// Replace an exhausted Gateway handle with the one dispatch allowed for a
+/// locally recorded payment retry.
+#[tauri::command]
+pub fn renew_gateway_dispatch_handle(
+    state: State<'_, ToolAuthorizationState>,
+    exhausted_handle_id: String,
+    receipt_id: String,
+) -> Result<String, String> {
+    state.renew_gateway_dispatch_handle(&exhausted_handle_id, &receipt_id)
 }
 
 /// Derive a *proposed* capability bundle for a task. This is read-only: it grants

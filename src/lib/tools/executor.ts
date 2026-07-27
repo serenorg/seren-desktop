@@ -292,20 +292,23 @@ interface SpendReservation {
  * prompt) rather than a silent payment.
  */
 async function reserveLeaseSpend(
+  exhaustedHandleId: string,
   publisherSlug: string,
   toolName: string,
   conversationId: string,
   context: OperationContext,
+  receiptId: string,
   costMicros: number,
   asset: string,
 ): Promise<SpendReservation> {
   try {
     const reservation = await invoke<SpendReservation>("reserve_lease_spend", {
-      route: "gateway",
+      exhaustedHandleId,
       publisherSlug,
       toolName,
       conversationId,
       context,
+      receiptId,
       asset,
       costMicros,
     });
@@ -344,6 +347,16 @@ async function settleLeaseSpend(
   } catch (err) {
     console.error("[Tool Executor] Failed to settle lease spend:", err);
   }
+}
+
+async function renewGatewayDispatchHandle(
+  exhaustedHandleId: string,
+  receiptId: string,
+): Promise<string> {
+  return invoke<string>("renew_gateway_dispatch_handle", {
+    exhaustedHandleId,
+    receiptId,
+  });
 }
 
 /**
@@ -1383,6 +1396,30 @@ function extractPaymentRequirements(
   return null;
 }
 
+function extractSettlementReceiptId(
+  proxyInfo: PaymentProxyInfo,
+): string | null {
+  const readReceiptId = (value: unknown): string | null => {
+    if (!value || typeof value !== "object") return null;
+    const envelope = value as {
+      accepts?: Array<{ extra?: { settlementReceiptId?: unknown } }>;
+    };
+    const candidate = envelope.accepts?.[0]?.extra?.settlementReceiptId;
+    return typeof candidate === "string" && candidate.trim()
+      ? candidate.trim()
+      : null;
+  };
+
+  const fromBody = readReceiptId(proxyInfo.payment_requirements);
+  if (fromBody) return fromBody;
+  if (!proxyInfo.payment_required_header) return null;
+  try {
+    return readReceiptId(JSON.parse(atob(proxyInfo.payment_required_header)));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Execute a gateway tool call via the MCP Gateway.
  * Handles x402 payment proxy flow: if server returns payment requirements,
@@ -1410,8 +1447,8 @@ async function executeGatewayTool(
       console.log("[Tool Executor] Operation blocked before execution");
       return auth.toolResult;
     }
-    // One authorization covers the initial dispatch plus its x402 payment
-    // retries — the host-minted handle carries that exact allowance.
+    // Every handle covers one dispatch. A payment challenge can mint a separate
+    // retry handle only after its receipt passes the host budget gate.
     const authHandle = auth.handle;
 
     if (auth.connectionId) {
@@ -1468,15 +1505,31 @@ async function executeGatewayTool(
           is_error: true,
         };
       }
+      const receiptId = extractSettlementReceiptId(response.payment_proxy);
+      if (!receiptId) {
+        const prepaidBalanceRequired = requirements.accepts.some(
+          (option) =>
+            option.type === "x402" && option.option.scheme === "prepaid",
+        );
+        return {
+          tool_call_id: toolCallId,
+          content: prepaidBalanceRequired
+            ? "The prepaid balance is insufficient. Add funds and retry this operation."
+            : "Payment required but the settlement receipt was missing; refusing an untracked payment.",
+          is_error: true,
+        };
+      }
       // Match the same context the initial authorize used (the original args,
       // before OAuth connection_id resolution) so the charge lands on the exact
       // lease that authorized this call.
       const leaseContext = contextForPublisherRoute("gateway", args);
       const reservation = await reserveLeaseSpend(
+        authHandle,
         publisherSlug,
         toolName,
         sessionConversationId(conversationId),
         leaseContext,
+        receiptId,
         charge.micros,
         charge.asset,
       );
@@ -1511,10 +1564,18 @@ async function executeGatewayTool(
         };
       }
 
-      // Payment committed: finalize the reservation once (keeps the charge; a
-      // delta only arises if a pre-call estimate was reserved earlier).
-      if (reservationId) {
-        await settleLeaseSpend(reservationId, charge.micros);
+      let retryAuthHandle: string;
+      try {
+        retryAuthHandle = await renewGatewayDispatchHandle(
+          authHandle,
+          receiptId,
+        );
+      } catch (error) {
+        return {
+          tool_call_id: toolCallId,
+          content: `Payment completed, but the authorized retry could not be created: ${String(error)}`,
+          is_error: true,
+        };
       }
 
       // If crypto payment was signed, retry with the payment header
@@ -1530,8 +1591,11 @@ async function executeGatewayTool(
           publisherSlug,
           toolName,
           retryArgs,
-          authHandle,
+          retryAuthHandle,
         );
+        if (reservationId && !retryResponse.is_error) {
+          await settleLeaseSpend(reservationId, charge.micros);
+        }
 
         const retryContent =
           typeof retryResponse.result === "string"
@@ -1560,8 +1624,11 @@ async function executeGatewayTool(
           publisherSlug,
           toolName,
           callArgs,
-          authHandle,
+          retryAuthHandle,
         );
+        if (reservationId && !retryResponse.is_error) {
+          await settleLeaseSpend(reservationId, charge.micros);
+        }
 
         const retryContent =
           typeof retryResponse.result === "string"

@@ -6950,6 +6950,96 @@ export type DataResponseSessionsRevoked = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseSettlementReceiptResponse = {
+    /**
+     * Settlement state for one priced publisher operation.
+     */
+    data: {
+        asset: string;
+        /**
+         * Gross settled cost in micro-units of the named asset.
+         *
+         * Pending receipts report no settled amount. Cancelled and expired receipts
+         * report zero. Refunded receipts retain the original gross cost.
+         */
+        charged_micros?: number | null;
+        receipt_id: string;
+        status: PaymentStatus;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseSignupResult = {
     data: {
         message: string;
@@ -12606,6 +12696,11 @@ export type PaymentRequirements = {
 };
 
 /**
+ * Status of payment request (402 response)
+ */
+export type PaymentStatus = 'pending' | 'paid' | 'expired' | 'cancelled' | 'refunded';
+
+/**
  * Status of a publisher payout request.
  */
 export type PayoutStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -13414,6 +13509,23 @@ export type SetRecoveryRequest = {
      * Email address for account recovery (optional, for human contact)
      */
     email?: string | null;
+};
+
+/**
+ * Settlement state for one priced publisher operation.
+ */
+export type SettlementReceiptResponse = {
+    asset: string;
+    /**
+     * Gross settled cost in micro-units of the named asset.
+     *
+     * Pending receipts report no settled amount. Cancelled and expired receipts
+     * report zero. Refunded receipts retain the original gross cost.
+     */
+    charged_micros?: number | null;
+    receipt_id: string;
+    status: PaymentStatus;
+    updated_at: string;
 };
 
 /**
@@ -20660,6 +20772,38 @@ export type ApplyReferralCodeResponses = {
      */
     200: unknown;
 };
+
+export type GetSettlementReceiptData = {
+    body?: never;
+    path: {
+        /**
+         * Settlement receipt ID
+         */
+        receipt_id: string;
+    };
+    query?: never;
+    url: '/wallet/settlements/{receipt_id}';
+};
+
+export type GetSettlementReceiptErrors = {
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * Settlement receipt not found
+     */
+    404: unknown;
+};
+
+export type GetSettlementReceiptResponses = {
+    /**
+     * Settlement receipt retrieved
+     */
+    200: DataResponseSettlementReceiptResponse;
+};
+
+export type GetSettlementReceiptResponse = GetSettlementReceiptResponses[keyof GetSettlementReceiptResponses];
 
 export type GetTransactionsData = {
     body?: never;

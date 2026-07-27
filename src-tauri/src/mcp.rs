@@ -1030,6 +1030,17 @@ fn settled_gateway_charge_from_meta(
     })
 }
 
+fn settlement_receipt_from_meta(meta: Option<&rmcp::model::Meta>) -> Option<String> {
+    meta?
+        .0
+        .get("seren/settlementReceipt")?
+        .get("receiptId")?
+        .as_str()?
+        .parse::<uuid::Uuid>()
+        .ok()
+        .map(|receipt_id| receipt_id.to_string())
+}
+
 /// Call a tool on an HTTP MCP server.
 ///
 /// #3193-F: like the stdio transport, this refuses to execute without a live
@@ -1078,6 +1089,9 @@ pub async fn mcp_call_tool_http(
     let settled_charge = settlement_trusted
         .then(|| settled_gateway_charge_from_meta(result.meta.as_ref()))
         .flatten();
+    let settlement_receipt = settlement_trusted
+        .then(|| settlement_receipt_from_meta(result.meta.as_ref()))
+        .flatten();
     if route == crate::tool_authorization::ToolRoute::Gateway
         && !result.is_error.unwrap_or(false)
     {
@@ -1085,6 +1099,7 @@ pub async fn mcp_call_tool_http(
         // discard the paid response and invite a duplicate paid retry.
         if let Err(err) = authorization.complete_gateway_dispatch(
             auth_handle.as_deref().unwrap_or_default(),
+            settlement_receipt.as_deref(),
             settled_charge.as_ref(),
             &redemption,
         ) {
@@ -1260,11 +1275,15 @@ mod dispatch_enforcement_tests {
 
     #[test]
     fn settled_charge_uses_protocol_metadata_only() {
+        let receipt_id = uuid::Uuid::new_v4();
         let meta = rmcp::model::Meta(
             serde_json::json!({
                 "seren/settledCharge": {
                     "micros": 1_250_000,
                     "asset": "USDC"
+                },
+                "seren/settlementReceipt": {
+                    "receiptId": receipt_id
                 }
             })
             .as_object()
@@ -1280,6 +1299,11 @@ mod dispatch_enforcement_tests {
             })
         );
         assert_eq!(settled_gateway_charge_from_meta(None), None);
+        assert_eq!(
+            settlement_receipt_from_meta(Some(&meta)),
+            Some(receipt_id.to_string())
+        );
+        assert_eq!(settlement_receipt_from_meta(None), None);
     }
 
     /// A renderer picks both the server name and the tool name, so neither can

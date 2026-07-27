@@ -198,9 +198,16 @@ pub struct SettledGatewayCharge {
     pub asset: String,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct GatewaySettlementReceipt {
+    pub receipt_id: String,
+    pub status: String,
+    pub charged_micros: Option<u64>,
+    pub asset: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DispatchRedemption {
-    initial_gateway_dispatch: bool,
     lease_id: Option<String>,
 }
 
@@ -245,16 +252,14 @@ const DISPATCH_HANDLE_TTL_SECS: i64 = 300;
 /// by a crash are ever pruned — and their charge is left standing, never released.
 const SPEND_RESERVATION_TTL_SECS: i64 = 3600;
 
-/// Redemptions per handle. Gateway operations legitimately re-dispatch after an
-/// x402 402 (signed-payment retry, or a SerenBucks retry) without re-consulting
-/// the gate, so one authorization covers the initial call plus those retries.
-/// A successful terminal response removes any unused allowance immediately.
-/// Every other route is strictly one dispatch per authorization.
-fn handle_uses_for_route(route: ToolRoute) -> i64 {
-    match route {
-        ToolRoute::Gateway => 3,
-        _ => 1,
-    }
+/// An unresolved Core receipt eventually revokes its bound lease instead of
+/// leaving an operation silently undercounted or blocking the task forever.
+const SETTLEMENT_PENDING_TTL_SECS: i64 = 86_400;
+
+/// Every handle authorizes one dispatch. A payment challenge can mint one new
+/// handle only after its receipt has passed the local budget gate.
+fn handle_uses_for_route(_route: ToolRoute) -> i64 {
+    1
 }
 
 /// Gateway metadata keys excluded from the operation binding: they are added,
@@ -712,6 +717,28 @@ impl ToolAuthorizationState {
         let class = classify_for_route(route, publisher_slug, tool_name);
         let binding = binding_for_operation(route, context, call_args);
 
+        if route == ToolRoute::Gateway
+            && self.with_conn(|conn| {
+                conn.query_row(
+                    "SELECT EXISTS (
+                        SELECT 1
+                        FROM gateway_settlement_receipts receipt
+                        JOIN capability_leases lease ON lease.id = receipt.lease_id
+                        WHERE receipt.state = 'pending'
+                          AND lease.conversation_id = ?1
+                    )",
+                    rusqlite::params![conversation_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(|e| e.to_string())
+            })?
+        {
+            return Err(
+                "A previous publisher charge is still settling. Retry after reconciliation."
+                    .to_string(),
+            );
+        }
+
         if class == OperationClass::TrustedRead {
             let handle =
                 self.mint_handle(conversation_id, route, publisher_slug, tool_name, &binding, None)?;
@@ -936,10 +963,6 @@ impl ToolAuthorizationState {
                     return Err(REFUSED.to_string());
                 }
             }
-            // Capture first-use provenance before decrementing so overlapping
-            // requests cannot change how a later settlement is classified.
-            let initial_gateway_dispatch =
-                route == ToolRoute::Gateway && uses_remaining == handle_uses_for_route(route);
             conn.execute(
                 "UPDATE dispatch_handles SET uses_remaining = uses_remaining - 1 WHERE id = ?1",
                 rusqlite::params![handle_id],
@@ -953,10 +976,135 @@ impl ToolAuthorizationState {
                 rusqlite::params![now],
             )
             .map_err(|e| e.to_string())?;
-            Ok(DispatchRedemption {
-                initial_gateway_dispatch,
+            Ok(DispatchRedemption { lease_id })
+        })
+    }
+
+    /// Mint the single retry authorization for a payment challenge. The quote
+    /// receipt must already be recorded, so a retry cannot precede local budget
+    /// accounting.
+    pub fn renew_gateway_dispatch_handle(
+        &self,
+        exhausted_handle_id: &str,
+        receipt_id: &str,
+    ) -> Result<String, String> {
+        const REFUSED: &str =
+            "Dispatch refused: no valid host authorization for this payment retry.";
+        let receipt_id = uuid::Uuid::parse_str(receipt_id)
+            .map_err(|_| REFUSED.to_string())?
+            .to_string();
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let now = current_timestamp(&transaction)?;
+            let handle: Option<(
+                String,
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                i64,
+                String,
+            )> = transaction
+                .query_row(
+                    "SELECT conversation_id, route, publisher_slug, tool_name, binding, \
+                            lease_id, uses_remaining, expires_at \
+                     FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![exhausted_handle_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                            row.get(7)?,
+                        ))
+                    },
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let Some((
+                conversation_id,
+                route,
+                publisher_slug,
+                tool_name,
+                binding,
                 lease_id,
-            })
+                uses_remaining,
+                expires_at,
+            )) = handle
+            else {
+                return Err(REFUSED.to_string());
+            };
+            let receipt: Option<(String, String, bool)> = transaction
+                .query_row(
+                    "SELECT initial_handle_id, state, retry_minted \
+                     FROM gateway_settlement_receipts WHERE receipt_id = ?1",
+                    rusqlite::params![&receipt_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let Some((initial_handle_id, receipt_state, retry_minted)) = receipt else {
+                return Err(REFUSED.to_string());
+            };
+            if route != ToolRoute::Gateway.as_wire()
+                || uses_remaining != 0
+                || expires_at.as_str() <= now.as_str()
+                || receipt_state != "pending"
+                || retry_minted
+                || initial_handle_id != exhausted_handle_id
+            {
+                return Err(REFUSED.to_string());
+            }
+
+            let retry_handle_id = uuid::Uuid::new_v4().to_string();
+            let updated = transaction
+                .execute(
+                    "UPDATE gateway_settlement_receipts \
+                     SET retry_minted = 1, retry_handle_id = ?2, updated_at = ?3 \
+                     WHERE receipt_id = ?1 AND retry_minted = 0",
+                    rusqlite::params![&receipt_id, &retry_handle_id, &now],
+                )
+                .map_err(|e| e.to_string())?;
+            if updated != 1 {
+                return Err(REFUSED.to_string());
+            }
+            transaction
+                .execute(
+                    "INSERT INTO dispatch_handles \
+                       (id, conversation_id, route, publisher_slug, tool_name, binding, \
+                        lease_id, uses_remaining, expires_at, created_at) \
+                     VALUES (?1, ?2, 'gateway', ?3, ?4, ?5, ?6, 1, ?7, ?8)",
+                    rusqlite::params![
+                        &retry_handle_id,
+                        conversation_id,
+                        publisher_slug,
+                        tool_name,
+                        binding,
+                        lease_id,
+                        expires_at,
+                        &now
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            transaction
+                .execute(
+                    "DELETE FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![exhausted_handle_id],
+                )
+                .map_err(|e| e.to_string())?;
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok(retry_handle_id)
         })
     }
 
@@ -965,6 +1113,7 @@ impl ToolAuthorizationState {
     pub fn complete_gateway_dispatch(
         &self,
         handle_id: &str,
+        receipt_id: Option<&str>,
         charge: Option<&SettledGatewayCharge>,
         redemption: &DispatchRedemption,
     ) -> Result<(), String> {
@@ -974,39 +1123,22 @@ impl ToolAuthorizationState {
         self.with_conn(|conn| {
             let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
 
-            if let (Some(lease_id), Some(charge)) = (redemption.lease_id.as_deref(), charge)
-                && redemption.initial_gateway_dispatch
-                && charge.micros > 0
-                && let Some(mut lease) = read_lease(&transaction, lease_id)?
-            {
-                let asset_matches = lease
-                    .budgets
-                    .asset
-                    .as_deref()
-                    .map(|expected| expected.eq_ignore_ascii_case(&charge.asset))
-                    .unwrap_or(true);
-                if asset_matches {
-                    lease.budgets.charge_spend(charge.micros);
-                    write_lease(&transaction, &lease)?;
+            if let Some(receipt_id) = receipt_id {
+                record_gateway_settlement(
+                    &transaction,
+                    receipt_id,
+                    handle_id,
+                    redemption.lease_id.as_deref(),
+                    charge,
+                )?;
+            } else if let Some(charge) = charge {
+                if let Some(lease_id) = redemption.lease_id.as_deref() {
+                    revoke_lease_for_untracked_gateway_charge(&transaction, lease_id, charge)?;
                 } else {
-                    // The settled amount cannot be converted into the lease's
-                    // asset safely. Revoke the lease so later calls cannot keep
-                    // spending against an undercounted budget.
-                    lease.revoked = true;
-                    write_lease(&transaction, &lease)?;
-                    let now = current_timestamp(&transaction)?;
-                    audit(
-                        &transaction,
-                        &lease.conversation_id,
-                        AuditEvent::LeaseRevoked,
-                        &AuditContext::for_lease(&lease),
-                        &now,
-                    );
                     log::warn!(
-                        "[tool-authorization] Revoked lease {} after settled gateway charge asset {} did not match {}",
-                        lease_id,
+                        "[tool-authorization] Ignored gateway charge {} {} without a settlement receipt or bound lease",
+                        charge.micros,
                         charge.asset,
-                        lease.budgets.asset.as_deref().unwrap_or("unknown"),
                     );
                 }
             }
@@ -1019,6 +1151,159 @@ impl ToolAuthorizationState {
                 .map_err(|e| e.to_string())?;
             transaction.commit().map_err(|e| e.to_string())?;
             Ok(())
+        })
+    }
+
+    /// Apply an authoritative Core receipt exactly once. A pending receipt
+    /// remains durable until Core reports a terminal state.
+    pub fn reconcile_gateway_settlement(
+        &self,
+        receipt: &GatewaySettlementReceipt,
+    ) -> Result<(), String> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let row: Option<(String, bool, Option<String>, Option<i64>)> = transaction
+                .query_row(
+                    "SELECT state, locally_accounted, lease_id, charged_micros \
+                     FROM gateway_settlement_receipts WHERE receipt_id = ?1",
+                    rusqlite::params![receipt.receipt_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                )
+                .map(Some)
+                .or_else(|err| match err {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    other => Err(other.to_string()),
+                })?;
+            let Some((state, locally_accounted, lease_id, charged_micros)) = row else {
+                return Ok(());
+            };
+            if state != "pending" {
+                return Ok(());
+            }
+
+            match receipt.status.as_str() {
+                "pending" => return Ok(()),
+                "paid" | "refunded" => {
+                    let charge = SettledGatewayCharge {
+                        micros: receipt.charged_micros.ok_or_else(|| {
+                            "Settled receipt did not include a charged amount.".to_string()
+                        })?,
+                        asset: receipt.asset.clone(),
+                    };
+                    if !locally_accounted
+                        && let Some(lease_id) = lease_id.as_deref()
+                    {
+                        apply_gateway_charge(&transaction, lease_id, &charge)?;
+                    }
+                    transaction
+                        .execute(
+                            "UPDATE gateway_settlement_receipts \
+                             SET state = 'accounted', charged_micros = ?2, asset = ?3, \
+                                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                             WHERE receipt_id = ?1 AND state = 'pending'",
+                            rusqlite::params![
+                                receipt.receipt_id,
+                                i64::try_from(charge.micros)
+                                    .map_err(|_| "Settled cost exceeds local storage range.")?,
+                                charge.asset
+                            ],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                "expired" | "cancelled" => {
+                    if locally_accounted
+                        && let (Some(lease_id), Some(charged_micros)) =
+                            (lease_id.as_deref(), charged_micros)
+                        && let Some(mut lease) = read_lease(&transaction, lease_id)?
+                    {
+                        lease.budgets.release_spend(
+                            u64::try_from(charged_micros)
+                                .map_err(|_| "Stored settled cost is invalid.")?,
+                        );
+                        write_lease(&transaction, &lease)?;
+                    }
+                    transaction
+                        .execute(
+                            "UPDATE gateway_settlement_receipts \
+                             SET state = 'cancelled', charged_micros = 0, asset = ?2, \
+                                 updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                             WHERE receipt_id = ?1 AND state = 'pending'",
+                            rusqlite::params![receipt.receipt_id, receipt.asset],
+                        )
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => return Err("Core returned an unknown settlement status.".to_string()),
+            }
+
+            transaction.commit().map_err(|e| e.to_string())
+        })
+    }
+
+    pub fn pending_gateway_settlement_receipts(&self) -> Result<Vec<String>, String> {
+        self.with_conn(|conn| {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let stale_before =
+                timestamp_plus_seconds(&transaction, -SETTLEMENT_PENDING_TTL_SECS)?;
+            let stale_rows = {
+                let mut statement = transaction
+                    .prepare(
+                        "SELECT receipt_id, lease_id \
+                         FROM gateway_settlement_receipts \
+                         WHERE state = 'pending' AND created_at <= ?1",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = statement
+                    .query_map(rusqlite::params![stale_before], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+                    })
+                    .map_err(|e| e.to_string())?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?
+            };
+            for (_, lease_id) in &stale_rows {
+                if let Some(lease_id) = lease_id
+                    && let Some(mut lease) = read_lease(&transaction, lease_id)?
+                    && !lease.revoked
+                {
+                    lease.revoked = true;
+                    write_lease(&transaction, &lease)?;
+                    let now = current_timestamp(&transaction)?;
+                    audit(
+                        &transaction,
+                        &lease.conversation_id,
+                        AuditEvent::LeaseRevoked,
+                        &AuditContext::for_lease(&lease),
+                        &now,
+                    );
+                }
+            }
+            if !stale_rows.is_empty() {
+                transaction
+                    .execute(
+                        "UPDATE gateway_settlement_receipts \
+                         SET state = 'cancelled', \
+                             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                         WHERE state = 'pending' AND created_at <= ?1",
+                        rusqlite::params![stale_before],
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+
+            let receipt_ids = {
+                let mut statement = transaction
+                .prepare(
+                    "SELECT receipt_id FROM gateway_settlement_receipts \
+                     WHERE state = 'pending' ORDER BY created_at",
+                )
+                .map_err(|e| e.to_string())?;
+                let rows = statement
+                    .query_map([], |row| row.get(0))
+                    .map_err(|e| e.to_string())?;
+                rows.collect::<Result<Vec<String>, _>>()
+                    .map_err(|e| e.to_string())?
+            };
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok(receipt_ids)
         })
     }
 
@@ -1134,11 +1419,12 @@ impl ToolAuthorizationState {
     /// a 402 and must not consume a reservation.
     pub fn reserve_lease_spend(
         &self,
-        route: ToolRoute,
+        exhausted_handle_id: &str,
         publisher_slug: &str,
         tool_name: &str,
         conversation_id: &str,
         context: &OperationContext,
+        receipt_id: &str,
         asset: &str,
         cost_micros: u64,
     ) -> Result<SpendReservation, String> {
@@ -1146,6 +1432,10 @@ impl ToolAuthorizationState {
             // A zero cost is free: nothing to reserve, nothing to escalate.
             return Ok(SpendReservation::uncovered());
         }
+        let receipt_id = uuid::Uuid::parse_str(receipt_id)
+            .map_err(|_| "Payment quote did not include a valid settlement receipt.".to_string())?
+            .to_string();
+        let route = ToolRoute::Gateway;
         let class = classify_for_route(route, publisher_slug, tool_name);
         let request = OperationRequest {
             route,
@@ -1158,10 +1448,51 @@ impl ToolAuthorizationState {
             cost_micros,
         };
         self.with_conn(|conn| {
-            let now = current_timestamp(conn)?;
-            record_lease_expiries_audited(conn, conversation_id, &now);
-            let leases = read_leases(conn, conversation_id)?;
-            match capability_lease::spend_for_conversation(
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let now = current_timestamp(&transaction)?;
+            record_lease_expiries_audited(&transaction, conversation_id, &now);
+            let handle_matches: bool = transaction
+                .query_row(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM dispatch_handles
+                        WHERE id = ?1
+                          AND conversation_id = ?2
+                          AND route = 'gateway'
+                          AND publisher_slug = ?3
+                          AND tool_name = ?4
+                          AND uses_remaining = 0
+                          AND expires_at > ?5
+                    )",
+                    rusqlite::params![
+                        exhausted_handle_id,
+                        conversation_id,
+                        publisher_slug,
+                        tool_name,
+                        now
+                    ],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if !handle_matches {
+                return Err(
+                    "Payment quote is not bound to the completed gateway dispatch.".to_string(),
+                );
+            }
+            let leases = read_leases(&transaction, conversation_id)?;
+            let receipt_exists: bool = transaction
+                .query_row(
+                    "SELECT EXISTS (
+                        SELECT 1 FROM gateway_settlement_receipts
+                        WHERE receipt_id = ?1
+                    )",
+                    rusqlite::params![&receipt_id],
+                    |row| row.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            if receipt_exists {
+                return Err("Payment quote has already been reserved locally.".to_string());
+            }
+            let outcome = match capability_lease::spend_for_conversation(
                 &leases,
                 &request,
                 asset,
@@ -1178,22 +1509,62 @@ impl ToolAuthorizationState {
                         return Ok(SpendReservation::uncovered());
                     };
                     lease.budgets.charge_spend(cost_micros);
-                    write_lease(conn, &lease)?;
+                    write_lease(&transaction, &lease)?;
+                    transaction
+                        .execute(
+                            "INSERT INTO gateway_settlement_receipts \
+                               (receipt_id, initial_handle_id, lease_id, state, \
+                                locally_accounted, retry_minted, charged_micros, asset, \
+                                created_at, updated_at) \
+                             VALUES (?1, ?2, ?3, 'pending', 1, 0, ?4, ?5, ?6, ?6)",
+                            rusqlite::params![
+                                &receipt_id,
+                                exhausted_handle_id,
+                                lease_id,
+                                i64::try_from(cost_micros)
+                                    .map_err(|_| "Quoted cost exceeds local storage range.")?,
+                                asset,
+                                now
+                            ],
+                        )
+                        .map_err(|e| e.to_string())?;
                     let reservation_id = uuid::Uuid::new_v4().to_string();
                     insert_spend_reservation(
-                        conn,
+                        &transaction,
                         &reservation_id,
+                        &receipt_id,
                         conversation_id,
                         &lease_id,
                         cost_micros,
                         asset,
                         &now,
                     )?;
-                    Ok(SpendReservation::charged(reservation_id))
+                    SpendReservation::charged(reservation_id)
                 }
-                SpendOutcome::Escalate => Ok(SpendReservation::escalate()),
-                SpendOutcome::Uncovered => Ok(SpendReservation::uncovered()),
+                SpendOutcome::Escalate => SpendReservation::escalate(),
+                SpendOutcome::Uncovered => SpendReservation::uncovered(),
+            };
+            if outcome.outcome != "charged" {
+                transaction
+                    .execute(
+                        "INSERT INTO gateway_settlement_receipts \
+                           (receipt_id, initial_handle_id, lease_id, state, \
+                            locally_accounted, retry_minted, charged_micros, asset, \
+                            created_at, updated_at) \
+                         VALUES (?1, ?2, NULL, 'pending', 0, 0, ?3, ?4, ?5, ?5)",
+                        rusqlite::params![
+                            &receipt_id,
+                            exhausted_handle_id,
+                            i64::try_from(cost_micros)
+                                .map_err(|_| "Quoted cost exceeds local storage range.")?,
+                            asset,
+                            now
+                        ],
+                    )
+                    .map_err(|e| e.to_string())?;
             }
+            transaction.commit().map_err(|e| e.to_string())?;
+            Ok(outcome)
         })
     }
 
@@ -1210,22 +1581,48 @@ impl ToolAuthorizationState {
         settled_micros: Option<u64>,
     ) -> Result<(), String> {
         self.with_conn(|conn| {
-            let Some((lease_id, reserved)) = take_spend_reservation(conn, reservation_id)? else {
+            let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            let Some((lease_id, reserved, receipt_id, asset)) =
+                take_spend_reservation(&transaction, reservation_id)?
+            else {
                 return Ok(());
             };
             let settled = settled_micros.unwrap_or(0);
-            if settled == reserved {
-                return Ok(());
-            }
-            if let Some(mut lease) = read_lease(conn, &lease_id)? {
+            if settled != reserved
+                && let Some(mut lease) = read_lease(&transaction, &lease_id)?
+            {
                 if settled < reserved {
                     lease.budgets.release_spend(reserved - settled);
                 } else {
                     lease.budgets.charge_spend(settled - reserved);
                 }
-                write_lease(conn, &lease)?;
+                write_lease(&transaction, &lease)?;
             }
-            Ok(())
+            if settled_micros.is_some() {
+                transaction.execute(
+                    "UPDATE gateway_settlement_receipts \
+                     SET charged_micros = ?2, asset = ?3, \
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                     WHERE receipt_id = ?1 AND state = 'pending'",
+                    rusqlite::params![
+                        receipt_id,
+                        i64::try_from(settled)
+                            .map_err(|_| "Settled cost exceeds local storage range.")?,
+                        asset
+                    ],
+                )
+                .map_err(|e| e.to_string())?;
+            } else {
+                transaction.execute(
+                    "UPDATE gateway_settlement_receipts \
+                     SET state = 'cancelled', charged_micros = 0, \
+                         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+                     WHERE receipt_id = ?1 AND state = 'pending'",
+                    rusqlite::params![receipt_id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            transaction.commit().map_err(|e| e.to_string())
         })
     }
 
@@ -1946,10 +2343,22 @@ impl ToolAuthorizationState {
             let reservations = conn
                 .execute("DELETE FROM spend_reservations", [])
                 .map_err(|e| e.to_string())?;
+            let settlement_receipts = conn
+                .execute("DELETE FROM gateway_settlement_receipts", [])
+                .map_err(|e| e.to_string())?;
             // Reclaim and zero the freed pages so no wiped authorization data
             // survives in the file after an erase-all (#3348).
             conn.execute_batch("VACUUM;").map_err(|e| e.to_string())?;
-            Ok(decisions + leases + policies + continuations + audit_rows + handles + reservations)
+            Ok(
+                decisions
+                    + leases
+                    + policies
+                    + continuations
+                    + audit_rows
+                    + handles
+                    + reservations
+                    + settlement_receipts,
+            )
         })
     }
 }
@@ -2246,6 +2655,7 @@ fn write_standing_policy(conn: &Connection, policy: &StandingPolicy) -> Result<(
 fn insert_spend_reservation(
     conn: &Connection,
     reservation_id: &str,
+    receipt_id: &str,
     conversation_id: &str,
     lease_id: &str,
     reserved_micros: u64,
@@ -2260,10 +2670,11 @@ fn insert_spend_reservation(
     .map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO spend_reservations \
-           (id, conversation_id, lease_id, reserved_micros, asset, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+           (id, receipt_id, conversation_id, lease_id, reserved_micros, asset, created_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         rusqlite::params![
             reservation_id,
+            receipt_id,
             conversation_id,
             lease_id,
             reserved_micros as i64,
@@ -2281,19 +2692,20 @@ fn insert_spend_reservation(
 fn take_spend_reservation(
     conn: &Connection,
     reservation_id: &str,
-) -> Result<Option<(String, u64)>, String> {
-    let row: Option<(String, i64)> = conn
+) -> Result<Option<(String, u64, String, String)>, String> {
+    let row: Option<(String, i64, String, String)> = conn
         .query_row(
-            "SELECT lease_id, reserved_micros FROM spend_reservations WHERE id = ?1",
+            "SELECT lease_id, reserved_micros, receipt_id, asset \
+             FROM spend_reservations WHERE id = ?1",
             rusqlite::params![reservation_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )
         .map(Some)
         .or_else(|err| match err {
             rusqlite::Error::QueryReturnedNoRows => Ok(None),
             other => Err(other.to_string()),
         })?;
-    let Some((lease_id, reserved)) = row else {
+    let Some((lease_id, reserved, receipt_id, asset)) = row else {
         return Ok(None);
     };
     conn.execute(
@@ -2301,7 +2713,161 @@ fn take_spend_reservation(
         rusqlite::params![reservation_id],
     )
     .map_err(|e| e.to_string())?;
-    Ok(Some((lease_id, reserved.max(0) as u64)))
+    Ok(Some((
+        lease_id,
+        reserved.max(0) as u64,
+        receipt_id,
+        asset,
+    )))
+}
+
+fn apply_gateway_charge(
+    conn: &Connection,
+    lease_id: &str,
+    charge: &SettledGatewayCharge,
+) -> Result<(), String> {
+    if charge.micros == 0 {
+        return Ok(());
+    }
+    let Some(mut lease) = read_lease(conn, lease_id)? else {
+        return Ok(());
+    };
+    let asset_matches = lease
+        .budgets
+        .asset
+        .as_deref()
+        .map(|expected| expected.eq_ignore_ascii_case(&charge.asset))
+        .unwrap_or(true);
+    if asset_matches {
+        lease.budgets.charge_spend(charge.micros);
+        write_lease(conn, &lease)?;
+    } else {
+        // The amount cannot be converted into the lease asset safely. Revoke
+        // the lease so later calls cannot spend against an undercounted budget.
+        lease.revoked = true;
+        write_lease(conn, &lease)?;
+        let now = current_timestamp(conn)?;
+        audit(
+            conn,
+            &lease.conversation_id,
+            AuditEvent::LeaseRevoked,
+            &AuditContext::for_lease(&lease),
+            &now,
+        );
+        log::warn!(
+            "[tool-authorization] Revoked lease {} after settled gateway charge asset {} did not match {}",
+            lease_id,
+            charge.asset,
+            lease.budgets.asset.as_deref().unwrap_or("unknown"),
+        );
+    }
+    Ok(())
+}
+
+fn revoke_lease_for_untracked_gateway_charge(
+    conn: &Connection,
+    lease_id: &str,
+    charge: &SettledGatewayCharge,
+) -> Result<(), String> {
+    let Some(mut lease) = read_lease(conn, lease_id)? else {
+        log::warn!(
+            "[tool-authorization] Ignored gateway charge {} {} without a settlement receipt because lease {} was unavailable",
+            charge.micros,
+            charge.asset,
+            lease_id,
+        );
+        return Ok(());
+    };
+    if !lease.revoked {
+        lease.revoked = true;
+        write_lease(conn, &lease)?;
+        let now = current_timestamp(conn)?;
+        audit(
+            conn,
+            &lease.conversation_id,
+            AuditEvent::LeaseRevoked,
+            &AuditContext::for_lease(&lease),
+            &now,
+        );
+    }
+    log::warn!(
+        "[tool-authorization] Revoked lease {} after a gateway charge {} {} arrived without a settlement receipt",
+        lease_id,
+        charge.micros,
+        charge.asset,
+    );
+    Ok(())
+}
+
+fn record_gateway_settlement(
+    conn: &Connection,
+    receipt_id: &str,
+    handle_id: &str,
+    lease_id: Option<&str>,
+    charge: Option<&SettledGatewayCharge>,
+) -> Result<(), String> {
+    let receipt_id = uuid::Uuid::parse_str(receipt_id)
+        .map_err(|_| "Core returned an invalid settlement receipt ID.".to_string())?
+        .to_string();
+    let now = current_timestamp(conn)?;
+    conn.execute(
+        "INSERT OR IGNORE INTO gateway_settlement_receipts \
+           (receipt_id, initial_handle_id, lease_id, state, locally_accounted, \
+            created_at, updated_at) \
+         VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4)",
+        rusqlite::params![receipt_id, handle_id, lease_id, now],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let (initial_handle_id, retry_handle_id, state, locally_accounted): (
+        String,
+        Option<String>,
+        String,
+        bool,
+    ) = conn
+        .query_row(
+            "SELECT initial_handle_id, retry_handle_id, state, locally_accounted \
+             FROM gateway_settlement_receipts WHERE receipt_id = ?1",
+            rusqlite::params![receipt_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    if initial_handle_id != handle_id && retry_handle_id.as_deref() != Some(handle_id) {
+        return Err("Settlement receipt does not match this gateway dispatch.".to_string());
+    }
+    if state != "pending" {
+        return Ok(());
+    }
+
+    if let Some(charge) = charge {
+        if !locally_accounted
+            && let Some(lease_id) = lease_id
+        {
+            apply_gateway_charge(conn, lease_id, charge)?;
+        }
+        conn.execute(
+            "UPDATE gateway_settlement_receipts \
+             SET state = 'accounted', charged_micros = ?2, asset = ?3, updated_at = ?4 \
+             WHERE receipt_id = ?1 AND state = 'pending'",
+            rusqlite::params![
+                receipt_id,
+                i64::try_from(charge.micros)
+                    .map_err(|_| "Settled cost exceeds local storage range.")?,
+                charge.asset,
+                now
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    } else if locally_accounted {
+        conn.execute(
+            "UPDATE gateway_settlement_receipts \
+             SET state = 'accounted', updated_at = ?2 \
+             WHERE receipt_id = ?1 AND state = 'pending'",
+            rusqlite::params![receipt_id, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn init_schema(conn: &Connection) -> Result<(), String> {
@@ -2373,18 +2939,63 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
-    // Spend reservations (#3193-G): a live reserve→settle record so the realized
+    // Spend reservations (#3193-G): a live reserve-to-settle record so the realized
     // cost charged at the x402 payment gate is reconciled against a host-owned
     // amount once the payment resolves, not a renderer-supplied one.
+    let spend_reservations_need_rebuild: bool = conn
+        .query_row(
+            "SELECT EXISTS (
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'spend_reservations'
+            )",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?
+        && conn
+            .prepare("SELECT receipt_id FROM spend_reservations LIMIT 0")
+            .is_err();
+    if spend_reservations_need_rebuild {
+        // Reservations are process-local in-flight records. No dispatch survives
+        // application restart, so obsolete rows cannot be settled safely.
+        conn.execute("DROP TABLE spend_reservations", [])
+            .map_err(|e| e.to_string())?;
+    }
     conn.execute(
         "CREATE TABLE IF NOT EXISTS spend_reservations (
             id              TEXT PRIMARY KEY,
+            receipt_id      TEXT NOT NULL UNIQUE,
             conversation_id TEXT NOT NULL,
             lease_id        TEXT NOT NULL,
             reserved_micros INTEGER NOT NULL,
             asset           TEXT,
             created_at      TEXT NOT NULL
         )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    // Settlement receipts are the idempotency boundary for Core-owned charges.
+    // A primary key makes repeated transport delivery impossible to double-count.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS gateway_settlement_receipts (
+            receipt_id      TEXT PRIMARY KEY,
+            initial_handle_id TEXT NOT NULL,
+            retry_handle_id TEXT,
+            lease_id        TEXT,
+            state           TEXT NOT NULL CHECK (state IN ('pending', 'accounted', 'cancelled')),
+            locally_accounted INTEGER NOT NULL DEFAULT 0,
+            retry_minted    INTEGER NOT NULL DEFAULT 0,
+            charged_micros  INTEGER,
+            asset           TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_gateway_settlement_receipts_pending \
+         ON gateway_settlement_receipts(state, created_at) WHERE state = 'pending'",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -2406,6 +3017,46 @@ mod tests {
         // Force the connection open against :memory: by touching the store.
         s.with_conn(|_| Ok(())).unwrap();
         s
+    }
+
+    #[test]
+    fn schema_rebuilds_obsolete_spend_reservations() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute(
+                "CREATE TABLE spend_reservations (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL,
+                    lease_id TEXT NOT NULL,
+                    reserved_micros INTEGER NOT NULL,
+                    asset TEXT,
+                    created_at TEXT NOT NULL
+                )",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO spend_reservations \
+                   (id, conversation_id, lease_id, reserved_micros, created_at) \
+                 VALUES ('old', 'conversation', 'lease', 1, 'now')",
+                [],
+            )
+            .unwrap();
+
+        init_schema(&connection).unwrap();
+
+        let count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM spend_reservations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(
+            connection
+                .prepare("SELECT receipt_id FROM spend_reservations LIMIT 0")
+                .is_ok()
+        );
     }
 
     // No lease context: the classification/decision-store tests exercise the
@@ -3014,12 +3665,33 @@ mod tests {
         asset: &str,
         cost_micros: u64,
     ) -> SpendReservation {
-        s.reserve_lease_spend(
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        s.consume_dispatch_handle(
+            &handle,
             ToolRoute::Gateway,
+            "some-dex",
+            "post_swap",
+            &binding_for_publisher_args(&args),
+        )
+        .unwrap();
+        s.reserve_lease_spend(
+            &handle,
             "some-dex",
             "post_swap",
             "conv-a",
             &ctx(),
+            &uuid::Uuid::new_v4().to_string(),
             asset,
             cost_micros,
         )
@@ -3072,6 +3744,8 @@ mod tests {
     fn priced_call_with_no_covering_lease_is_uncovered() {
         let s = state();
         // A lease that covers a *different* publisher does not cover this call.
+        // The dispatch is still authorized (a trusted read needs no lease), so
+        // the reservation reaches the budget matcher and finds nothing.
         let other = LeasePredicates {
             publisher_ops: vec![capability_lease::PublisherRule {
                 publisher_slug: "attio".to_string(),
@@ -3082,7 +3756,40 @@ mod tests {
         };
         s.grant_lease("conv-a", "crm", 3600, other, money_budget(10_000_000, "USDC"))
             .unwrap();
-        let reservation = reserve(&s, "USDC", 1_000_000);
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        s.consume_dispatch_handle(
+            &handle,
+            ToolRoute::Gateway,
+            "gmail",
+            "get_messages",
+            &binding_for_publisher_args(&args),
+        )
+        .unwrap();
+
+        let reservation = s
+            .reserve_lease_spend(
+                &handle,
+                "gmail",
+                "get_messages",
+                "conv-a",
+                &ctx(),
+                &uuid::Uuid::new_v4().to_string(),
+                "USDC",
+                1_000_000,
+            )
+            .unwrap();
+
         assert_eq!(reservation.outcome, "uncovered");
         assert!(reservation.reservation_id.is_none());
     }
@@ -3152,13 +3859,34 @@ mod tests {
             let s = ToolAuthorizationState::new(db.clone());
             s.grant_lease("conv-a", "trading", 3600, funded_publisher_predicates(), money_budget(10_000_000, "USDC"))
                 .unwrap();
-            let reservation = s
-                .reserve_lease_spend(
+            let args = serde_json::json!({});
+            let decision = s
+                .authorize(
                     ToolRoute::Gateway,
                     "some-dex",
                     "post_swap",
                     "conv-a",
                     &ctx(),
+                    Some(&args),
+                )
+                .unwrap();
+            let handle = decision.handle.unwrap();
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+            let reservation = s
+                .reserve_lease_spend(
+                    &handle,
+                    "some-dex",
+                    "post_swap",
+                    "conv-a",
+                    &ctx(),
+                    &uuid::Uuid::new_v4().to_string(),
                     "USDC",
                     4_000_000,
                 )
@@ -3880,8 +4608,7 @@ mod tests {
         serde_json::json!({ "q": "from:example" })
     }
 
-    /// A silent allow mints a handle the transport can redeem for that exact
-    /// operation; a gateway handle budgets the x402 retry pair, then exhausts.
+    /// A silent allow mints one handle for one exact transport dispatch.
     #[test]
     fn allow_mints_a_redeemable_handle_that_exhausts() {
         let s = state();
@@ -3893,10 +4620,6 @@ mod tests {
         let handle = decision.handle.expect("allow carries a dispatch handle");
         let binding = binding_for_publisher_args(&args);
 
-        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
-            .unwrap();
-        s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
-            .unwrap();
         s.consume_dispatch_handle(&handle, ToolRoute::Gateway, "gmail", "get_messages", &binding)
             .unwrap();
         assert!(
@@ -3932,7 +4655,7 @@ mod tests {
                 &binding,
             )
             .unwrap();
-        s.complete_gateway_dispatch(&handle, None, &redemption)
+        s.complete_gateway_dispatch(&handle, None, None, &redemption)
             .unwrap();
 
         assert!(
@@ -3981,10 +4704,11 @@ mod tests {
                 &binding_for_publisher_args(&args),
             )
             .unwrap();
-        assert!(redemption.initial_gateway_dispatch);
+        let receipt_id = uuid::Uuid::new_v4().to_string();
 
         s.complete_gateway_dispatch(
             &handle,
+            Some(&receipt_id),
             Some(&SettledGatewayCharge {
                 micros: 5_000_000,
                 asset: "USDC".to_string(),
@@ -4004,6 +4728,227 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn settlement_receipt_is_a_database_enforced_idempotency_key() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(20_000_000, "USDC"),
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        let charge = SettledGatewayCharge {
+            micros: 5_000_000,
+            asset: "USDC".to_string(),
+        };
+
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+        for _ in 0..2 {
+            s.complete_gateway_dispatch(
+                &handle,
+                Some(&receipt_id),
+                Some(&charge),
+                &redemption,
+            )
+            .unwrap();
+        }
+
+        assert_eq!(spend_used(&s), 5_000_000);
+        let count = s
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM gateway_settlement_receipts WHERE receipt_id = ?1",
+                    rusqlite::params![receipt_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|e| e.to_string())
+            })
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn pending_receipt_blocks_more_gateway_spend_until_reconciled() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(20_000_000, "USDC"),
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+        s.complete_gateway_dispatch(&handle, Some(&receipt_id), None, &redemption)
+            .unwrap();
+
+        assert_eq!(
+            s.pending_gateway_settlement_receipts().unwrap(),
+            vec![receipt_id.clone()]
+        );
+        assert!(
+            s.authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .is_err()
+        );
+
+        s.reconcile_gateway_settlement(&GatewaySettlementReceipt {
+            receipt_id,
+            status: "paid".to_string(),
+            charged_micros: Some(4_000_000),
+            asset: "USDC".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(spend_used(&s), 4_000_000);
+        assert!(s.pending_gateway_settlement_receipts().unwrap().is_empty());
+        assert!(
+            s.authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn expired_receipt_releases_locally_reserved_spend() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(20_000_000, "USDC"),
+        )
+        .unwrap();
+        let reservation = reserve(&s, "USDC", 4_000_000);
+        let mut pending_receipts = s.pending_gateway_settlement_receipts().unwrap();
+        let receipt_id = pending_receipts.remove(0);
+        s.settle_lease_spend(
+            reservation.reservation_id.as_deref().unwrap(),
+            Some(4_000_000),
+        )
+        .unwrap();
+        assert_eq!(spend_used(&s), 4_000_000);
+
+        s.reconcile_gateway_settlement(&GatewaySettlementReceipt {
+            receipt_id,
+            status: "expired".to_string(),
+            charged_micros: Some(0),
+            asset: "USDC".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(spend_used(&s), 0);
+        assert!(s.pending_gateway_settlement_receipts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn stale_pending_receipt_revokes_its_lease() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(20_000_000, "USDC"),
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        s.complete_gateway_dispatch(&handle, Some(&receipt_id), None, &redemption)
+            .unwrap();
+        s.with_conn(|conn| {
+            conn.execute(
+                "UPDATE gateway_settlement_receipts \
+                 SET created_at = '2000-01-01T00:00:00.000Z' \
+                 WHERE receipt_id = ?1",
+                rusqlite::params![receipt_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(s.pending_gateway_settlement_receipts().unwrap().is_empty());
+        assert!(s.list_leases("conv-a").unwrap()[0].revoked);
     }
 
     #[test]
@@ -4039,8 +4984,10 @@ mod tests {
             )
             .unwrap();
 
+        let receipt_id = uuid::Uuid::new_v4().to_string();
         s.complete_gateway_dispatch(
             &handle,
+            Some(&receipt_id),
             Some(&SettledGatewayCharge {
                 micros: 5_000_000,
                 asset: "EUR".to_string(),
@@ -4053,6 +5000,57 @@ mod tests {
         assert_eq!(leases.len(), 1);
         assert!(leases[0].revoked);
         assert_eq!(leases[0].budgets.spend_used_micros, 0);
+    }
+
+    #[test]
+    fn settled_charge_without_a_receipt_revokes_the_lease() {
+        let s = state();
+        s.grant_lease(
+            "conv-a",
+            "trading",
+            3600,
+            funded_publisher_predicates(),
+            money_budget(10_000_000, "USDC"),
+        )
+        .unwrap();
+        let args = serde_json::json!({});
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let redemption = s
+            .consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding_for_publisher_args(&args),
+            )
+            .unwrap();
+
+        s.complete_gateway_dispatch(
+            &handle,
+            None,
+            Some(&SettledGatewayCharge {
+                micros: 5_000_000,
+                asset: "USDC".to_string(),
+            }),
+            &redemption,
+        )
+        .unwrap();
+
+        let leases = s.list_leases("conv-a").unwrap();
+        assert_eq!(leases.len(), 1);
+        assert!(leases[0].revoked);
+        assert_eq!(leases[0].budgets.spend_used_micros, 0);
+        assert!(audit_events(&s, "conv-a").contains(&"lease_revoked".to_string()));
     }
 
     #[test]
@@ -4083,6 +5081,7 @@ mod tests {
 
         s.complete_gateway_dispatch(
             &handle,
+            None,
             Some(&SettledGatewayCharge {
                 micros: 5_000_000,
                 asset: "USDC".to_string(),
@@ -4128,39 +5127,155 @@ mod tests {
             )
             .unwrap();
         let handle = decision.handle.unwrap();
+        let other_decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let other_handle = other_decision.handle.unwrap();
         let binding = binding_for_publisher_args(&args);
 
-        let initial_redemption = s
-            .consume_dispatch_handle(
+        s.consume_dispatch_handle(
+            &handle,
+            ToolRoute::Gateway,
+            "some-dex",
+            "post_swap",
+            &binding,
+        )
+        .unwrap();
+        let receipt_id = uuid::Uuid::new_v4().to_string();
+        let reservation = s
+            .reserve_lease_spend(
                 &handle,
-                ToolRoute::Gateway,
                 "some-dex",
                 "post_swap",
-                &binding,
+                "conv-a",
+                &ctx(),
+                &receipt_id,
+                "USDC",
+                5_000_000,
             )
             .unwrap();
-        assert!(initial_redemption.initial_gateway_dispatch);
+        s.settle_lease_spend(
+            reservation.reservation_id.as_deref().unwrap(),
+            Some(5_000_000),
+        )
+        .unwrap();
+        s.consume_dispatch_handle(
+            &other_handle,
+            ToolRoute::Gateway,
+            "some-dex",
+            "post_swap",
+            &binding,
+        )
+        .unwrap();
+        assert!(
+            s.renew_gateway_dispatch_handle(&other_handle, &receipt_id)
+                .is_err()
+        );
+        let retry_handle = s
+            .renew_gateway_dispatch_handle(&handle, &receipt_id)
+            .unwrap();
         let retry_redemption = s
             .consume_dispatch_handle(
-                &handle,
+                &retry_handle,
                 ToolRoute::Gateway,
                 "some-dex",
                 "post_swap",
                 &binding,
             )
             .unwrap();
-        assert!(!retry_redemption.initial_gateway_dispatch);
         s.complete_gateway_dispatch(
-            &handle,
-            Some(&SettledGatewayCharge {
-                micros: 5_000_000,
-                asset: "USDC".to_string(),
-            }),
+            &retry_handle,
+            Some(&receipt_id),
+            None,
             &retry_redemption,
         )
         .unwrap();
 
-        assert_eq!(spend_used(&s), 5_000_000);
+        assert_eq!(spend_used(&s), 10_000_000);
+        assert!(
+            s.consume_dispatch_handle(
+                &handle,
+                ToolRoute::Gateway,
+                "some-dex",
+                "post_swap",
+                &binding,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn exhausted_gateway_handle_is_retained_until_retry_or_expiry() {
+        let s = state();
+        let args = gmail_read_args();
+        let decision = s
+            .authorize(
+                ToolRoute::Gateway,
+                "gmail",
+                "get_messages",
+                "conv-a",
+                &ctx(),
+                Some(&args),
+            )
+            .unwrap();
+        let handle = decision.handle.unwrap();
+        let binding = binding_for_publisher_args(&args);
+
+        s.consume_dispatch_handle(
+            &handle,
+            ToolRoute::Gateway,
+            "gmail",
+            "get_messages",
+            &binding,
+        )
+        .unwrap();
+        let retained_uses = s
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT uses_remaining FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![&handle],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| error.to_string())
+            })
+            .unwrap();
+        assert_eq!(retained_uses, 0);
+
+        s.with_conn(|conn| {
+            conn.execute(
+                "UPDATE dispatch_handles SET expires_at = '1970-01-01T00:00:00Z' WHERE id = ?1",
+                rusqlite::params![&handle],
+            )
+            .map_err(|error| error.to_string())?;
+            let now = current_timestamp(conn)?;
+            mint_dispatch_handle(
+                conn,
+                "conv-a",
+                ToolRoute::Gateway,
+                "gmail",
+                "get_labels",
+                &binding_for_publisher_args(&serde_json::json!({})),
+                None,
+                &now,
+            )?;
+            let retained: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM dispatch_handles WHERE id = ?1",
+                    rusqlite::params![&handle],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            assert_eq!(retained, 0);
+            Ok(())
+        })
+        .unwrap();
     }
 
     /// A transport invoked with no handle, a forged handle, or an expired

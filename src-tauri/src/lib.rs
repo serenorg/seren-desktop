@@ -1093,6 +1093,18 @@ pub fn run() {
                     authorization_path,
                 ));
             }
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        commands::gateway_http::reconcile_pending_gateway_settlements(
+                            handle.clone(),
+                        )
+                        .await;
+                        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    }
+                });
+            }
 
             tauri::async_runtime::spawn(commands::happy_bridge::auto_start_if_enabled(
                 app.handle().clone(),
@@ -1177,6 +1189,7 @@ pub fn run() {
             commands::tool_authorization::record_tool_operation_decision,
             commands::tool_authorization::reserve_lease_spend,
             commands::tool_authorization::settle_lease_spend,
+            commands::tool_authorization::renew_gateway_dispatch_handle,
             commands::tool_authorization::propose_capability_bundle,
             commands::tool_authorization::grant_capability_lease,
             commands::tool_authorization::list_capability_leases,

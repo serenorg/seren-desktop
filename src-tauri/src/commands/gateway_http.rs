@@ -17,6 +17,9 @@ use url::Url;
 const GATEWAY_HTTP_EVENT: &str = "gateway-http://event";
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const GATEWAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Settlement lookups run on a repeating background pass, so each one is
+/// bounded rather than allowed to hold the pass open indefinitely.
+const SETTLEMENT_LOOKUP_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub struct GatewayHttpState {
     active: Mutex<HashMap<String, oneshot::Sender<()>>>,
@@ -94,6 +97,7 @@ fn normalize_path(path: &str) -> String {
 const AUTH_HANDLE_HEADER: &str = "x-seren-auth-handle";
 const CHARGED_COST_MICROS_HEADER: &str = "x-seren-charged-cost-micros";
 const CHARGED_COST_ASSET_HEADER: &str = "x-seren-charged-cost-asset";
+const SETTLEMENT_RECEIPT_HEADER: &str = "x-seren-settlement-receipt";
 
 /// Detect the publisher tool-dispatch surface:
 /// `/publishers/{slug}/_mcp/tools/{tool}`. Returns the decoded publisher slug
@@ -131,6 +135,94 @@ fn settled_gateway_charge(
         micros,
         asset: asset.to_string(),
     })
+}
+
+fn settlement_receipt_id(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(SETTLEMENT_RECEIPT_HEADER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<uuid::Uuid>()
+        .ok()
+        .map(|receipt_id| receipt_id.to_string())
+}
+
+#[derive(Deserialize)]
+struct SettlementReceiptEnvelope {
+    data: crate::tool_authorization::GatewaySettlementReceipt,
+}
+
+async fn fetch_settlement_receipt(
+    app: &AppHandle,
+    client: &reqwest::Client,
+    receipt_id: &str,
+) -> Result<crate::tool_authorization::GatewaySettlementReceipt, String> {
+    let url = format!("{GATEWAY_BASE_URL}/wallet/settlements/{receipt_id}");
+    // The shared client bounds connect time only. A hung read here would stall
+    // every later receipt, leaving conversations blocked until the stale sweep.
+    let response = crate::auth::authenticated_request(app, client, |client, token| {
+        client
+            .get(&url)
+            .timeout(SETTLEMENT_LOOKUP_TIMEOUT)
+            .bearer_auth(token)
+    })
+    .await?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Settlement receipt lookup returned HTTP {}.",
+            response.status()
+        ));
+    }
+    response
+        .json::<SettlementReceiptEnvelope>()
+        .await
+        .map(|envelope| envelope.data)
+        .map_err(|e| format!("Invalid settlement receipt response: {e}"))
+}
+
+pub async fn reconcile_pending_gateway_settlements(app: AppHandle) {
+    let receipt_ids = match app
+        .state::<crate::tool_authorization::ToolAuthorizationState>()
+        .pending_gateway_settlement_receipts()
+    {
+        Ok(receipt_ids) => receipt_ids,
+        Err(err) => {
+            log::error!(
+                "[gateway-http] Failed to list pending settlement receipts: {}",
+                err
+            );
+            return;
+        }
+    };
+    if receipt_ids.is_empty() {
+        return;
+    }
+
+    let client = app.state::<GatewayHttpState>().client.clone();
+    for receipt_id in receipt_ids {
+        match fetch_settlement_receipt(&app, &client, &receipt_id).await {
+            Ok(receipt) => {
+                if let Err(err) = app
+                    .state::<crate::tool_authorization::ToolAuthorizationState>()
+                    .reconcile_gateway_settlement(&receipt)
+                {
+                    log::error!(
+                        "[gateway-http] Failed to reconcile settlement receipt {}: {}",
+                        receipt_id,
+                        err
+                    );
+                }
+            }
+            Err(err) => {
+                log::warn!(
+                    "[gateway-http] Settlement receipt {} remains pending: {}",
+                    receipt_id,
+                    err
+                );
+            }
+        }
+    }
 }
 
 /// #3193-F: a publisher tool dispatch through the HTTP bridge must redeem a
@@ -315,11 +407,17 @@ pub async fn gateway_http_start(
         && let Some((handle, redemption)) = dispatch_handle.as_ref()
     {
         let charge = settled_gateway_charge(response.headers());
+        let receipt_id = settlement_receipt_id(response.headers());
         // The upstream call already settled, so a bookkeeping failure must not
         // discard the paid response and invite a duplicate paid retry.
         if let Err(err) = app
             .state::<crate::tool_authorization::ToolAuthorizationState>()
-            .complete_gateway_dispatch(handle, charge.as_ref(), redemption)
+            .complete_gateway_dispatch(
+                handle,
+                receipt_id.as_deref(),
+                charge.as_ref(),
+                redemption,
+            )
         {
             log::error!("[gateway-http] Failed to complete gateway dispatch: {}", err);
         }
