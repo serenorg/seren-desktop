@@ -1,13 +1,22 @@
 // ABOUTME: Unit tests for multi-browser selection, detection, and configuration.
 // ABOUTME: Validates parseBrowserType, isChromiumBased, resolveBrowserName, and listInstalledBrowsers.
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import type { InstalledBrowser } from "../browser.js";
 import {
   addPageInitPatchIfEnabled,
   applyStealthPluginIfEnabled,
   CONNECT_CDP_URL_ENV,
   createSafeStealthPlugin,
+  ensureBrowserModules,
   detectDefaultBrowser,
   getConfiguredCdpUrl,
   getConfiguredStorageStatePath,
@@ -45,6 +54,12 @@ const TEST_INSTALLED_BROWSERS: InstalledBrowser[] = [
     stealthSupported: false,
   },
 ];
+
+// playwright-extra + the stealth plugin now load lazily on first browser
+// launch, so tests that exercise the stealth helpers must load them first.
+beforeAll(async () => {
+  await ensureBrowserModules();
+});
 
 const CONTROLLED_ENV_KEYS = [
   "SEREN_PLAYWRIGHT_HEADLESS",

@@ -3,8 +3,32 @@
 
 import { existsSync } from "node:fs";
 import type { Browser, BrowserContext, BrowserType, Page } from "playwright";
-import { chromium, firefox, webkit } from "playwright-extra";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
+import type StealthPluginFactory from "puppeteer-extra-plugin-stealth";
+
+// playwright-extra and the stealth plugin are heavy to import. Loading them at
+// module scope ran during the MCP `initialize` handshake, and on a cold or
+// loaded machine that cold import pushed the handshake past its timeout and
+// failed agent startup. They are only needed once a browser actually launches,
+// so they load lazily off the initialize critical path (#3405).
+let chromium: typeof import("playwright-extra").chromium;
+let firefox: typeof import("playwright-extra").firefox;
+let webkit: typeof import("playwright-extra").webkit;
+let StealthPlugin: typeof StealthPluginFactory;
+let browserModulesPromise: Promise<void> | null = null;
+
+/** Import playwright-extra + the stealth plugin once, on first browser launch. */
+export async function ensureBrowserModules(): Promise<void> {
+  if (!browserModulesPromise) {
+    browserModulesPromise = (async () => {
+      const playwrightExtra = await import("playwright-extra");
+      chromium = playwrightExtra.chromium;
+      firefox = playwrightExtra.firefox;
+      webkit = playwrightExtra.webkit;
+      StealthPlugin = (await import("puppeteer-extra-plugin-stealth")).default;
+    })();
+  }
+  return browserModulesPromise;
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -650,6 +674,7 @@ export async function addPageInitPatchIfEnabled(
 
 export async function getBrowser(): Promise<Browser> {
   if (!browser) {
+    await ensureBrowserModules();
     const startupMode = resolveBrowserStartupMode();
 
     if (startupMode.mode === "cdp") {
