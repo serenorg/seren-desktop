@@ -2,6 +2,9 @@ packages:
   - "."
   - "packages/*"
 
+overrides:
+  solid-js: 1.9.14
+
 allowBuilds:
   bufferutil: false
   esbuild: true
