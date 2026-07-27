@@ -195,7 +195,7 @@ export const privacyStore = {
         next.counselDirection ?? null,
       ).catch((error) => {
         console.warn(
-          "[Privacy] Failed to persist Privileged Matter Mode to the chat DB:",
+          "[Privacy] Failed to persist Privacy Mode to the chat DB:",
           error,
         );
       });

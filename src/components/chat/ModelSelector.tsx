@@ -91,7 +91,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
       lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
     });
   const privilegedProviderMessage =
-    "Privileged Matter Mode only permits LM Studio on a local loopback endpoint.";
+    "Privacy Mode only permits LM Studio on a local loopback endpoint.";
   const rejectUnsafeProvider = (providerId: string): boolean => {
     if (isProviderAllowedForConversation(providerId)) return false;
     conversationStore.setError(privilegedProviderMessage);
@@ -530,8 +530,8 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
 
           <Show when={isPrivilegedConversation()}>
             <p class="m-0 border-b border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-200/80">
-              Privileged Matter Mode restricts this conversation to local LM
-              Studio. Remote chat providers are intentionally unavailable.
+              Privacy Mode restricts this conversation to local LM Studio.
+              Remote chat providers are intentionally unavailable.
             </p>
           </Show>
 

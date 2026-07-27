@@ -1,5 +1,5 @@
-// ABOUTME: Compact, live disclosure of every data destination used by a conversation.
-// ABOUTME: Gives each conversation its memory and history-sync exclusion controls.
+// ABOUTME: Compact, live privacy panel showing where a conversation's data can go.
+// ABOUTME: Gives each conversation its Privacy Mode and per-path exclusion controls.
 
 import type { Component } from "solid-js";
 import { createMemo, For, Show } from "solid-js";
@@ -29,11 +29,11 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
 
   const destinationState = createMemo<Destination[]>(() => [
     {
-      label: "Privileged Matter Mode",
+      label: "Privacy Mode",
       detail: () =>
         privacyStore.isPrivileged(props.conversationId)
           ? "Memory, history sync, cloud Notes export, and non-local providers are blocked"
-          : "Off — turn it on only for counsel-directed work product",
+          : "Off — turn on to keep this conversation private",
       control: "Conversation controls",
       enabled: () => privacyStore.isPrivileged(props.conversationId),
     },
@@ -136,57 +136,56 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
 
   return (
     <section
-      class="w-full max-w-[560px] overflow-hidden rounded-xl border border-[#293438] bg-[#101719] text-[#e8f0ef] shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
+      class="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-surface-2 text-foreground shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
       data-testid="data-destinations-panel"
-      aria-label="Data destinations"
+      aria-label="Privacy"
     >
-      <div class="border-b border-[#293438] bg-[linear-gradient(105deg,rgba(116,220,177,0.12),transparent_42%)] px-4 py-3">
+      <div class="border-b border-border px-4 py-3">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#86d9b8]">
-              Data destinations
+            <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Privacy
             </p>
-            <h2 class="m-0 mt-1 text-sm font-semibold text-[#f2f7f6]">
+            <h2 class="m-0 mt-1 text-sm font-semibold text-foreground">
               Where this conversation can go
             </h2>
           </div>
-          <span class="rounded-full border border-[#345047] bg-[#15241f] px-2 py-1 text-[10px] font-medium text-[#9ce3c3]">
+          <span class="rounded-full border border-border bg-surface-3 px-2 py-1 text-[10px] font-medium text-muted-foreground">
             live state
           </span>
         </div>
-        <p class="m-0 mt-2 max-w-[450px] text-xs leading-relaxed text-[#a8b9b5]">
-          Controls below update the local capture and synchronization paths
-          immediately.
+        <p class="m-0 mt-2 max-w-[450px] text-xs leading-relaxed text-muted-foreground">
+          Changes below take effect immediately for this conversation.
         </p>
       </div>
 
-      <div class="divide-y divide-[#253135]">
+      <div class="divide-y divide-border">
         <For each={destinationState()}>
           {(destination) => (
             <div class="flex gap-3 px-4 py-3">
               <span
                 class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
                   destination.enabled()
-                    ? "bg-[#76ddb0] shadow-[0_0_0_3px_rgba(118,221,176,0.12)]"
-                    : "bg-[#61716f]"
+                    ? "bg-primary shadow-[0_0_0_3px_rgba(56,189,248,0.15)]"
+                    : "bg-muted-foreground/40"
                 }`}
                 aria-hidden="true"
               />
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span class="text-xs font-semibold text-[#e8f0ef]">
+                  <span class="text-xs font-semibold text-foreground">
                     {destination.label}
                   </span>
                   <span
-                    class={`text-[10px] font-semibold uppercase tracking-[0.12em] ${destination.enabled() ? "text-[#86d9b8]" : "text-[#82918f]"}`}
+                    class={`text-[10px] font-semibold uppercase tracking-[0.12em] ${destination.enabled() ? "text-primary" : "text-muted-foreground"}`}
                   >
                     {destination.enabled() ? "active" : "off"}
                   </span>
                 </div>
-                <p class="m-0 mt-1 text-xs leading-relaxed text-[#a8b9b5]">
+                <p class="m-0 mt-1 text-xs leading-relaxed text-muted-foreground">
                   {destination.detail()}
                 </p>
-                <p class="m-0 mt-1 text-[10px] text-[#71817e]">
+                <p class="m-0 mt-1 text-[10px] text-muted-foreground/70">
                   {destination.control}
                 </p>
               </div>
@@ -196,60 +195,59 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
       </div>
 
       <Show when={props.conversationId}>
-        <div class="border-t border-[#293438] bg-[#0d1416] px-4 py-3">
-          <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#82918f]">
+        <div class="border-t border-border bg-surface-3/40 px-4 py-3">
+          <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             Conversation controls
           </p>
           <div class="mt-2 grid gap-2 sm:grid-cols-2">
-            <div class="sm:col-span-2 rounded-lg border border-[#805f35] bg-[linear-gradient(110deg,rgba(171,117,49,0.17),rgba(28,23,18,0.5))] px-3 py-2.5 shadow-[inset_3px_0_0_rgba(220,171,95,0.8)]">
+            <div class="sm:col-span-2 rounded-lg border border-border-strong bg-surface-3 px-3 py-2.5 shadow-[inset_3px_0_0_var(--primary)]">
               <label class="flex cursor-pointer items-start gap-2">
                 <input
                   type="checkbox"
-                  class="mt-0.5 accent-[#dcae66]"
+                  class="mt-0.5 accent-primary"
                   checked={privacyStore.isPrivileged(props.conversationId)}
                   onChange={(event) =>
                     updatePrivileged(event.currentTarget.checked)
                   }
-                  aria-label="Enable Privileged Matter Mode"
+                  aria-label="Enable Privacy Mode"
                 />
                 <span class="min-w-0">
-                  <span class="block text-xs font-semibold text-[#f3d6a1]">
-                    Privileged Matter Mode
+                  <span class="block text-xs font-semibold text-foreground">
+                    Privacy Mode
                   </span>
-                  <span class="mt-0.5 block text-[11px] leading-relaxed text-[#cbb89a]">
-                    Applies a privileged-and-confidential stamp and blocks
-                    memory, history sync, cloud Notes export, local search
-                    indexing, and providers that are not explicitly
-                    confidential-safe.
+                  <span class="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                    Keeps this conversation private: blocks memory, history
+                    sync, cloud Notes export, and local search indexing, and
+                    uses only privacy-safe providers.
                   </span>
                 </span>
               </label>
               <Show when={privacyStore.isPrivileged(props.conversationId)}>
                 <label class="mt-2 block">
-                  <span class="block text-[10px] font-semibold uppercase tracking-[0.12em] text-[#cbb89a]">
-                    Counsel direction (optional)
+                  <span class="block text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Reason (optional)
                   </span>
                   <input
                     type="text"
-                    class="mt-1 w-full rounded border border-[#805f35] bg-[#15110d] px-2.5 py-1.5 text-xs text-[#f3e7d4] outline-none placeholder:text-[#8a7963] focus:border-[#dcae66]"
+                    class="mt-1 w-full rounded border border-border-strong bg-surface-2 px-2.5 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-primary"
                     value={
                       privacyStore.getConversationPrivacy(
                         props.conversationId ?? "",
                       ).counselDirection ?? ""
                     }
-                    placeholder="e.g. Counsel-directed review"
+                    placeholder="e.g. Confidential review"
                     onChange={(event) =>
                       updateCounselDirection(event.currentTarget.value)
                     }
-                    aria-label="Counsel direction"
+                    aria-label="Reason this conversation is private"
                   />
                 </label>
               </Show>
             </div>
-            <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-[#293438] px-3 py-2 transition-colors hover:border-[#4a6a5e]">
+            <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 transition-colors hover:border-border-hover">
               <input
                 type="checkbox"
-                class="mt-0.5 accent-[#76ddb0] disabled:cursor-not-allowed"
+                class="mt-0.5 accent-primary disabled:cursor-not-allowed"
                 checked={privacyStore.isMemoryExcluded(props.conversationId)}
                 disabled={privacyStore.isPrivileged(props.conversationId)}
                 onChange={(event) =>
@@ -257,14 +255,14 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
                 }
                 aria-label="Exclude this conversation from memory"
               />
-              <span class="text-xs leading-relaxed text-[#c4d1ce]">
+              <span class="text-xs leading-relaxed text-foreground">
                 Exclude from memory capture
               </span>
             </label>
-            <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-[#293438] px-3 py-2 transition-colors hover:border-[#4a6a5e]">
+            <label class="flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2 transition-colors hover:border-border-hover">
               <input
                 type="checkbox"
-                class="mt-0.5 accent-[#76ddb0] disabled:cursor-not-allowed"
+                class="mt-0.5 accent-primary disabled:cursor-not-allowed"
                 checked={privacyStore.isHistorySyncExcluded(
                   props.conversationId,
                 )}
@@ -277,15 +275,15 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
                 }
                 aria-label="Exclude this conversation from history sync"
               />
-              <span class="text-xs leading-relaxed text-[#c4d1ce]">
+              <span class="text-xs leading-relaxed text-foreground">
                 Exclude from history sync
               </span>
             </label>
           </div>
-          <p class="m-0 mt-2 text-[10px] leading-relaxed text-[#71817e]">
+          <p class="m-0 mt-2 text-[10px] leading-relaxed text-muted-foreground">
             Exclusion takes effect before the next capture or sync drain; queued
-            history remains local until you include it again. Privileged Matter
-            Mode locks both exclusions on for this conversation.
+            history remains local until you include it again. Privacy Mode locks
+            both exclusions on for this conversation.
           </p>
         </div>
       </Show>
