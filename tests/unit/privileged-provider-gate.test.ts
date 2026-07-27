@@ -30,7 +30,7 @@ import {
 
 describe("Privileged Matter provider gate", () => {
   it("denies non-allowlisted providers and permits only loopback LM Studio", () => {
-    expect(CONFIDENTIAL_SAFE_PROVIDERS).toEqual(["lmstudio"]);
+    expect(CONFIDENTIAL_SAFE_PROVIDERS).toEqual(["lmstudio", "seren-private"]);
     expect(
       isConfidentialSafeProvider("lmstudio", {
         lmStudioBaseUrl: "http://localhost:1234",
@@ -49,6 +49,33 @@ describe("Privileged Matter provider gate", () => {
         lmStudioBaseUrl: "http://127.0.0.1:1234",
       }),
     ).not.toThrow();
+  });
+
+  it("permits Seren Private Models only with a verified no-training/no-retention attestation", () => {
+    // Allowed only when the org policy attests no-training/no-retention.
+    expect(
+      isConfidentialSafeProvider("seren-private", {
+        serenPrivateModelsAttested: true,
+      }),
+    ).toBe(true);
+    // Fails closed when the attestation is absent or unverified.
+    expect(isConfidentialSafeProvider("seren-private", {})).toBe(false);
+    expect(
+      isConfidentialSafeProvider("seren-private", {
+        serenPrivateModelsAttested: false,
+      }),
+    ).toBe(false);
+    // The gate lets an attested private model through and blocks it otherwise.
+    expect(() =>
+      assertPrivilegedConversationProvider("p1", true, "seren-private", {
+        serenPrivateModelsAttested: true,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      assertPrivilegedConversationProvider("p1", true, "seren-private", {
+        serenPrivateModelsAttested: false,
+      }),
+    ).toThrow("Privacy Mode blocks seren-private");
   });
 
   it("uses the same static allowlist in selector and send paths", () => {

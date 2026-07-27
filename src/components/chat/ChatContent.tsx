@@ -104,6 +104,7 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
+import { serenPrivateModelsAttested } from "@/services/private-models";
 import { assertPrivilegedConversationProvider } from "@/services/providers";
 import { skills } from "@/services/skills";
 import { pendingForConversation } from "@/stores/approvals.store";
@@ -1187,7 +1188,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
         id,
         isPrivilegedConversation(),
         activeThreadProvider(),
-        { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+        {
+          lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+          serenPrivateModelsAttested: serenPrivateModelsAttested(),
+        },
       );
     } catch (error) {
       conversationStore.setError(
@@ -1301,7 +1305,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
         id,
         isPrivilegedConversation(),
         retryProvider,
-        { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+        {
+          lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+          serenPrivateModelsAttested: serenPrivateModelsAttested(),
+        },
       );
       const content = await sendMessageWithRetry(
         message.request.prompt,

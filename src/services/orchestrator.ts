@@ -41,6 +41,7 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
+import { serenPrivateModelsAttested } from "@/services/private-models";
 import { assertPrivilegedConversationProvider } from "@/services/providers";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
@@ -212,7 +213,10 @@ export async function orchestrate(
       conversationId,
       isPrivilegedConversation,
       selectedProvider,
-      { lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl") },
+      {
+        lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+        serenPrivateModelsAttested: serenPrivateModelsAttested(),
+      },
     );
   } catch (error) {
     conversationStore.setError(

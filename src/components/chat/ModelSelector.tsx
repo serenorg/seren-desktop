@@ -23,7 +23,10 @@ import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
-import { privateModelsService } from "@/services/private-models";
+import {
+  privateModelsService,
+  serenPrivateModelsAttested,
+} from "@/services/private-models";
 import {
   evaluateChatSwitchGuard,
   type SwitchBlockedReason,
@@ -89,12 +92,15 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     !isPrivilegedConversation() ||
     isConfidentialSafeProvider(providerId, {
       lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+      serenPrivateModelsAttested: serenPrivateModelsAttested(),
     });
-  const privilegedProviderMessage =
-    "Privacy Mode only permits LM Studio on a local loopback endpoint.";
+  const privilegedProviderMessage = () =>
+    serenPrivateModelsAttested()
+      ? "Privacy Mode permits a Seren Private Model or LM Studio on a local loopback endpoint."
+      : "Privacy Mode only permits LM Studio on a local loopback endpoint.";
   const rejectUnsafeProvider = (providerId: string): boolean => {
     if (isProviderAllowedForConversation(providerId)) return false;
-    conversationStore.setError(privilegedProviderMessage);
+    conversationStore.setError(privilegedProviderMessage());
     return true;
   };
   const activeConversation = (): PickerConversation | null => {
@@ -515,7 +521,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                     title={
                       isProviderAllowedForConversation(providerId)
                         ? PROVIDER_CONFIGS[providerId].name
-                        : privilegedProviderMessage
+                        : privilegedProviderMessage()
                     }
                   >
                     <ProviderIcon provider={providerId} size={14} />
@@ -564,7 +570,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
                       title={
                         isProviderAllowedForConversation(agent.type)
                           ? `Switch to ${agentDisplayName(agent.type)} — opens an external agent session for this thread`
-                          : privilegedProviderMessage
+                          : privilegedProviderMessage()
                       }
                     >
                       <ProviderIcon provider={agent.type} size={14} />
