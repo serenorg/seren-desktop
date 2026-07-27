@@ -1635,7 +1635,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   our company using Seren's Publishers"
                 </p>
                 <div class="mt-8 w-full max-w-[560px]">
-                  <DataDestinationsPanel conversationId={conversationId()} />
+                  <DataDestinationsPanel
+                    conversationId={conversationId()}
+                    variant="controls"
+                  />
                 </div>
               </div>
             }

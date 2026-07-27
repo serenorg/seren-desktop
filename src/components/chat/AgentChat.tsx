@@ -1944,6 +1944,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
               <div class="mt-8 w-full max-w-[560px]">
                 <DataDestinationsPanel
                   conversationId={activeAgentThread()?.id}
+                  variant="controls"
                 />
               </div>
             </div>
