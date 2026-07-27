@@ -36,18 +36,30 @@ export type UnlistenFn = () => void;
 /**
  * Explicit P0 allowlist for Privacy Mode. Unknown providers are
  * denied rather than inferred safe from a display name or marketing claim.
+ * Membership is necessary but not sufficient: each entry still passes a runtime
+ * check in `isConfidentialSafeProvider` (loopback for LM Studio, a verified
+ * no-training/no-retention attestation for Seren Private Models).
  */
 export const CONFIDENTIAL_SAFE_PROVIDERS = [
   // LM Studio is a local process only when its configured endpoint resolves to
   // loopback. The settings UI also permits remote URLs, so the runtime check in
   // `isConfidentialSafeProvider` is required in addition to this static entry.
   "lmstudio",
+  // Seren Private Models (Bedrock) are safe only when the organization's
+  // private-chat policy carries a verified no-training/no-retention attestation.
+  // The attestation, not the provider name, is the evidence.
+  "seren-private",
 ] as const;
 
 type ConfidentialSafeProvider = (typeof CONFIDENTIAL_SAFE_PROVIDERS)[number];
 
 export interface ConfidentialProviderOptions {
   lmStudioBaseUrl?: string | null;
+  /**
+   * True when the org's private-chat policy carries a verified
+   * no-training/no-retention attestation (see `hasNoTrainingNoRetentionAttestation`).
+   */
+  serenPrivateModelsAttested?: boolean;
 }
 
 function isLoopbackUrl(rawUrl: string): boolean {
@@ -62,9 +74,11 @@ function isLoopbackUrl(rawUrl: string): boolean {
 }
 
 /**
- * Returns true only for an explicitly reviewed provider in a configuration
- * that keeps inference on the user's device. This remains intentionally
- * static until a registry can provide verifiable retention and training terms.
+ * Returns true only for an explicitly reviewed provider whose configuration
+ * carries verifiable confidentiality terms: LM Studio keeping inference on the
+ * user's device (loopback), or Seren Private Models whose org policy attests
+ * no-training/no-retention. Safety is proven by the runtime check, never
+ * inferred from the provider name.
  */
 export function isConfidentialSafeProvider(
   providerId: string | null | undefined,
@@ -81,6 +95,9 @@ export function isConfidentialSafeProvider(
   if (providerId === "lmstudio") {
     return isLoopbackUrl(options.lmStudioBaseUrl ?? "http://localhost:1234");
   }
+  if (providerId === "seren-private") {
+    return options.serenPrivateModelsAttested === true;
+  }
   return false;
 }
 
@@ -92,8 +109,11 @@ export function assertPrivilegedConversationProvider(
   options: ConfidentialProviderOptions = {},
 ): void {
   if (!privileged || isConfidentialSafeProvider(providerId, options)) return;
+  const alternative = options.serenPrivateModelsAttested
+    ? "Choose a Seren Private Model or a local LM Studio endpoint instead."
+    : "Choose a local LM Studio endpoint instead.";
   throw new Error(
-    `Privacy Mode blocks ${providerId ?? "this provider"} for conversation ${conversationId}. Choose a local LM Studio endpoint instead.`,
+    `Privacy Mode blocks ${providerId ?? "this provider"} for conversation ${conversationId}. ${alternative}`,
   );
 }
 

@@ -1,8 +1,19 @@
 import { getPrivateModels } from "@/api/seren-private-models";
 import type { ProviderModel } from "@/lib/providers/types";
 import { authStore } from "@/stores/auth.store";
+import { hasNoTrainingNoRetentionAttestation } from "./organization-policy";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * True when the active org's private-chat policy carries a verified
+ * no-training/no-retention attestation, which is what makes Seren Private
+ * Models eligible in Privacy Mode. Fails closed when the policy or attestation
+ * is absent.
+ */
+export function serenPrivateModelsAttested(): boolean {
+  return hasNoTrainingNoRetentionAttestation(authStore.privateChatPolicy);
+}
 
 let cachedModels: ProviderModel[] | null = null;
 let cacheExpiresAt = 0;
