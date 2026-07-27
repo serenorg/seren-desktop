@@ -24520,7 +24520,8 @@
         "type": "string",
         "description": "Authority that recorded the data-handling declaration.",
         "enum": [
-          "policy_administrator"
+          "policy_administrator",
+          "provider_configuration"
         ]
       },
       "PrivateModelsDataHandlingAttestationStatus": {

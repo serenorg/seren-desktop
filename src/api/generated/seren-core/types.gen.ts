@@ -12860,7 +12860,7 @@ export type PrivateModelsDataHandlingAttestation = {
 /**
  * Authority that recorded the data-handling declaration.
  */
-export type PrivateModelsDataHandlingAttestationBasis = 'policy_administrator';
+export type PrivateModelsDataHandlingAttestationBasis = 'policy_administrator' | 'provider_configuration';
 
 /**
  * Organization declaration for private-model inference data handling.
