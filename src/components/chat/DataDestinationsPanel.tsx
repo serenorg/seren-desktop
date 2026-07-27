@@ -9,6 +9,9 @@ import { threadStore } from "@/stores/thread.store";
 
 interface DataDestinationsPanelProps {
   conversationId?: string | null;
+  /** "controls" renders only the actionable switches for starting a chat;
+   * "full" (default) also shows the read-only data-destination disclosure. */
+  variant?: "controls" | "full";
 }
 
 interface Destination {
@@ -134,68 +137,78 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
     });
   };
 
+  // In controls mode there is nothing actionable to show without a
+  // conversation to scope the switches to.
+  if (props.variant === "controls" && !props.conversationId) {
+    return null;
+  }
+
   return (
     <section
       class="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-surface-2 text-foreground shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
       data-testid="data-destinations-panel"
       aria-label="Privacy"
     >
-      <div class="border-b border-border px-4 py-3">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-              Privacy
-            </p>
-            <h2 class="m-0 mt-1 text-sm font-semibold text-foreground">
-              Where this conversation can go
-            </h2>
-          </div>
-          <span class="rounded-full border border-border bg-surface-3 px-2 py-1 text-[10px] font-medium text-muted-foreground">
-            live state
-          </span>
-        </div>
-        <p class="m-0 mt-2 max-w-[450px] text-xs leading-relaxed text-muted-foreground">
-          Changes below take effect immediately for this conversation.
-        </p>
-      </div>
-
-      <div class="divide-y divide-border">
-        <For each={destinationState()}>
-          {(destination) => (
-            <div class="flex gap-3 px-4 py-3">
-              <span
-                class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                  destination.enabled()
-                    ? "bg-primary shadow-[0_0_0_3px_rgba(56,189,248,0.15)]"
-                    : "bg-muted-foreground/40"
-                }`}
-                aria-hidden="true"
-              />
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <span class="text-xs font-semibold text-foreground">
-                    {destination.label}
-                  </span>
-                  <span
-                    class={`text-[10px] font-semibold uppercase tracking-[0.12em] ${destination.enabled() ? "text-primary" : "text-muted-foreground"}`}
-                  >
-                    {destination.enabled() ? "active" : "off"}
-                  </span>
-                </div>
-                <p class="m-0 mt-1 text-xs leading-relaxed text-muted-foreground">
-                  {destination.detail()}
-                </p>
-                <p class="m-0 mt-1 text-[10px] text-muted-foreground/70">
-                  {destination.control}
-                </p>
-              </div>
+      <Show when={props.variant !== "controls"}>
+        <div class="border-b border-border px-4 py-3">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                Privacy
+              </p>
+              <h2 class="m-0 mt-1 text-sm font-semibold text-foreground">
+                Where this conversation can go
+              </h2>
             </div>
-          )}
-        </For>
-      </div>
+            <span class="rounded-full border border-border bg-surface-3 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+              live state
+            </span>
+          </div>
+          <p class="m-0 mt-2 max-w-[450px] text-xs leading-relaxed text-muted-foreground">
+            Changes below take effect immediately for this conversation.
+          </p>
+        </div>
+
+        <div class="divide-y divide-border">
+          <For each={destinationState()}>
+            {(destination) => (
+              <div class="flex gap-3 px-4 py-3">
+                <span
+                  class={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
+                    destination.enabled()
+                      ? "bg-primary shadow-[0_0_0_3px_rgba(56,189,248,0.15)]"
+                      : "bg-muted-foreground/40"
+                  }`}
+                  aria-hidden="true"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <span class="text-xs font-semibold text-foreground">
+                      {destination.label}
+                    </span>
+                    <span
+                      class={`text-[10px] font-semibold uppercase tracking-[0.12em] ${destination.enabled() ? "text-primary" : "text-muted-foreground"}`}
+                    >
+                      {destination.enabled() ? "active" : "off"}
+                    </span>
+                  </div>
+                  <p class="m-0 mt-1 text-xs leading-relaxed text-muted-foreground">
+                    {destination.detail()}
+                  </p>
+                  <p class="m-0 mt-1 text-[10px] text-muted-foreground/70">
+                    {destination.control}
+                  </p>
+                </div>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
 
       <Show when={props.conversationId}>
-        <div class="border-t border-border bg-surface-3/40 px-4 py-3">
+        <div
+          class={`bg-surface-3/40 px-4 py-3 ${props.variant === "controls" ? "" : "border-t border-border"}`}
+        >
           <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             Conversation controls
           </p>
