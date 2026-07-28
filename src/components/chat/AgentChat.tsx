@@ -104,6 +104,7 @@ import { privacyStore } from "@/stores/privacy.store";
 import { settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
+import { surfaceDailyClaimIfEligible } from "@/stores/wallet.store";
 import { workspaceStore } from "@/stores/workspace.store";
 import RenderMarkdownWorker from "@/workers/render-markdown.worker?worker";
 import { AgentEffortSelector } from "./AgentEffortSelector";
@@ -979,6 +980,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           agentStore.setTurnError(thread.id, "spawn_failed");
           return;
         }
+        // A fresh agent launch is a moment of engagement — surface the daily
+        // SerenBucks claim if the user still has one, so the reward is timely
+        // instead of stranded behind a once-a-day popup they may have dismissed.
+        // Cold-start only, so it fires once per launch and never per message.
+        void surfaceDailyClaimIfEligible();
       } catch (err) {
         console.error("[AgentChat] cold-start spawn threw:", err);
         // If the user cancelled, don't overwrite their cancel with an error.

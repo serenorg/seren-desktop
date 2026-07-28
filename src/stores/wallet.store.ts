@@ -488,6 +488,29 @@ function dismissDailyClaim(): void {
 }
 
 /**
+ * Re-check daily claim eligibility and re-surface the popup when the user still
+ * has an unclaimed daily reward. Called when the user launches an agent so the
+ * reward is offered at the moment of engagement — even after an earlier dismiss
+ * or a session that crossed midnight UTC. A fresh eligibility fetch keeps the
+ * midnight boundary honest; on a transient failure the existing state is left
+ * untouched (mirroring the poll) so a launch is never blocked or falsely reset.
+ */
+async function surfaceDailyClaimIfEligible(): Promise<void> {
+  try {
+    const eligibility = await fetchDailyEligibility();
+    setWalletState("dailyClaim", eligibility);
+    if (eligibility.can_claim) {
+      setWalletState("dailyClaimDismissed", false);
+    }
+  } catch (err) {
+    console.error(
+      "[Wallet Store] Failed to refresh daily claim on agent launch:",
+      err,
+    );
+  }
+}
+
+/**
  * Start periodic re-checking of daily claim eligibility.
  * Surfaces the claim popup for long-running sessions that span midnight UTC.
  */
@@ -615,6 +638,7 @@ export {
   startDailyClaimPolling,
   stopAutoRefresh,
   stopDailyClaimPolling,
+  surfaceDailyClaimIfEligible,
   updateBalanceFromError,
   walletState,
 };
