@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   composeApprovalNotification,
   createAssistantMessageCoalescer,
+  createFileReadSummarizer,
   createTurnCorrelator,
   translateNeutralEvent,
 } from "../../bin/happy-bridge/translate.mjs";
@@ -132,6 +133,84 @@ describe("neutral-to-Happy session translation", () => {
       isError: true,
       output: "e".repeat(3_000),
     });
+  });
+
+  it("summarizes a completed file read body while keeping the read visible", () => {
+    const summarizer = createFileReadSummarizer();
+    const body = "line one\nline two\nline three";
+
+    // The read announces itself on tool-start (claude-code emits kind "fileRead").
+    const startEvent = summarizer.annotate({
+      kind: "tool-start",
+      sessionId: "session-1",
+      payload: {
+        toolCallId: "read-1",
+        kind: "fileRead",
+        title: "Read: /workspace/project/app.ts",
+        parameters: { file_path: "/workspace/project/app.ts" },
+      },
+    });
+    const [startMessage] = translateNeutralEvent(startEvent);
+    expect(startMessage.body).toMatchObject({ type: "tool-call", callId: "read-1" });
+
+    // tool-end carries only the body; it is replaced with a line-count summary.
+    const endEvent = summarizer.annotate({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "read-1", result: body },
+    });
+    const [endMessage] = translateNeutralEvent(endEvent);
+    expect(endMessage.body.output).toBe("[3 lines hidden on Happy Mobile]");
+    expect(endMessage.body.output).not.toContain("line two");
+  });
+
+  it("summarizes an ACP `read` result the same way", () => {
+    const summarizer = createFileReadSummarizer();
+    summarizer.annotate({
+      kind: "tool-start",
+      sessionId: "session-1",
+      payload: { toolCallId: "read-2", kind: "read" },
+    });
+    const endEvent = summarizer.annotate({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "read-2", result: "only one line" },
+    });
+    expect(translateNeutralEvent(endEvent)[0].body.output).toBe(
+      "[1 line hidden on Happy Mobile]",
+    );
+  });
+
+  it("leaves a failed read and a non-read result untouched", () => {
+    const summarizer = createFileReadSummarizer();
+    // A read that errored keeps its short, diagnostic failure text.
+    summarizer.annotate({
+      kind: "tool-start",
+      sessionId: "session-1",
+      payload: { toolCallId: "read-err", kind: "fileRead" },
+    });
+    const failed = summarizer.annotate({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "read-err", error: "ENOENT: no such file" },
+    });
+    expect(translateNeutralEvent(failed)[0].body).toMatchObject({
+      isError: true,
+      output: "ENOENT: no such file",
+    });
+
+    // A shell command's output is not a read and stays on the character-cap path.
+    summarizer.annotate({
+      kind: "tool-start",
+      sessionId: "session-1",
+      payload: { toolCallId: "run-1", kind: "shell" },
+    });
+    const command = summarizer.annotate({
+      kind: "tool-end",
+      sessionId: "session-1",
+      payload: { toolCallId: "run-1", result: "build succeeded" },
+    });
+    expect(translateNeutralEvent(command)[0].body.output).toBe("build succeeded");
   });
 
   it("bounds tool input without flattening its shape", () => {

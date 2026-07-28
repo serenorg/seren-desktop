@@ -11,6 +11,12 @@ const TOOL_ERROR_MAX_CHARS = 6_000;
 const FILE_DIFF_MAX_CHARS = 2_000;
 const TOOL_INPUT_MAX_CHARS = 2_000;
 const MOBILE_TRUNCATION_MARKER = "\n… [truncated for Happy Mobile]";
+// A file read streams the whole file body to the phone. Provider runtimes label
+// that read differently: claude-code emits the semantic kind `fileRead`, while
+// ACP surfaces the ToolKind `read`. Either one identifies a read whose result
+// body should be summarized rather than forwarded. lmstudio labels calls by
+// transport (`local`/`mcp`), so its reads fall back to the character cap below.
+const FILE_READ_TOOL_KINDS = new Set(["fileRead", "read"]);
 
 function stringValue(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -222,6 +228,57 @@ export function createAssistantMessageCoalescer({ createMessageId = randomUUID }
     },
     close() {
       pending.clear();
+    },
+  };
+}
+
+/**
+ * A file `Read` streams its whole result to the phone, and an agent that reads
+ * many files buries the conversation. `tool-end` carries only the call id and
+ * body, while the read kind arrives on the earlier `tool-start`, so remember
+ * which calls are reads and replace a completed read's body with a line-count
+ * summary — the same elision `summarizeFileContent` already applies to diffs.
+ * Errors are never elided; a truncated failure is worse than useless.
+ *
+ * @param {{maxPending?: number}} options
+ */
+export function createFileReadSummarizer({ maxPending = 512 } = {}) {
+  const fileReadCallIds = new Set();
+
+  function annotate(event) {
+    if (!event || typeof event !== "object" || typeof event.kind !== "string") {
+      return event;
+    }
+    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+    const callId = stringValue(payload.toolCallId);
+    if (event.kind === "tool-start") {
+      if (callId && FILE_READ_TOOL_KINDS.has(stringValue(payload.kind))) {
+        // A read whose `tool-end` never arrives (e.g. a cancelled turn) would
+        // otherwise pin its call id forever; evict the oldest to bound growth.
+        if (fileReadCallIds.size >= maxPending) {
+          const oldest = fileReadCallIds.values().next().value;
+          if (oldest !== undefined) fileReadCallIds.delete(oldest);
+        }
+        fileReadCallIds.add(callId);
+      }
+      return event;
+    }
+    if (event.kind === "tool-end" && callId && fileReadCallIds.has(callId)) {
+      fileReadCallIds.delete(callId);
+      if (!payload.error && typeof payload.result === "string") {
+        return {
+          ...event,
+          payload: { ...payload, result: summarizeFileContent(payload.result) },
+        };
+      }
+    }
+    return event;
+  }
+
+  return {
+    annotate,
+    close() {
+      fileReadCallIds.clear();
     },
   };
 }
