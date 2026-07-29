@@ -6,9 +6,16 @@ import * as path from 'path';
 import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import { execSync } from 'child_process';
+import { pathToFileURL } from 'url';
+import {
+	clearStagedNodeVersion,
+	ensureRuntimeShims,
+	readStagedNodeVersion,
+	writeStagedNodeVersion
+} from '../runtime-staging';
 
 // Version configuration - update these for new releases
-const NODE_VERSION = '22.12.0';
+export const NODE_VERSION = '22.12.0';
 const GIT_VERSION = '2.47.1';
 
 // Node.js download URLs for Linux
@@ -65,16 +72,28 @@ async function extractTarGz(archivePath: string, destDir: string): Promise<void>
 	execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
 }
 
-async function prepareNodejs(options: DownloadOptions): Promise<string> {
+export async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	const { arch, outputDir } = options;
 	const nodeConfig = NODE_DOWNLOADS[arch];
 	const nodeDir = path.join(outputDir, 'node');
 
 	if (fs.existsSync(nodeDir)) {
-		console.log(`Node.js directory already exists at ${nodeDir}, skipping...`);
-		return nodeDir;
+		const stagedVersion = readStagedNodeVersion(outputDir);
+		if (stagedVersion === NODE_VERSION) {
+			console.log(`Node.js ${NODE_VERSION} already staged at ${nodeDir}, skipping download...`);
+			// The download is skippable; the wrappers are not. A tree extracted
+			// before this step existed still holds the original symlinks, and the
+			// bundler dereferences those at bundle time (#3449, #3152).
+			ensureRuntimeShims(nodeDir);
+			return nodeDir;
+		}
+		// A cached tree of any other (or unrecorded) version must not ship while
+		// embedded-runtime.json claims NODE_VERSION (#3450).
+		console.log(`Staged Node.js at ${nodeDir} is ${stagedVersion ?? 'of unrecorded version'}, expected ${NODE_VERSION}; re-staging...`);
+		fs.rmSync(nodeDir, { recursive: true, force: true });
 	}
 
+	clearStagedNodeVersion(outputDir);
 	fs.mkdirSync(nodeDir, { recursive: true });
 
 	const tarPath = path.join(outputDir, `node-${arch}.tar.gz`);
@@ -98,6 +117,9 @@ async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	// Cleanup
 	fs.rmSync(tempDir, { recursive: true, force: true });
 	fs.unlinkSync(tarPath);
+
+	ensureRuntimeShims(nodeDir);
+	writeStagedNodeVersion(outputDir, NODE_VERSION);
 
 	console.log(`Node.js prepared at ${nodeDir}`);
 	return nodeDir;
@@ -166,13 +188,16 @@ export async function prepareEmbeddedRuntime(arch: 'x64' | 'arm64' | 'armhf', ou
 	return { nodeDir, gitDir };
 }
 
-// CLI entry point (ESM compatible)
-const arch = (process.argv[2] as 'x64' | 'arm64' | 'armhf') || 'x64';
-const outputDir = process.argv[3] || path.join(process.cwd(), 'src-tauri', 'embedded-runtime', `linux-${arch}`);
+// CLI entry point (ESM compatible). Keep imports side-effect free so the
+// symlink replacement contract can be exercised against a real temp tree.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+	const arch = (process.argv[2] as 'x64' | 'arm64' | 'armhf') || 'x64';
+	const outputDir = process.argv[3] || path.join(process.cwd(), 'src-tauri', 'embedded-runtime', `linux-${arch}`);
 
-prepareEmbeddedRuntime(arch, outputDir)
-	.then(() => process.exit(0))
-	.catch((err) => {
-		console.error('Failed to prepare embedded runtime:', err);
-		process.exit(1);
-	});
+	prepareEmbeddedRuntime(arch, outputDir)
+		.then(() => process.exit(0))
+		.catch((err) => {
+			console.error('Failed to prepare embedded runtime:', err);
+			process.exit(1);
+		});
+}

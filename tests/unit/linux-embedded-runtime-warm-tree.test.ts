@@ -1,4 +1,4 @@
-// ABOUTME: Regression coverage for macOS embedded-runtime preparation on a warm tree (#3152).
+// ABOUTME: Regression coverage for Linux embedded-runtime preparation on a warm tree (#3449).
 // ABOUTME: Proves an incremental prepare still replaces the npm/npx/corepack symlinks.
 
 import {
@@ -12,24 +12,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NODE_VERSION, prepareNodejs } from "../../build/darwin/prepare-embedded-runtime";
+import { NODE_VERSION, prepareNodejs } from "../../build/linux/prepare-embedded-runtime";
 import { writeStagedNodeVersion } from "../../build/runtime-staging";
 import { expect, it } from "vitest";
 
 /**
- * The download is skipped when `<outputDir>/node` already exists with a
- * matching staged-node-version marker, which is the state of every incremental
- * `pnpm prepare:runtime:darwin-*`. That early return used to skip the wrapper
- * replacement with it, leaving the original symlinks in place — and Tauri
- * dereferences symlinks when bundling the .app, which breaks
- * `require('../lib/cli.js')` for npm/npx/corepack.
- *
- * Exercising the real function against a real warm tree also proves the early
+ * The Linux Node tarball ships bin/npm, bin/npx and bin/corepack as the same
+ * relative symlinks as the darwin one, and the bundler dereferences symlinks
+ * the same way — but the Linux prepare script historically never replaced them
+ * with wrappers (#3449). Exercising the real function against a real warm tree
+ * proves both the wrapper replacement and that the version-matched early
  * return still short-circuits the network: the download would fail or hang
  * here, not silently pass.
  */
 it("replaces runtime symlinks on an already-prepared node tree", async () => {
-  const outputDir = mkdtempSync(join(tmpdir(), "seren-warm-runtime-"));
+  const outputDir = mkdtempSync(join(tmpdir(), "seren-linux-warm-runtime-"));
   try {
     const nodeDir = join(outputDir, "node");
     const binDir = join(nodeDir, "bin");
@@ -44,7 +41,7 @@ it("replaces runtime symlinks on an already-prepared node tree", async () => {
     // matches NODE_VERSION; anything else is re-staged (#3450).
     writeStagedNodeVersion(outputDir, NODE_VERSION);
 
-    const prepared = await prepareNodejs({ arch: "arm64", outputDir });
+    const prepared = await prepareNodejs({ arch: "x64", outputDir });
 
     expect(prepared).toBe(nodeDir);
     for (const wrapper of ["npm", "npx", "corepack"]) {

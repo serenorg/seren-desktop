@@ -6,6 +6,11 @@ import * as path from 'path';
 import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import { execSync } from 'child_process';
+import {
+	clearStagedNodeVersion,
+	readStagedNodeVersion,
+	writeStagedNodeVersion
+} from '../runtime-staging';
 
 // Version configuration - update these for new releases
 const NODE_VERSION = '22.12.0';
@@ -90,10 +95,18 @@ async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	const nodeDir = path.join(outputDir, 'node');
 
 	if (fs.existsSync(nodeDir)) {
-		console.log(`Node.js directory already exists at ${nodeDir}, skipping...`);
-		return nodeDir;
+		const stagedVersion = readStagedNodeVersion(outputDir);
+		if (stagedVersion === NODE_VERSION) {
+			console.log(`Node.js ${NODE_VERSION} already staged at ${nodeDir}, skipping download...`);
+			return nodeDir;
+		}
+		// A cached tree of any other (or unrecorded) version must not ship while
+		// embedded-runtime.json claims NODE_VERSION (#3450).
+		console.log(`Staged Node.js at ${nodeDir} is ${stagedVersion ?? 'of unrecorded version'}, expected ${NODE_VERSION}; re-staging...`);
+		fs.rmSync(nodeDir, { recursive: true, force: true });
 	}
 
+	clearStagedNodeVersion(outputDir);
 	fs.mkdirSync(nodeDir, { recursive: true });
 
 	const zipPath = path.join(outputDir, `node-${arch}.zip`);
@@ -117,6 +130,8 @@ async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	// Cleanup
 	fs.rmSync(tempDir, { recursive: true, force: true });
 	fs.unlinkSync(zipPath);
+
+	writeStagedNodeVersion(outputDir, NODE_VERSION);
 
 	console.log(`Node.js prepared at ${nodeDir}`);
 	return nodeDir;
