@@ -282,7 +282,9 @@ function emitToolCallUpdate(emit, session, update) {
     sessionId: session.id,
     toolCallId,
     title: update.title ?? update.name ?? "Tool call",
-    kind: update.name ?? "tool",
+    // ACP puts the tool category on `kind` (ToolKind: read/edit/execute/…);
+    // tool_call updates carry no `name` field on the wire.
+    kind: update.kind ?? "tool",
     status,
     parameters: update,
   });
@@ -1069,5 +1071,6 @@ export function createAcpRuntime({
 
 export {
   applyAcpPermissionMode as _applyAcpPermissionMode,
+  emitToolCallUpdate as _emitAcpToolCallUpdate,
   sendRequest as _sendAcpRequest,
 };
