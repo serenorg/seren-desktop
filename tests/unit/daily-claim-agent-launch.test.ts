@@ -8,9 +8,15 @@ const dailyClaimMocks = vi.hoisted(() => ({
   claimDailyCredits: vi.fn(),
 }));
 
+const mockAuthState = vi.hoisted(() => ({ isAuthenticated: true }));
+
 vi.mock("@/services/dailyClaim", () => ({
   fetchDailyEligibility: dailyClaimMocks.fetchDailyEligibility,
   claimDailyCredits: dailyClaimMocks.claimDailyCredits,
+}));
+
+vi.mock("@/stores/auth.store", () => ({
+  authStore: mockAuthState,
 }));
 
 vi.mock("@/services/notifications", () => ({
@@ -43,6 +49,7 @@ function eligibility(canClaim: boolean) {
 describe("daily claim on agent launch", () => {
   beforeEach(() => {
     dailyClaimMocks.fetchDailyEligibility.mockReset();
+    mockAuthState.isAuthenticated = true;
     resetWalletState();
   });
 
@@ -88,6 +95,19 @@ describe("daily claim on agent launch", () => {
     // State is preserved (not nulled, not blocked): the launch is never gated
     // on eligibility, and we do not un-dismiss on an unconfirmed reward.
     expect(walletState.dailyClaim?.can_claim).toBe(true);
+    expect(walletState.dailyClaimDismissed).toBe(true);
+  });
+
+  it("skips the eligibility fetch entirely when signed out (#3451)", async () => {
+    mockAuthState.isAuthenticated = false;
+    dismissDailyClaim();
+
+    await surfaceDailyClaimIfEligible();
+
+    // No Gateway call — a signed-out probe is a guaranteed 401 that only
+    // produces console noise and captureHttpFailure diagnostics entries.
+    expect(dailyClaimMocks.fetchDailyEligibility).not.toHaveBeenCalled();
+    expect(walletState.dailyClaim).toBeNull();
     expect(walletState.dailyClaimDismissed).toBe(true);
   });
 });
