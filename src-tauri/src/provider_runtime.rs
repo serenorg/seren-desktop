@@ -2,7 +2,7 @@
 // ABOUTME: Starts the bundled runtime on localhost and returns connection config to the frontend.
 
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -131,7 +131,7 @@ impl ProviderRuntimeState {
         let host = "127.0.0.1".to_string();
         let mut config = startup_config_for_host(&host, preferred_config.as_ref())?;
         let node_bin = resolve_node_binary(app);
-        let runtime_entry = find_provider_runtime_mjs()?;
+        let runtime_entry = find_provider_runtime_mjs(app)?;
 
         // Spawn up to STARTUP_ATTEMPT_BUDGETS.len() attempts. #1568 shipped
         // with 2 attempts at 20s each; field evidence in #1587 showed cases
@@ -386,18 +386,41 @@ fn resolve_node_binary(app: &AppHandle) -> PathBuf {
     crate::embedded_runtime::system_node_fallback()
 }
 
-fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
-    let exe_path = std::env::current_exe()
-        .map_err(|err| format!("Failed to get current exe path: {}", err))?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| "Failed to get exe directory".to_string())?;
-    let platform_subdir = crate::embedded_runtime::platform_subdir();
-
-    let candidates = [
+/// Candidate locations for provider-runtime.mjs, in probe order.
+///
+/// The resource-dir candidates come first: Tauri's resource resolver is the
+/// only source that knows the Linux install layout (`exe_dir/../lib/<app>`
+/// for deb/rpm, `$APPDIR/usr/lib/<app>` for AppImage, `/usr/lib/<app>` for a
+/// system install — #3434). On macOS it resolves to `exe_dir/../Resources`,
+/// on Windows and in dev to `exe_dir` itself — directories the exe-relative
+/// candidates below already probe, so their behavior is unchanged. The
+/// exe-relative and dev candidates remain as fallback for when the resolver
+/// errors.
+fn provider_runtime_mjs_candidates(
+    exe_dir: &Path,
+    resource_dir: Option<&Path>,
+    platform_subdir: &str,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(7);
+    if let Some(resource_dir) = resource_dir {
+        candidates.push(
+            resource_dir
+                .join("embedded-runtime")
+                .join(platform_subdir)
+                .join("provider-runtime")
+                .join("provider-runtime.mjs"),
+        );
+        candidates.push(
+            resource_dir
+                .join("embedded-runtime")
+                .join("provider-runtime")
+                .join("provider-runtime.mjs"),
+        );
+    }
+    candidates.extend([
         exe_dir
             .join("../Resources/embedded-runtime")
-            .join(&platform_subdir)
+            .join(platform_subdir)
             .join("provider-runtime")
             .join("provider-runtime.mjs"),
         exe_dir
@@ -406,7 +429,7 @@ fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
             .join("provider-runtime.mjs"),
         exe_dir
             .join("embedded-runtime")
-            .join(&platform_subdir)
+            .join(platform_subdir)
             .join("provider-runtime")
             .join("provider-runtime.mjs"),
         exe_dir
@@ -417,7 +440,21 @@ fn find_provider_runtime_mjs() -> Result<PathBuf, String> {
             .join("embedded-runtime")
             .join("provider-runtime")
             .join("provider-runtime.mjs"),
-    ];
+    ]);
+    candidates
+}
+
+fn find_provider_runtime_mjs(app: &AppHandle) -> Result<PathBuf, String> {
+    let exe_path = std::env::current_exe()
+        .map_err(|err| format!("Failed to get current exe path: {}", err))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or_else(|| "Failed to get exe directory".to_string())?;
+    let platform_subdir = crate::embedded_runtime::platform_subdir();
+    let resource_dir = app.path().resource_dir().ok();
+
+    let candidates =
+        provider_runtime_mjs_candidates(exe_dir, resource_dir.as_deref(), &platform_subdir);
 
     for candidate in &candidates {
         if candidate.exists() {
@@ -1314,5 +1351,64 @@ mod tests {
                 "budgets should be non-decreasing: {prev:?} -> {next:?}"
             );
         }
+    }
+
+    /// #3434: installed Linux builds resolve resources to `../lib/<app>`,
+    /// `$APPDIR/usr/lib/<app>`, or `/usr/lib/<app>` — locations no
+    /// exe-relative candidate ever reaches, so agent mode could not start.
+    /// The resolver-backed candidates must be probed first (platform subdir
+    /// before flat layout), and every pre-existing exe-relative/dev
+    /// candidate must remain, in the same order, as the fallback tail.
+    #[test]
+    fn mjs_candidates_probe_resource_dir_before_exe_relative() {
+        let exe_dir = Path::new("/usr/bin");
+        let resource_dir = Path::new("/usr/lib/seren-desktop");
+        let candidates = provider_runtime_mjs_candidates(exe_dir, Some(resource_dir), "linux-x64");
+
+        assert_eq!(
+            candidates[0],
+            resource_dir
+                .join("embedded-runtime")
+                .join("linux-x64")
+                .join("provider-runtime")
+                .join("provider-runtime.mjs")
+        );
+        assert_eq!(
+            candidates[1],
+            resource_dir
+                .join("embedded-runtime")
+                .join("provider-runtime")
+                .join("provider-runtime.mjs")
+        );
+        assert_eq!(
+            candidates[2..],
+            provider_runtime_mjs_candidates(exe_dir, None, "linux-x64")[..],
+            "exe-relative and dev candidates must be unchanged after the resolver pair"
+        );
+    }
+
+    /// A failed resolver must degrade to exactly the pre-#3434 candidate
+    /// list — macOS/Windows/dev discovery is untouched.
+    #[test]
+    fn mjs_candidates_without_resource_dir_keep_prior_probe_set() {
+        let exe_dir = Path::new("/Applications/Seren.app/Contents/MacOS");
+        let candidates = provider_runtime_mjs_candidates(exe_dir, None, "darwin-arm64");
+
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(
+            candidates[0],
+            exe_dir
+                .join("../Resources/embedded-runtime")
+                .join("darwin-arm64")
+                .join("provider-runtime")
+                .join("provider-runtime.mjs")
+        );
+        assert_eq!(
+            candidates[4],
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("embedded-runtime")
+                .join("provider-runtime")
+                .join("provider-runtime.mjs")
+        );
     }
 }
