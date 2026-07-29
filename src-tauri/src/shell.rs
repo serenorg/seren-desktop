@@ -457,14 +457,11 @@ async fn spawn_argv(
     }
 }
 
-async fn spawn_one_shot(
-    command: &str,
-    secs: u64,
-    seren_api_key: Option<&str>,
-    progress: Option<mpsc::Sender<StreamChunk>>,
-) -> Result<CommandResult, String> {
-    let timeout = Duration::from_secs(secs);
-
+/// Build the `/bin/sh` (or `cmd.exe`) command for a one-shot shell execution:
+/// argv, embedded-runtime PATH prepend, Electron-host env scrub, and Seren API
+/// key scoping. Extracted from [`spawn_one_shot`] so the env contract is
+/// unit-testable (#3448).
+fn build_one_shot_command(command: &str, seren_api_key: Option<&str>) -> Command {
     let mut cmd = Command::new(if cfg!(target_os = "windows") {
         "cmd"
     } else {
@@ -509,6 +506,13 @@ async fn spawn_one_shot(
         cmd.env("PATH", &combined);
     }
 
+    // With the embedded runtime first on PATH, `node` inside the command
+    // resolves to the bundled binary — scrub the Electron-host vars
+    // (ELECTRON_RUN_AS_NODE, VSCODE_*, __CF*) like every sibling embedded
+    // spawn site, or it hangs bootstrapping as an extension host when the app
+    // was launched from a VSCode/Cursor terminal (#1516/#1521, #3448).
+    crate::embedded_runtime::sanitize_spawn_env(&mut cmd);
+
     cmd.env_remove("SEREN_API_KEY");
     cmd.env_remove("API_KEY");
     if let Some(api_key) = seren_api_key.filter(|key| !key.is_empty()) {
@@ -519,6 +523,18 @@ async fn spawn_one_shot(
     cmd.stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
+
+    cmd
+}
+
+async fn spawn_one_shot(
+    command: &str,
+    secs: u64,
+    seren_api_key: Option<&str>,
+    progress: Option<mpsc::Sender<StreamChunk>>,
+) -> Result<CommandResult, String> {
+    let timeout = Duration::from_secs(secs);
+    let mut cmd = build_one_shot_command(command, seren_api_key);
 
     // Log the exact CWD we inherit and the command we're about to run.
     // GH #1595: a Windows user reported tool-written files landing
@@ -1230,5 +1246,54 @@ mod tests {
         assert_eq!(result.stdout, "alpha\nbeta\n");
         assert_eq!(result.stderr, "");
         assert!(!result.timed_out);
+    }
+
+    /// Regression for #3448 (re-exposure of #1516/#1521): the one-shot shell
+    /// path prepends the embedded runtime to PATH, so a command that runs
+    /// `node` resolves to the bundled binary — it must get the same
+    /// Electron-host env scrub as every sibling embedded-runtime spawn site
+    /// or it hangs bootstrapping as a VSCode/Cursor extension host.
+    #[test]
+    fn one_shot_command_strips_electron_host_env() {
+        let cmd = build_one_shot_command("node --version", Some("sk-test"));
+        let overrides: Vec<(String, Option<String>)> = cmd
+            .as_std()
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().to_string(),
+                    v.map(|v| v.to_string_lossy().to_string()),
+                )
+            })
+            .collect();
+
+        // The load-bearing subset of POLLUTING_PARENT_ENV_VARS; each must be
+        // explicitly removed ((key, None) override), never merely overwritten.
+        for var in [
+            "ELECTRON_RUN_AS_NODE",
+            "VSCODE_ESM_ENTRYPOINT",
+            "__CFBundleIdentifier",
+            "__CF_USER_TEXT_ENCODING",
+            "NODE_PATH",
+        ] {
+            let entry = overrides.iter().find(|(k, _)| k == var).unwrap_or_else(|| {
+                panic!(
+                    "one-shot shell spawn must env_remove {var:?} (sanitize_spawn_env); \
+                     without it a shell command running the embedded node hangs when the \
+                     app was launched from an Electron-host terminal (#3448)"
+                )
+            });
+            assert!(
+                entry.1.is_none(),
+                "one-shot shell spawn must REMOVE {var:?}, not overwrite it; got {:?}",
+                entry.1
+            );
+        }
+
+        // The scrub must not clobber the API key scoping applied after it.
+        assert!(
+            overrides.contains(&("SEREN_API_KEY".to_string(), Some("sk-test".to_string()))),
+            "SEREN_API_KEY must still be injected after the env scrub"
+        );
     }
 }

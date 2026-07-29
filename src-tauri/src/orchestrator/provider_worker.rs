@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 use tokio::sync::{Mutex, mpsc};
@@ -248,6 +250,21 @@ pub async fn list_provider_agents(app: &AppHandle) -> Result<Vec<ProviderAgentSt
 /// borrows or releases a serving/standby chat session. #2399.
 const ONESHOT_LOCAL_SESSION_PREFIX: &str = "oneshot-";
 
+/// Hard bound on the post-spawn one-shot completion (permission mode, model
+/// selection, and the prompt round-trip). Rust is the SINGLE enforcement point
+/// for this value: the runtime still receives it as `timeoutSecs`, but it only
+/// stores it for observability and never arms a timer — do not build a second
+/// timer there. Interactive chat sessions never pass through this path and
+/// keep having no timeout. #3440.
+const ONESHOT_COMPLETION_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Bound on the best-effort ephemeral-session release (terminate) that runs
+/// after the completion resolves or expires. A runtime whose socket has gone
+/// silent — the very condition that trips the completion timeout — would
+/// otherwise hang the terminate round-trip forever and re-open the hang the
+/// bound above closes. #3440.
+const ONESHOT_RELEASE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// True when `session_id` names an ephemeral session created by a one-shot.
 /// The terminate in [`complete_oneshot`] is gated on this so a one-shot can
 /// never cancel a serving/standby chat session.
@@ -301,7 +318,7 @@ pub async fn complete_oneshot(
         "approvalPolicy": "on-request",
         "sandboxMode": "read-only",
         "networkEnabled": false,
-        "timeoutSecs": 180,
+        "timeoutSecs": ONESHOT_COMPLETION_TIMEOUT.as_secs(),
     });
     if agent_type == "lmstudio" {
         if let Some(base_url) = app_setting_string(app, "lmStudioBaseUrl") {
@@ -341,86 +358,147 @@ pub async fn complete_oneshot(
     let owns_ephemeral_session =
         session_id == local_session_id && is_ephemeral_oneshot_session(&session_id);
 
-    let completion_result = async {
-        provider_request(
-            &mut socket,
-            SET_MODE_ONESHOT_REQUEST_ID,
-            "provider_set_permission_mode",
-            json!({
-                "sessionId": session_id,
-                "mode": provider_oneshot_permission_mode(&agent_type),
-            }),
-        )
-        .await?;
+    // The completion and the release below share the socket, and the
+    // completion future is dropped mid-await when its timeout fires — the
+    // Arc<Mutex> hands the connection over to the release at that point.
+    // Never contended otherwise: the two futures run strictly in sequence.
+    let socket = Arc::new(Mutex::new(socket));
 
-        // Gemini's model is fixed by the `--model` flag at spawn time; the
-        // runtime's set_session_model is a no-op against the running process,
-        // so the Gemini one-shot intentionally runs on the agent's default
-        // model. For Claude/Codex, setting the model is best-effort: Codex
-        // rejects an unknown model id with a hard error, but a toolless
-        // summarization does not need an exact model — log and proceed on the
-        // agent default rather than failing the whole completion. #2398.
-        if agent_type != "gemini" && agent_type != "grok" {
-            if let Some(model) = request
-                .model
-                .as_deref()
-                .filter(|model| !model.trim().is_empty())
-            {
-                if let Err(err) = provider_request(
-                    &mut socket,
-                    SET_MODEL_ONESHOT_REQUEST_ID,
-                    "provider_set_session_model",
-                    json!({
-                        "sessionId": session_id,
-                        "modelId": model,
-                    }),
-                )
-                .await
+    let completion = {
+        let socket = Arc::clone(&socket);
+        let session_id = session_id.clone();
+        async move {
+            let mut socket = socket.lock().await;
+            provider_request(
+                &mut socket,
+                SET_MODE_ONESHOT_REQUEST_ID,
+                "provider_set_permission_mode",
+                json!({
+                    "sessionId": session_id,
+                    "mode": provider_oneshot_permission_mode(&agent_type),
+                }),
+            )
+            .await?;
+
+            // Gemini's model is fixed by the `--model` flag at spawn time; the
+            // runtime's set_session_model is a no-op against the running process,
+            // so the Gemini one-shot intentionally runs on the agent's default
+            // model. For Claude/Codex, setting the model is best-effort: Codex
+            // rejects an unknown model id with a hard error, but a toolless
+            // summarization does not need an exact model — log and proceed on the
+            // agent default rather than failing the whole completion. #2398.
+            if agent_type != "gemini" && agent_type != "grok" {
+                if let Some(model) = request
+                    .model
+                    .as_deref()
+                    .filter(|model| !model.trim().is_empty())
                 {
-                    log::warn!(
-                        "[provider-one-shot] set_session_model({model}) failed; continuing on agent default model: {err}"
-                    );
+                    if let Err(err) = provider_request(
+                        &mut socket,
+                        SET_MODEL_ONESHOT_REQUEST_ID,
+                        "provider_set_session_model",
+                        json!({
+                            "sessionId": session_id,
+                            "modelId": model,
+                        }),
+                    )
+                    .await
+                    {
+                        log::warn!(
+                            "[provider-one-shot] set_session_model({model}) failed; continuing on agent default model: {err}"
+                        );
+                    }
                 }
             }
-        }
 
-        collect_provider_prompt(
-            &mut socket,
-            &session_id,
-            &build_provider_prompt(request.system.as_deref(), &request.prompt),
-        )
-        .await
-    }
-    .await;
+            collect_provider_prompt(
+                &mut socket,
+                &session_id,
+                &build_provider_prompt(request.system.as_deref(), &request.prompt),
+            )
+            .await
+        }
+    };
 
     // Release: terminate ONLY the ephemeral session this call created. A
     // one-shot must never cancel a serving/standby chat session, so if spawn
     // ever returned a non-ephemeral id we leave it alone. Terminate is
     // best-effort (warn-on-error) so a double-release or runtime restart can't
     // surface as a hard failure. #2399.
-    if owns_ephemeral_session {
-        if let Err(err) = provider_request(
-            &mut socket,
-            TERMINATE_ONESHOT_REQUEST_ID,
-            "provider_terminate",
-            json!({ "sessionId": session_id }),
-        )
-        .await
-        {
-            log::warn!("[provider-one-shot] failed to terminate ephemeral session: {err}");
+    let release = {
+        let socket = Arc::clone(&socket);
+        let session_id = session_id.clone();
+        async move {
+            if !owns_ephemeral_session {
+                log::warn!(
+                    "[provider-one-shot] spawn returned non-ephemeral session id {session_id:?}; \
+                     not terminating (one-shots never cancel serving/standby chat sessions)"
+                );
+                return;
+            }
+            let mut socket = socket.lock().await;
+            if let Err(err) = provider_request(
+                &mut socket,
+                TERMINATE_ONESHOT_REQUEST_ID,
+                "provider_terminate",
+                json!({ "sessionId": session_id }),
+            )
+            .await
+            {
+                log::warn!("[provider-one-shot] failed to terminate ephemeral session: {err}");
+            }
         }
-    } else {
-        log::warn!(
-            "[provider-one-shot] spawn returned non-ephemeral session id {session_id:?}; \
-             not terminating (one-shots never cancel serving/standby chat sessions)"
-        );
-    }
+    };
+
+    let completion_result = bounded_oneshot_completion(
+        completion,
+        release,
+        ONESHOT_COMPLETION_TIMEOUT,
+        ONESHOT_RELEASE_TIMEOUT,
+    )
+    .await;
 
     let content = completion_result?;
     if content.trim().is_empty() {
         return Err("provider one-shot returned no content".to_string());
     }
     Ok(content)
+}
+
+/// Await the one-shot `completion` for at most `completion_timeout`, then run
+/// `release` (the ephemeral-session terminate) for at most `release_timeout`.
+///
+/// `release` runs on every exit — success, completion error, and expiry — so
+/// an expired one-shot kills its wedged CLI child instead of orphaning it.
+/// Without this bound no layer enforces the one-shot timeout (`timeoutSecs`
+/// is echoed to the runtime but never armed) and headless notes/dictation
+/// hang forever when the CLI wedges mid-turn. #3440.
+async fn bounded_oneshot_completion<C, R>(
+    completion: C,
+    release: R,
+    completion_timeout: Duration,
+    release_timeout: Duration,
+) -> Result<String, String>
+where
+    C: Future<Output = Result<String, String>>,
+    R: Future<Output = ()>,
+{
+    let result = match tokio::time::timeout(completion_timeout, completion).await {
+        Ok(result) => result,
+        // The expired completion future is dropped here, releasing its socket
+        // lock so the release below can take over the connection.
+        Err(_) => Err(format!(
+            "provider one-shot timed out after {}s; terminating the ephemeral session",
+            completion_timeout.as_secs()
+        )),
+    };
+    if tokio::time::timeout(release_timeout, release).await.is_err() {
+        log::warn!(
+            "[provider-one-shot] ephemeral session release did not resolve within {}s; abandoning socket",
+            release_timeout.as_secs()
+        );
+    }
+    result
 }
 
 async fn connect_authenticated_provider_socket(
@@ -875,5 +953,88 @@ mod tests {
                 "serving/standby id must not be terminable: {serving:?}"
             );
         }
+    }
+
+    // =========================================================================
+    // Bounded one-shot completion (GH #3440 regression tests)
+    // =========================================================================
+
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test]
+    async fn hung_oneshot_completion_times_out_and_still_releases_session() {
+        // Contract (GH #3440): a runtime that accepts the prompt and then
+        // never responds must not hang the headless one-shot forever — the
+        // bound fires, the caller gets a clear error, AND the ephemeral
+        // session release still runs so the wedged CLI child is terminated
+        // instead of orphaned.
+        let released = Arc::new(AtomicBool::new(false));
+        let release_flag = Arc::clone(&released);
+        let t0 = std::time::Instant::now();
+
+        let result = bounded_oneshot_completion(
+            std::future::pending::<Result<String, String>>(),
+            async move {
+                release_flag.store(true, Ordering::SeqCst);
+            },
+            Duration::from_millis(50),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        let err = result.expect_err("hung completion must surface a timeout error");
+        assert!(err.contains("timed out"), "error must name the timeout: {err}");
+        assert!(
+            released.load(Ordering::SeqCst),
+            "session release must run after the timeout fires"
+        );
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "timeout must unblock promptly, took {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn completed_oneshot_passes_result_through_and_releases_session() {
+        let released = Arc::new(AtomicBool::new(false));
+        let release_flag = Arc::clone(&released);
+
+        let result = bounded_oneshot_completion(
+            async { Ok("meeting notes".to_string()) },
+            async move {
+                release_flag.store(true, Ordering::SeqCst);
+            },
+            Duration::from_secs(5),
+            Duration::from_secs(5),
+        )
+        .await;
+
+        assert_eq!(result.as_deref(), Ok("meeting notes"));
+        assert!(
+            released.load(Ordering::SeqCst),
+            "normal completion must still release the ephemeral session"
+        );
+    }
+
+    #[tokio::test]
+    async fn hung_session_release_cannot_hang_the_oneshot() {
+        // The release round-trip talks to the same possibly-wedged socket that
+        // tripped the completion timeout; it must be bounded too or the fix
+        // re-opens the exact hang it closes.
+        let t0 = std::time::Instant::now();
+        let result = bounded_oneshot_completion(
+            async { Ok("notes".to_string()) },
+            std::future::pending::<()>(),
+            Duration::from_secs(5),
+            Duration::from_millis(50),
+        )
+        .await;
+        assert_eq!(result.as_deref(), Ok("notes"));
+        assert!(
+            t0.elapsed() < Duration::from_secs(5),
+            "hung release must not block the one-shot result, took {:?}",
+            t0.elapsed()
+        );
     }
 }
