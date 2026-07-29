@@ -11,6 +11,10 @@ import {
   createTurnCorrelator,
   translateNeutralEvent,
 } from "../../bin/happy-bridge/translate.mjs";
+// @ts-expect-error — the bridge seam is plain ESM and has no generated declarations.
+import { translateProviderEvent } from "../../bin/happy-bridge/provider-source.mjs";
+// @ts-expect-error — the browser-local runtime is plain ESM without declarations.
+import { _emitAcpToolCallUpdate } from "../../bin/browser-local/acp-runtime.mjs";
 
 const payload = {
   text: "assistant text",
@@ -164,19 +168,38 @@ describe("neutral-to-Happy session translation", () => {
     expect(endMessage.body.output).not.toContain("line two");
   });
 
-  it("summarizes an ACP `read` result the same way", () => {
+  it("summarizes an ACP `read` result emitted by the real runtime pipeline", () => {
+    // The ACP wire carries the tool category on `kind` and has no `name`
+    // field, so a hand-built payload can pass while the runtime emits
+    // something else (#3454). Drive the fixture through the runtime's own
+    // emitter and the provider event mapping instead.
     const summarizer = createFileReadSummarizer();
-    summarizer.annotate({
-      kind: "tool-start",
-      sessionId: "session-1",
-      payload: { toolCallId: "read-2", kind: "read" },
+    const session = { id: "session-1" };
+    const neutralEvents: Array<Record<string, unknown>> = [];
+    const emit = (method: string, params: Record<string, unknown>) => {
+      const event = translateProviderEvent(method, params);
+      if (event) neutralEvents.push(summarizer.annotate(event));
+    };
+
+    _emitAcpToolCallUpdate(emit, session, {
+      sessionUpdate: "tool_call",
+      toolCallId: "read-2",
+      title: "Read app.ts",
+      kind: "read",
+      status: "pending",
     });
-    const endEvent = summarizer.annotate({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "read-2", result: "only one line" },
+    _emitAcpToolCallUpdate(emit, session, {
+      sessionUpdate: "tool_call_update",
+      toolCallId: "read-2",
+      status: "completed",
+      content: [{ type: "text", text: "only one line" }],
     });
-    expect(translateNeutralEvent(endEvent)[0].body.output).toBe(
+
+    const toolStart = neutralEvents.find((event) => event.kind === "tool-start");
+    expect(toolStart).toMatchObject({ payload: { kind: "read" } });
+    const toolEnd = neutralEvents.find((event) => event.kind === "tool-end");
+    expect(toolEnd).toBeDefined();
+    expect(translateNeutralEvent(toolEnd)[0].body.output).toBe(
       "[1 line hidden on Happy Mobile]",
     );
   });
