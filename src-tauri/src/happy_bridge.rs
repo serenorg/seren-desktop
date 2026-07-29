@@ -205,7 +205,7 @@ impl HappyBridgeManager {
             .ensure_started(app)
             .await?;
         let node_binary = resolve_node_binary(app);
-        let bridge_entry = find_happy_bridge_mjs()?;
+        let bridge_entry = find_happy_bridge_mjs(app)?;
         let pairing_credential = self.load_pairing_credential(app)?;
         if let Some(directory) = happy_home_dir(app) {
             reconcile_session_key_store_reset(&directory, pairing_credential.is_some())?;
@@ -1081,28 +1081,58 @@ fn resolve_node_binary(app: &AppHandle) -> PathBuf {
     crate::embedded_runtime::system_node_fallback()
 }
 
-fn find_happy_bridge_mjs() -> Result<PathBuf, String> {
+/// Candidate locations for happy-bridge.mjs, in probe order.
+///
+/// The resource-dir candidates come first: Tauri's resource resolver is the
+/// only source that knows the Linux install layout (`exe_dir/../lib/<app>`
+/// for deb/rpm, `$APPDIR/usr/lib/<app>` for AppImage, `/usr/lib/<app>` for a
+/// system install — #3434). On macOS it resolves to `exe_dir/../Resources`,
+/// on Windows and in dev to `exe_dir` itself — directories the exe-relative
+/// candidates below already probe, so their behavior is unchanged. The
+/// exe-relative and dev candidates remain as fallback for when the resolver
+/// errors.
+fn happy_bridge_mjs_candidates(
+    exe_dir: &Path,
+    resource_dir: Option<&Path>,
+    platform: &str,
+) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(8);
+    if let Some(resource_dir) = resource_dir {
+        candidates.push(
+            resource_dir
+                .join("embedded-runtime")
+                .join(platform)
+                .join("provider-runtime/happy-bridge.mjs"),
+        );
+        candidates.push(resource_dir.join("embedded-runtime/provider-runtime/happy-bridge.mjs"));
+    }
+    candidates.extend([
+        exe_dir
+            .join("../Resources/embedded-runtime")
+            .join(platform)
+            .join("provider-runtime/happy-bridge.mjs"),
+        exe_dir.join("../Resources/embedded-runtime/provider-runtime/happy-bridge.mjs"),
+        exe_dir
+            .join("embedded-runtime")
+            .join(platform)
+            .join("provider-runtime/happy-bridge.mjs"),
+        exe_dir.join("embedded-runtime/provider-runtime/happy-bridge.mjs"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("embedded-runtime/provider-runtime/happy-bridge.mjs"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bin/happy-bridge.mjs"),
+    ]);
+    candidates
+}
+
+fn find_happy_bridge_mjs(app: &AppHandle) -> Result<PathBuf, String> {
     let exe_dir = std::env::current_exe()
         .map_err(|err| format!("Failed to get current exe path: {err}"))?
         .parent()
         .ok_or_else(|| "Failed to get exe directory".to_string())?
         .to_path_buf();
     let platform = crate::embedded_runtime::platform_subdir();
-    let candidates = [
-        exe_dir
-            .join("../Resources/embedded-runtime")
-            .join(&platform)
-            .join("provider-runtime/happy-bridge.mjs"),
-        exe_dir.join("../Resources/embedded-runtime/provider-runtime/happy-bridge.mjs"),
-        exe_dir
-            .join("embedded-runtime")
-            .join(&platform)
-            .join("provider-runtime/happy-bridge.mjs"),
-        exe_dir.join("embedded-runtime/provider-runtime/happy-bridge.mjs"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("embedded-runtime/provider-runtime/happy-bridge.mjs"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bin/happy-bridge.mjs"),
-    ];
+    let resource_dir = app.path().resource_dir().ok();
+    let candidates = happy_bridge_mjs_candidates(&exe_dir, resource_dir.as_deref(), &platform);
     candidates
         .iter()
         .find(|candidate| candidate.exists())
@@ -1831,14 +1861,15 @@ mod tests {
         BoundedLine, HappyBridgeState, MAX_RESTART_ATTEMPTS, MAX_SUPERVISOR_LINE_BYTES,
         SESSION_KEY_STORE_FILENAME, SESSION_KEY_STORE_RESET_FILENAME,
         canonical_happy_restoration_root, canonical_path_for_wire, discovered_project_roots,
-        error_response, is_advertised_root, matching_identity_reset_result, next_restart_attempt,
-        notify_supervisor, parse_supervisor_line, read_bounded_line,
-        reconcile_session_key_store_reset, report_state, required_nullable_string, required_uuid,
-        reset_session_key_store_transaction, restart_allowed, restart_delay, should_rearm,
-        stage_session_key_store_reset,
+        error_response, happy_bridge_mjs_candidates, is_advertised_root,
+        matching_identity_reset_result, next_restart_attempt, notify_supervisor,
+        parse_supervisor_line, read_bounded_line, reconcile_session_key_store_reset, report_state,
+        required_nullable_string, required_uuid, reset_session_key_store_transaction,
+        restart_allowed, restart_delay, should_rearm, stage_session_key_store_reset,
     };
     use crate::commands::happy_bridge::{ADVERTISED_ROOTS_KEY, SETTINGS_STORE};
     use serde_json::Value;
+    use std::path::{Path, PathBuf};
     use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tauri_plugin_store::StoreExt;
@@ -2578,6 +2609,57 @@ mod tests {
         assert!(
             result.is_err(),
             "a wedged bridge must fail the caller rather than block it forever"
+        );
+    }
+
+    /// #3434: installed Linux builds resolve resources to `../lib/<app>`,
+    /// `$APPDIR/usr/lib/<app>`, or `/usr/lib/<app>` — locations no
+    /// exe-relative candidate ever reaches, so the bridge could not start.
+    /// The resolver-backed candidates must be probed first (platform subdir
+    /// before flat layout), and every pre-existing exe-relative/dev
+    /// candidate must remain, in the same order, as the fallback tail.
+    #[test]
+    fn bridge_candidates_probe_resource_dir_before_exe_relative() {
+        let exe_dir = Path::new("/usr/bin");
+        let resource_dir = Path::new("/usr/lib/seren-desktop");
+        let candidates = happy_bridge_mjs_candidates(exe_dir, Some(resource_dir), "linux-x64");
+
+        assert_eq!(
+            candidates[0],
+            resource_dir
+                .join("embedded-runtime")
+                .join("linux-x64")
+                .join("provider-runtime/happy-bridge.mjs")
+        );
+        assert_eq!(
+            candidates[1],
+            resource_dir.join("embedded-runtime/provider-runtime/happy-bridge.mjs")
+        );
+        assert_eq!(
+            candidates[2..],
+            happy_bridge_mjs_candidates(exe_dir, None, "linux-x64")[..],
+            "exe-relative and dev candidates must be unchanged after the resolver pair"
+        );
+    }
+
+    /// A failed resolver must degrade to exactly the pre-#3434 candidate
+    /// list — macOS/Windows/dev discovery is untouched.
+    #[test]
+    fn bridge_candidates_without_resource_dir_keep_prior_probe_set() {
+        let exe_dir = Path::new("/Applications/Seren.app/Contents/MacOS");
+        let candidates = happy_bridge_mjs_candidates(exe_dir, None, "darwin-arm64");
+
+        assert_eq!(candidates.len(), 6);
+        assert_eq!(
+            candidates[0],
+            exe_dir
+                .join("../Resources/embedded-runtime")
+                .join("darwin-arm64")
+                .join("provider-runtime/happy-bridge.mjs")
+        );
+        assert_eq!(
+            candidates[5],
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../bin/happy-bridge.mjs")
         );
     }
 }
