@@ -24,6 +24,11 @@ pub struct McpPublisherWorker {
 
 /// Connect timeout for the HTTP client (seconds).
 const CONNECT_TIMEOUT_SECS: u64 = 30;
+/// Maximum time to wait between chunks from the SSE stream before giving up.
+/// Applied per-chunk (not as a total request timeout) so long-running publisher
+/// streams are not killed at a fixed wall-clock deadline, while a half-open
+/// connection that stops yielding data fails instead of spinning forever.
+const READ_TIMEOUT_SECS: u64 = 600;
 
 impl McpPublisherWorker {
     pub fn new() -> Self {
@@ -182,10 +187,19 @@ impl McpPublisherWorker {
         let mut accumulated_cost: f64 = 0.0;
         let mut got_complete = false;
 
-        while let Some(chunk_result) = stream.next().await {
+        loop {
             if *self.cancelled.lock().await {
                 return Ok(());
             }
+
+            let next_chunk =
+                tokio::time::timeout(Duration::from_secs(READ_TIMEOUT_SECS), stream.next())
+                    .await
+                    .map_err(|_| "Timed out waiting for publisher stream data".to_string())?;
+
+            let Some(chunk_result) = next_chunk else {
+                break;
+            };
 
             let chunk = chunk_result.map_err(|e| format!("Stream read error: {}", e))?;
             let text = String::from_utf8_lossy(&chunk);

@@ -258,6 +258,29 @@ async fn sleep_or_cancel(
     }
 }
 
+/// Bound on how long Stop waits for a worker's `cancel()` before falling back
+/// to aborting its task. A wedged runtime can accept the cancel connection and
+/// never reply; without a bound `orchestrate()` never reaches session cleanup
+/// and the conversation stays "running" until app restart (see GH #3433).
+const WORKER_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Await `worker.cancel()` for at most `timeout`.
+///
+/// Returns `true` if the cancel resolved in time, `false` on timeout. Callers
+/// proceed to abort the worker task either way — abort handles teardown — so a
+/// hung cancel can delay Stop by at most `timeout` (see GH #3433).
+async fn cancel_worker_or_timeout(worker: &dyn Worker, timeout: Duration) -> bool {
+    if tokio::time::timeout(timeout, worker.cancel()).await.is_err() {
+        log::warn!(
+            "[Orchestrator] Worker '{}' cancel did not resolve within {:?}; proceeding to abort",
+            worker.id(),
+            timeout
+        );
+        return false;
+    }
+    true
+}
+
 // =============================================================================
 // Model Fallback Chain
 // =============================================================================
@@ -756,7 +779,7 @@ async fn execute_single_task(
                 "[Orchestrator] Cancelling worker for conversation {}",
                 conversation_id
             );
-            let _ = worker_for_cancel.cancel().await;
+            cancel_worker_or_timeout(worker_for_cancel.as_ref(), WORKER_CANCEL_TIMEOUT).await;
             worker_handle.abort();
             break;
         }
@@ -1378,7 +1401,7 @@ async fn execute_multi_task(
             // If already cancelled, signal workers to stop and abort handles
             if *cancel_check.borrow() {
                 for w in &active_workers {
-                    let _ = w.cancel().await;
+                    cancel_worker_or_timeout(w.as_ref(), WORKER_CANCEL_TIMEOUT).await;
                 }
                 handle.abort();
                 continue;
@@ -1419,7 +1442,7 @@ async fn execute_multi_task(
             };
             if cancelled_during_await {
                 for w in &active_workers {
-                    let _ = w.cancel().await;
+                    cancel_worker_or_timeout(w.as_ref(), WORKER_CANCEL_TIMEOUT).await;
                 }
                 break;
             }
@@ -1938,6 +1961,70 @@ mod tests {
         let sessions = state.active_sessions.lock().await;
         assert!(sessions.contains_key("test-conv"));
         assert!(*sessions.get("test-conv").unwrap().borrow());
+    }
+
+    // =========================================================================
+    // Bounded worker cancel (GH #3433 regression tests)
+    // =========================================================================
+
+    /// Worker stub whose `cancel()` either resolves immediately or pends
+    /// forever, reproducing a wedged runtime that accepts the cancel
+    /// connection but never replies.
+    struct CancelProbeWorker {
+        hang_cancel: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Worker for CancelProbeWorker {
+        fn id(&self) -> &str {
+            "cancel-probe"
+        }
+
+        async fn execute(
+            &self,
+            _conversation_id: &str,
+            _prompt: &str,
+            _conversation_context: &[serde_json::Value],
+            _routing: &RoutingDecision,
+            _skill_content: &str,
+            _app: &tauri::AppHandle,
+            _images: &[ImageAttachment],
+            _event_tx: mpsc::Sender<WorkerEvent>,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        async fn cancel(&self) -> Result<(), String> {
+            if self.hang_cancel {
+                std::future::pending::<()>().await;
+            }
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn hung_worker_cancel_unblocks_stop_at_timeout() {
+        // Contract (GH #3433): a cancel() that never resolves must not block
+        // orchestrate() past the timeout — Stop proceeds to abort() and the
+        // session cleanup that follows, instead of leaving the conversation
+        // stuck "running" until app restart.
+        let worker = CancelProbeWorker { hang_cancel: true };
+        let t0 = std::time::Instant::now();
+        let resolved =
+            cancel_worker_or_timeout(&worker, std::time::Duration::from_millis(100)).await;
+        assert!(!resolved, "hung cancel must report timeout");
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "hung cancel must unblock promptly, took {:?}",
+            t0.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn responsive_worker_cancel_resolves_within_timeout() {
+        let worker = CancelProbeWorker { hang_cancel: false };
+        let resolved = cancel_worker_or_timeout(&worker, WORKER_CANCEL_TIMEOUT).await;
+        assert!(resolved, "responsive cancel must resolve inside the bound");
     }
 
     // =========================================================================
