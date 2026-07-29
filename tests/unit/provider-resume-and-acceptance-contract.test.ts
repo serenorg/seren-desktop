@@ -31,7 +31,9 @@ function createCodexProcessHarness() {
     stderr,
     pid: 42,
     kill: vi.fn(),
-    stdin: {
+    // Real child stdin is a Socket (an EventEmitter); the runtime attaches an
+    // `error` listener to it at spawn (#3432), so the fake must support .on().
+    stdin: Object.assign(new EventEmitter(), {
       write: vi.fn((line: string) => {
         const request = JSON.parse(line.trim());
         if (request.id == null) return true;
@@ -49,7 +51,7 @@ function createCodexProcessHarness() {
         });
         return true;
       }),
-    },
+    }),
   });
 
   return {

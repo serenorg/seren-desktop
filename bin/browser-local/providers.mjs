@@ -1604,6 +1604,22 @@ function attachProcessListeners(
     });
   });
 
+  // Stdin write-error guard (#3432): when the Codex process dies while a
+  // write is in flight — the window between process death and the `exit`
+  // event — the write fails with EPIPE, delivered as an `error` event on the
+  // stdin stream. Without a listener the event rethrows as an
+  // uncaughtException, killing the entire shared provider-runtime helper and
+  // every live agent session with it. Log and hard-kill this child so the
+  // exit handler below — the cleanup path for a child that had started —
+  // fails just this session; killChildTree is a no-op when the child is
+  // already dead.
+  session.process.stdin.on("error", (err) => {
+    console.warn(
+      `${logPrefix} stdin write failed: ${err?.message ?? String(err)}`,
+    );
+    killChildTree(session.process);
+  });
+
   session.process.on("exit", () => {
     const wasTracked = sessions.delete(session.id);
     void session.serenMcpProxy?.close();
