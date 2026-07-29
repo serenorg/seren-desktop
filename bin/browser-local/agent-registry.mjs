@@ -454,19 +454,42 @@ function emitCliActionRequired(
   return officialInstructionsUrl;
 }
 
-async function ensureCodexCliViaUpdater(emit) {
-  const baseline = CLI_MIN_VERSION_BASELINE["@openai/codex"];
-  let resolved = resolveInstalledCodexBinary();
-  const installed = await runInstalledVersion(resolved, "codex");
+/**
+ * Block spawn until the resolved CLI meets its CLI_MIN_VERSION_BASELINE,
+ * force-updating through the verified updater when it does not. Shared by
+ * the Codex (#2904) and Claude Code (#3443) spawn paths so both degrade
+ * identically: an at-or-above-baseline install returns immediately with no
+ * network access; a below-baseline install triggers a blocking verified
+ * update and fails closed — with an actionable retry/instructions handoff —
+ * when the update cannot be confirmed (offline, scan rejection, stale shim).
+ *
+ * `_runInstalledVersion` / `_backgroundUpdateCli` are test seams; production
+ * callers leave them undefined so the real probe and updater run. Mirrors
+ * the `_versionOverrides` / `_scannerOverrides` seams in cli-updater.mjs.
+ */
+async function ensureCliBaselineViaUpdater(
+  emit,
+  {
+    label,
+    bareCommand,
+    packageName,
+    resolveBinary,
+    _runInstalledVersion = runInstalledVersion,
+    _backgroundUpdateCli = backgroundUpdateCli,
+  },
+) {
+  const baseline = CLI_MIN_VERSION_BASELINE[packageName];
+  let resolved = resolveBinary();
+  const installed = await _runInstalledVersion(resolved, bareCommand);
   if (!installed) {
     const url = emitCliActionRequired(emit, {
-      label: "Codex",
-      bareCommand: "codex",
-      packageName: "@openai/codex",
+      label,
+      bareCommand,
+      packageName,
       reason: "installation_required",
     });
     throw new Error(
-      `Codex CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
+      `${label} CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
     );
   }
   if (!isBelowBaseline(installed, baseline)) {
@@ -475,14 +498,14 @@ async function ensureCodexCliViaUpdater(emit) {
 
   emit("provider://cli-install-progress", {
     stage: "installing",
-    message: `Updating Codex CLI to ${baseline} or newer...`,
+    message: `Updating ${label} CLI to ${baseline} or newer...`,
   });
 
-  const outcome = await backgroundUpdateCli({
-    label: "Codex",
-    bareCommand: "codex",
+  const outcome = await _backgroundUpdateCli({
+    label,
+    bareCommand,
     resolvedPath: resolved,
-    packageName: "@openai/codex",
+    packageName,
     npmCliScript: resolveNpmCliScript(),
     force: true,
     onUpdated: ({ label, from, to }) =>
@@ -493,53 +516,94 @@ async function ensureCodexCliViaUpdater(emit) {
       emit?.("provider://cli-update-action-required", event),
   });
 
-  resolved = resolveInstalledCodexBinary();
-  const updated = await runInstalledVersion(resolved, "codex");
+  resolved = resolveBinary();
+  const updated = await _runInstalledVersion(resolved, bareCommand);
   if (
     outcome.outcome !== "success" ||
     !updated ||
     isBelowBaseline(updated, baseline)
   ) {
     throw new Error(
-      `Codex CLI is still ${updated ?? "unknown"}; Seren requires ${baseline} ` +
-        `or newer. Update it from ${CLI_INSTALL_INSTRUCTIONS["@openai/codex"]}, ` +
+      `${label} CLI is still ${updated ?? "unknown"}; Seren requires ${baseline} ` +
+        `or newer. Update it from ${CLI_INSTALL_INSTRUCTIONS[packageName]}, ` +
         `then retry. (${outcome.outcome})`,
     );
   }
 
   emit("provider://cli-install-progress", {
     stage: "complete",
-    message: "Codex CLI updated successfully",
+    message: `${label} CLI updated successfully`,
   });
 
   return resolved;
+}
+
+async function ensureCodexCliViaUpdater(emit) {
+  return ensureCliBaselineViaUpdater(emit, {
+    label: "Codex",
+    bareCommand: "codex",
+    packageName: "@openai/codex",
+    resolveBinary: resolveInstalledCodexBinary,
+  });
 }
 
 async function ensureClaudeCodeCli(emit) {
   // Check well-known install paths first (bare `which`/`where` can find stale wrappers)
   const existing = resolveInstalledClaudeBinary();
   if (existing !== "claude") {
-    return existing;
+    // Known install location — enforce the shared version baseline before
+    // spawn, exactly like Codex (#3443). Without this gate, the first spawn
+    // after an app update hands a below-baseline CLI the default model id,
+    // which it hard-rejects; the background updater only heals it later.
+    return ensureCliBaselineViaUpdater(emit, {
+      label: "Claude Code",
+      bareCommand: "claude",
+      packageName: "@anthropic-ai/claude-code",
+      resolveBinary: resolveInstalledClaudeBinary,
+    });
   }
 
   // `which`/`where` may resolve to a path not covered by resolveInstalledClaudeBinary
   // (a custom user PATH location). Arch-check the resolved path so a wrong-arch
   // binary on PATH doesn't get spawned and fail with EBADARCH (#1862).
   if (await isCommandAvailable("claude")) {
+    let resolvedPath = "";
     try {
       const whichCommand = process.platform === "win32" ? "where" : "which";
-      const resolvedPath = (await execText(whichCommand, ["claude"]))
+      resolvedPath = (await execText(whichCommand, ["claude"]))
         .split(/\r?\n/)[0]
         .trim();
-      if (
-        resolvedPath &&
-        existsSync(resolvedPath) &&
-        binaryRunsOnHost(resolvedPath)
-      ) {
-        return "claude";
-      }
     } catch {
       // which/where failed — fall through to the manual install handoff.
+    }
+    if (
+      resolvedPath &&
+      existsSync(resolvedPath) &&
+      binaryRunsOnHost(resolvedPath)
+    ) {
+      // Custom PATH installs are outside every channel the updater manages
+      // (classifyInstallChannel calls them unresolved), so no auto-update
+      // is attempted. Still refuse to spawn a CLI that is determinately
+      // below the baseline: it would reject the default model id with a
+      // far less actionable error (#3443). An unprobeable version stays
+      // permissive so a working custom setup is not blocked.
+      const baseline = CLI_MIN_VERSION_BASELINE["@anthropic-ai/claude-code"];
+      const installed = await runInstalledVersion(resolvedPath, "claude");
+      if (isBelowBaseline(installed, baseline)) {
+        const url = emitCliActionRequired(emit, {
+          label: "Claude Code",
+          bareCommand: "claude",
+          packageName: "@anthropic-ai/claude-code",
+          from: installed,
+          to: baseline,
+          reason: "update_required",
+        });
+        throw new Error(
+          `Claude Code CLI is ${installed}; Seren requires ${baseline} or newer. ` +
+            `Update it from ${url}, then retry.`,
+        );
+      }
+      return "claude";
     }
   }
 
@@ -1264,3 +1328,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
 // ensureCli failure interpolate `undefined` in place of the install URL,
 // which is the unhelpful error #3154 was filed about.
 export { CLI_INSTALL_INSTRUCTIONS as _CLI_INSTALL_INSTRUCTIONS };
+// Exported for regression tests of the spawn-path baseline gate (#2904,
+// #3443). Production callers go through ensureCodexCliViaUpdater /
+// ensureClaudeCodeCli.
+export { ensureCliBaselineViaUpdater as _ensureCliBaselineViaUpdater };

@@ -23,18 +23,32 @@ describe("#2904 Codex CLI upgrade gate", () => {
     expect(codexDefinition).not.toContain("return ensureGlobalNpmPackage({");
   });
 
-  it("the Codex updater uses the verified update path and fails closed", () => {
-    const helperStart = agentRegistrySource.indexOf(
+  it("the Codex updater delegates to the shared baseline gate", () => {
+    const wrapperStart = agentRegistrySource.indexOf(
       "async function ensureCodexCliViaUpdater",
     );
-    const helperEnd = agentRegistrySource.indexOf(
+    const wrapperEnd = agentRegistrySource.indexOf(
       "async function ensureClaudeCodeCli",
+    );
+    const wrapper = agentRegistrySource.slice(wrapperStart, wrapperEnd);
+
+    expect(wrapper).toContain("ensureCliBaselineViaUpdater(emit");
+    expect(wrapper).toContain('packageName: "@openai/codex"');
+    expect(wrapper).toContain("resolveBinary: resolveInstalledCodexBinary");
+  });
+
+  it("the shared baseline gate uses the verified update path and fails closed", () => {
+    const helperStart = agentRegistrySource.indexOf(
+      "async function ensureCliBaselineViaUpdater",
+    );
+    const helperEnd = agentRegistrySource.indexOf(
+      "async function ensureCodexCliViaUpdater",
     );
     const helper = agentRegistrySource.slice(helperStart, helperEnd);
 
     expect(helper).toContain("CLI_MIN_VERSION_BASELINE");
     expect(helper).toContain("isBelowBaseline");
-    expect(helper).toContain("backgroundUpdateCli");
+    expect(helper).toContain("_backgroundUpdateCli");
     expect(helper).toContain("force: true");
     expect(helper).toContain("provider://cli-update-action-required");
     expect(helper).toContain('outcome.outcome !== "success"');
