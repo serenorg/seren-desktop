@@ -1,4 +1,4 @@
-// ABOUTME: Critical regression coverage for macOS embedded-runtime wrapper preparation (#3086).
+// ABOUTME: Critical regression coverage for embedded-runtime wrapper preparation (#3086).
 // ABOUTME: Proves replacing an extracted npm symlink never overwrites its JavaScript target.
 
 import {
@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { replaceRuntimeShim } from "../../build/darwin/prepare-embedded-runtime";
+import { replaceRuntimeShim } from "../../build/runtime-staging";
 import { expect, it } from "vitest";
 
 it("replaces an npm symlink without corrupting its target", () => {

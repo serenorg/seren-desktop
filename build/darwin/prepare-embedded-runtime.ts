@@ -7,9 +7,15 @@ import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import { execSync } from 'child_process';
 import { pathToFileURL } from 'url';
+import {
+	clearStagedNodeVersion,
+	ensureRuntimeShims,
+	readStagedNodeVersion,
+	writeStagedNodeVersion
+} from '../runtime-staging';
 
 // Version configuration - update these for new releases
-const NODE_VERSION = '22.12.0';
+export const NODE_VERSION = '22.12.0';
 const GIT_VERSION = '2.47.1';
 
 // Node.js download URLs for macOS
@@ -25,12 +31,6 @@ const NODE_DOWNLOADS: Record<string, { url: string }> = {
 interface DownloadOptions {
 	arch: 'x64' | 'arm64';
 	outputDir: string;
-}
-
-/** Replace an extracted symlink with a regular wrapper without touching its target. */
-export function replaceRuntimeShim(wrapperPath: string, contents: string): void {
-	fs.rmSync(wrapperPath, { force: true });
-	fs.writeFileSync(wrapperPath, contents, { mode: 0o755 });
 }
 
 async function downloadFile(url: string, dest: string): Promise<void> {
@@ -69,40 +69,28 @@ async function extractTarGz(archivePath: string, destDir: string): Promise<void>
 	execSync(`tar -xzf "${archivePath}" -C "${destDir}"`, { stdio: 'inherit' });
 }
 
-/**
- * Replace the extracted bin/npm, bin/npx and bin/corepack symlinks with shell
- * wrappers.
- *
- * Tauri resolves symlinks into regular files when bundling the .app, which
- * breaks `require('../lib/cli.js')` because the path resolves relative to bin/
- * rather than lib/node_modules/npm/bin/ where the symlink target lives. A shell
- * wrapper computes its own directory at runtime and stays correct whether or
- * not Tauri has dereferenced it.
- */
-export function ensureRuntimeShims(nodeDir: string): void {
-	const npmWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npm-cli.js" "$@"\n`;
-	const npxWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/npm/bin/npx-cli.js" "$@"\n`;
-	const corepackWrapper = `#!/bin/sh\nexec "$(dirname "$0")/node" "$(dirname "$0")/../lib/node_modules/corepack/dist/corepack.js" "$@"\n`;
-	replaceRuntimeShim(path.join(nodeDir, 'bin', 'npm'), npmWrapper);
-	replaceRuntimeShim(path.join(nodeDir, 'bin', 'npx'), npxWrapper);
-	replaceRuntimeShim(path.join(nodeDir, 'bin', 'corepack'), corepackWrapper);
-	console.log('Replaced bin/npm, bin/npx, and bin/corepack with Tauri-safe shell wrappers.');
-}
-
 export async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	const { arch, outputDir } = options;
 	const nodeConfig = NODE_DOWNLOADS[arch];
 	const nodeDir = path.join(outputDir, 'node');
 
 	if (fs.existsSync(nodeDir)) {
-		console.log(`Node.js directory already exists at ${nodeDir}, skipping download...`);
-		// The download is skippable; the wrappers are not. A tree extracted
-		// before this step existed still holds the original symlinks, and Tauri
-		// dereferences those at bundle time (#3152).
-		ensureRuntimeShims(nodeDir);
-		return nodeDir;
+		const stagedVersion = readStagedNodeVersion(outputDir);
+		if (stagedVersion === NODE_VERSION) {
+			console.log(`Node.js ${NODE_VERSION} already staged at ${nodeDir}, skipping download...`);
+			// The download is skippable; the wrappers are not. A tree extracted
+			// before this step existed still holds the original symlinks, and Tauri
+			// dereferences those at bundle time (#3152).
+			ensureRuntimeShims(nodeDir);
+			return nodeDir;
+		}
+		// A cached tree of any other (or unrecorded) version must not ship while
+		// embedded-runtime.json claims NODE_VERSION (#3450).
+		console.log(`Staged Node.js at ${nodeDir} is ${stagedVersion ?? 'of unrecorded version'}, expected ${NODE_VERSION}; re-staging...`);
+		fs.rmSync(nodeDir, { recursive: true, force: true });
 	}
 
+	clearStagedNodeVersion(outputDir);
 	fs.mkdirSync(nodeDir, { recursive: true });
 
 	const tarPath = path.join(outputDir, `node-${arch}.tar.gz`);
@@ -128,6 +116,7 @@ export async function prepareNodejs(options: DownloadOptions): Promise<string> {
 	fs.unlinkSync(tarPath);
 
 	ensureRuntimeShims(nodeDir);
+	writeStagedNodeVersion(outputDir, NODE_VERSION);
 
 	console.log(`Node.js prepared at ${nodeDir}`);
 	return nodeDir;
