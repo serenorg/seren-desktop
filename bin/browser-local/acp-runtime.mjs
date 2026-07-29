@@ -569,6 +569,22 @@ function attachProcessListeners(emit, sessions, session) {
     console.error(`${logPrefix} process error: ${error.message}`);
   });
 
+  // Stdin write-error guard (#3432): when the agent dies while a write is in
+  // flight — the window between process death and the `close` event — the
+  // write fails with EPIPE, delivered as an `error` event on the stdin
+  // stream (emitted even when the write supplied a callback, as sendRequest
+  // does). Without a listener the event rethrows as an uncaughtException,
+  // killing the entire shared provider-runtime helper and every live agent
+  // session with it. Log and hard-kill this child so `close` — the single
+  // cleanup path — fails just this session; killChildTree is a no-op when
+  // the child is already dead.
+  session.process.stdin.on("error", (error) => {
+    console.error(
+      `${logPrefix} stdin write failed: ${error?.message ?? String(error)}`,
+    );
+    killChildTree(session.process);
+  });
+
   session.process.on("close", () => {
     const wasTracked = sessions.delete(session.id);
     if (!wasTracked) return;
