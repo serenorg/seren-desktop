@@ -5,6 +5,7 @@ use log;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{Mutex, mpsc, watch};
@@ -20,6 +21,7 @@ use super::router;
 use super::subtask_context::{
     MAX_CONTEXT_SUBTASKS, MAX_SUBTASK_RESULT_BYTES, inject_dependency_results,
 };
+use super::tool_bridge::ToolResultBridge;
 use super::trust;
 use super::types::{
     DelegationType, ImageAttachment, OrchestratorEvent, RoutingDecision, SkillRef, SubTask,
@@ -36,9 +38,19 @@ const COMMUNITY_PRIOR_TIMEOUT_MS: u64 = 200;
 // Orchestrator State
 // =============================================================================
 
+/// One registered orchestration run for a conversation.
+///
+/// `run_token` records which `orchestrate()` call owns the entry so that a
+/// stale cleanup — a run that already lost the slot — can never evict a newer
+/// run's session and strand its cancel channel (see GH #3444).
+struct ActiveSession {
+    cancel_tx: watch::Sender<bool>,
+    run_token: u64,
+}
+
 /// Managed state for the orchestrator, tracking active sessions for cancellation.
 pub struct OrchestratorState {
-    /// Map of conversation_id → cancellation flag sender.
+    /// Map of conversation_id → active run (cancellation sender + ownership token).
     ///
     /// Uses a watch channel rather than a oneshot so that:
     /// - A single `send(true)` signals all consumers (forward-loop select,
@@ -50,14 +62,68 @@ pub struct OrchestratorState {
     /// - Sessions are removed only in `orchestrate()` cleanup, not on the
     ///   first cancel, so subsequent clicks during the same run find the
     ///   session and are silently absorbed.
-    active_sessions: Mutex<HashMap<String, watch::Sender<bool>>>,
+    active_sessions: Mutex<HashMap<String, ActiveSession>>,
+    /// Monotonic source of `ActiveSession::run_token` values.
+    run_counter: AtomicU64,
 }
 
 impl OrchestratorState {
     pub fn new() -> Self {
         Self {
             active_sessions: Mutex::new(HashMap::new()),
+            run_counter: AtomicU64::new(0),
         }
+    }
+
+    /// Register a run for `conversation_id`, returning its ownership token.
+    ///
+    /// Rejects when a run is already active for the conversation (GH #3444).
+    /// Overwriting the entry instead would drop the first run's cancel sender
+    /// — leaving it uncancellable and hot-spinning its forward loop on a
+    /// closed watch channel — and the first run's cleanup would then evict
+    /// the second run's entry. The frontend serializes sends per
+    /// conversation, so a concurrent second call is always a bug or a race;
+    /// the rejection surfaces through the `orchestrate` invoke error as the
+    /// conversation's error message.
+    async fn register_session(
+        &self,
+        conversation_id: &str,
+        cancel_tx: watch::Sender<bool>,
+    ) -> Result<u64, String> {
+        let mut sessions = self.active_sessions.lock().await;
+        if sessions.contains_key(conversation_id) {
+            return Err(format!(
+                "A response is already in progress for conversation {}. \
+                 Stop it or wait for it to finish before sending another message.",
+                conversation_id
+            ));
+        }
+        let run_token = self.run_counter.fetch_add(1, Ordering::Relaxed);
+        sessions.insert(
+            conversation_id.to_string(),
+            ActiveSession {
+                cancel_tx,
+                run_token,
+            },
+        );
+        Ok(run_token)
+    }
+
+    /// Remove the session entry only if `run_token` still owns it.
+    ///
+    /// Returns whether an entry was removed. A cleanup arriving from a run
+    /// that no longer owns the slot leaves the current run's entry — and its
+    /// cancellability — untouched (GH #3444).
+    async fn release_session(&self, conversation_id: &str, run_token: u64) -> bool {
+        let mut sessions = self.active_sessions.lock().await;
+        if sessions
+            .get(conversation_id)
+            .is_some_and(|session| session.run_token == run_token)
+        {
+            sessions.remove(conversation_id);
+            return true;
+        }
+        false
     }
 }
 
@@ -279,6 +345,53 @@ async fn cancel_worker_or_timeout(worker: &dyn Worker, timeout: Duration) -> boo
         return false;
     }
     true
+}
+
+/// Cancel and abort every worker already spawned in the current layer.
+///
+/// Used when spawning a layer fails partway (GH #3445): without this, the
+/// workers spawned before the failure keep executing — and spending — with no
+/// supervisor. Bounded per-worker cancel (GH #3433) followed by task abort
+/// mirrors the Stop path.
+async fn abort_layer<T>(workers: &[Arc<dyn Worker>], handles: &[tokio::task::JoinHandle<T>]) {
+    for worker in workers {
+        cancel_worker_or_timeout(worker.as_ref(), WORKER_CANCEL_TIMEOUT).await;
+    }
+    for handle in handles {
+        handle.abort();
+    }
+}
+
+/// Set the terminal status on an orchestration plan row.
+///
+/// Shared by the normal completion path and the mid-layer failure path
+/// (GH #3445) so a plan can never be left `'active'` forever; extracted so
+/// the SQL is testable without an `AppHandle`.
+fn finalize_plan_row(
+    conn: &rusqlite::Connection,
+    plan_id: &str,
+    status: &str,
+    completed_at: i64,
+) -> Result<usize, rusqlite::Error> {
+    conn.execute(
+        "UPDATE orchestration_plans SET status = ?1, completed_at = ?2 WHERE id = ?3",
+        rusqlite::params![status, completed_at, plan_id],
+    )
+}
+
+/// Persist a plan's terminal status. Best-effort: a database failure is not
+/// allowed to mask the orchestration outcome being returned to the caller.
+async fn finalize_plan(app: &AppHandle, plan_id: &str, status: &str) {
+    let app = app.clone();
+    let plan_id = plan_id.to_string();
+    let status = status.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = crate::services::database::init_db(&app) {
+            let _ = finalize_plan_row(&conn, &plan_id, &status, now_millis());
+        }
+    })
+    .await
+    .ok();
 }
 
 // =============================================================================
@@ -534,12 +647,10 @@ pub async fn orchestrate(
     // 3. Register cancellation. A watch channel lets the cancel flag be
     //    observed by every retry iteration and every cancellable sleep; a
     //    oneshot would be consumed by the first observer and leave later
-    //    iterations uncancellable (see GH #1581).
+    //    iterations uncancellable (see GH #1581). Registration rejects a
+    //    concurrent run for the same conversation (see GH #3444).
     let (cancel_tx, cancel_rx) = watch::channel(false);
-    {
-        let mut sessions = state.active_sessions.lock().await;
-        sessions.insert(conversation_id.clone(), cancel_tx);
-    }
+    let run_token = state.register_session(&conversation_id, cancel_tx).await?;
 
     // 4. Branch: single task (fast path) vs multi-task (parallel execution)
     let result = if subtasks.len() <= 1 {
@@ -571,10 +682,24 @@ pub async fn orchestrate(
         .await
     };
 
-    // 5. Clean up session
-    {
-        let mut sessions = state.active_sessions.lock().await;
-        sessions.remove(&conversation_id);
+    // 5. Clean up session — only if this run still owns the entry, so a
+    //    stale cleanup can never evict a newer run's session (GH #3444).
+    state.release_session(&conversation_id, run_token).await;
+
+    // Drop any frontend tool-call bridge entries this conversation still has
+    // pending. A worker aborted by Stop leaves its entry behind (nothing else
+    // removes it until the next main-view reload), and a still-running
+    // detached worker awaiting one of these observes the drop as a closed
+    // channel and finishes with "Tool execution was cancelled" (GH #3446).
+    if let Some(bridge) = app.try_state::<ToolResultBridge>() {
+        let purged = bridge.remove_for_conversation(&conversation_id).await;
+        if purged > 0 {
+            log::info!(
+                "[Orchestrator] Purged {} pending frontend tool call(s) for conversation {}",
+                purged,
+                conversation_id
+            );
+        }
     }
 
     result
@@ -1262,6 +1387,11 @@ async fn execute_multi_task(
 
         let mut handles = Vec::new();
         let mut active_workers: Vec<Arc<dyn Worker>> = Vec::new();
+        // An error while spawning this layer's workers must not return past
+        // the ones already spawned — they would keep running unsupervised and
+        // the plan row would stay 'active' forever (GH #3445). Capture the
+        // error, stop spawning, and clean up below instead.
+        let mut layer_spawn_error: Option<String> = None;
 
         for subtask in layer {
             // Compute rankings for this subtask's task_type
@@ -1302,7 +1432,13 @@ async fn execute_multi_task(
             }
 
             // Load skill content
-            let skill_content = load_skill_content(&routing.selected_skills)?;
+            let skill_content = match load_skill_content(&routing.selected_skills) {
+                Ok(content) => content,
+                Err(e) => {
+                    layer_spawn_error = Some(e);
+                    break;
+                }
+            };
 
             // Emit transition per subtask
             let transition = TransitionEvent {
@@ -1310,11 +1446,19 @@ async fn execute_multi_task(
                 model_name: routing.model_id.clone(),
                 task_description: routing.reason.clone(),
             };
-            app.emit("orchestrator://transition", &transition)
-                .map_err(|e| format!("Failed to emit transition: {}", e))?;
+            if let Err(e) = app.emit("orchestrator://transition", &transition) {
+                layer_spawn_error = Some(format!("Failed to emit transition: {}", e));
+                break;
+            }
 
             // Spawn worker — keep Arc clone for cancellation
-            let worker = create_worker(&routing, app, capabilities)?;
+            let worker = match create_worker(&routing, app, capabilities) {
+                Ok(worker) => worker,
+                Err(e) => {
+                    layer_spawn_error = Some(e);
+                    break;
+                }
+            };
             active_workers.push(Arc::clone(&worker));
             let subtask_prompt = subtask.prompt.clone();
             let subtask_id = subtask.id.clone();
@@ -1391,6 +1535,23 @@ async fn execute_multi_task(
             });
 
             handles.push(handle);
+        }
+
+        // A mid-layer spawn failure: stop the workers already spawned, close
+        // the forwarding loop, and finalize the plan row before surfacing the
+        // error (GH #3445).
+        if let Some(spawn_error) = layer_spawn_error {
+            log::error!(
+                "[Orchestrator] Layer {} spawn failed after {} worker(s) started; cleaning up: {}",
+                layer_idx,
+                active_workers.len(),
+                spawn_error
+            );
+            abort_layer(&active_workers, &handles).await;
+            drop(shared_tx);
+            let _ = forward_handle.await;
+            finalize_plan(app, &plan_id, "failed").await;
+            return Err(spawn_error);
         }
 
         // Wait for all workers in this layer before starting next
@@ -1484,22 +1645,7 @@ async fn execute_multi_task(
     let _ = forward_handle.await;
 
     // Mark plan as completed
-    let app_for_complete = app.clone();
-    let plan_id_for_complete = plan_id.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        if let Ok(conn) = crate::services::database::init_db(&app_for_complete) {
-            let completed_at = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as i64;
-            let _ = conn.execute(
-                "UPDATE orchestration_plans SET status = 'completed', completed_at = ?1 WHERE id = ?2",
-                rusqlite::params![completed_at, plan_id_for_complete],
-            );
-        }
-    })
-    .await
-    .ok();
+    finalize_plan(app, &plan_id, "completed").await;
 
     log::info!(
         "[Orchestrator] Completed multi-task orchestration for conversation {} (plan {})",
@@ -1519,8 +1665,8 @@ async fn execute_multi_task(
 /// "No active session" warnings (see GH #1581).
 pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<(), String> {
     let sessions = state.active_sessions.lock().await;
-    if let Some(cancel_tx) = sessions.get(conversation_id) {
-        if *cancel_tx.borrow() {
+    if let Some(session) = sessions.get(conversation_id) {
+        if *session.cancel_tx.borrow() {
             // Already cancelling — user clicked Stop again while the
             // orchestrator was still winding down. That is normal.
             log::debug!(
@@ -1529,7 +1675,7 @@ pub async fn cancel(state: &OrchestratorState, conversation_id: &str) -> Result<
             );
             return Ok(());
         }
-        let _ = cancel_tx.send(true);
+        let _ = session.cancel_tx.send(true);
         log::info!(
             "[Orchestrator] Sent cancel signal for conversation {}",
             conversation_id
@@ -1867,10 +2013,7 @@ mod tests {
         // Stop clicks during the unwind find the session and are silent.
         let state = OrchestratorState::new();
         let (tx, mut rx) = watch::channel(false);
-        {
-            let mut sessions = state.active_sessions.lock().await;
-            sessions.insert("test-conv".to_string(), tx);
-        }
+        state.register_session("test-conv", tx).await.unwrap();
 
         assert!(cancel(&state, "test-conv").await.is_ok());
 
@@ -1948,10 +2091,7 @@ mod tests {
         // map until orchestrate() exits.
         let state = OrchestratorState::new();
         let (tx, _rx) = watch::channel(false);
-        {
-            let mut sessions = state.active_sessions.lock().await;
-            sessions.insert("test-conv".to_string(), tx);
-        }
+        state.register_session("test-conv", tx).await.unwrap();
 
         for _ in 0..3 {
             assert!(cancel(&state, "test-conv").await.is_ok());
@@ -1960,7 +2100,7 @@ mod tests {
         // Session is still registered (orchestrate() will clean it up).
         let sessions = state.active_sessions.lock().await;
         assert!(sessions.contains_key("test-conv"));
-        assert!(*sessions.get("test-conv").unwrap().borrow());
+        assert!(*sessions.get("test-conv").unwrap().cancel_tx.borrow());
     }
 
     // =========================================================================
@@ -2025,6 +2165,144 @@ mod tests {
         let worker = CancelProbeWorker { hang_cancel: false };
         let resolved = cancel_worker_or_timeout(&worker, WORKER_CANCEL_TIMEOUT).await;
         assert!(resolved, "responsive cancel must resolve inside the bound");
+    }
+
+    // =========================================================================
+    // Session ownership guard (GH #3444 regression tests)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn second_register_for_same_conversation_is_rejected() {
+        // Contract (GH #3444): a concurrent second orchestrate for the same
+        // conversation must be rejected, not replace the first run's session.
+        // Replacing would drop run 1's cancel sender — leaving it
+        // uncancellable and hot-spinning its forward loop on a closed watch
+        // channel — while run 1's cleanup would then evict run 2's entry.
+        let state = OrchestratorState::new();
+        let (tx1, mut rx1) = watch::channel(false);
+        state
+            .register_session("conv", tx1)
+            .await
+            .expect("first register succeeds");
+
+        let (tx2, _rx2) = watch::channel(false);
+        let second = state.register_session("conv", tx2).await;
+        let err = second.expect_err("second concurrent register must be rejected");
+        assert!(
+            err.contains("already in progress"),
+            "rejection must explain the conflict, got: {err}"
+        );
+
+        // First run stays cancellable through the session map.
+        assert!(cancel(&state, "conv").await.is_ok());
+        rx1.changed()
+            .await
+            .expect("first run's cancel channel must stay live");
+        assert!(*rx1.borrow());
+    }
+
+    #[tokio::test]
+    async fn stale_release_does_not_evict_newer_run() {
+        // Contract (GH #3444): cleanup removes the session entry only when
+        // the finishing run still owns it. A stale release (older token)
+        // must leave the newer run's entry — and its cancellability — intact.
+        let state = OrchestratorState::new();
+        let (tx1, _rx1) = watch::channel(false);
+        let token1 = state.register_session("conv", tx1).await.unwrap();
+        assert!(state.release_session("conv", token1).await);
+
+        let (tx2, mut rx2) = watch::channel(false);
+        let token2 = state.register_session("conv", tx2).await.unwrap();
+        assert_ne!(token1, token2, "each run must get its own token");
+
+        assert!(
+            !state.release_session("conv", token1).await,
+            "a stale release must be a no-op"
+        );
+        {
+            let sessions = state.active_sessions.lock().await;
+            assert!(
+                sessions.contains_key("conv"),
+                "the newer run's session must survive a stale release"
+            );
+        }
+
+        // The newer run is still cancellable, and its own release works.
+        assert!(cancel(&state, "conv").await.is_ok());
+        rx2.changed().await.unwrap();
+        assert!(*rx2.borrow());
+        assert!(state.release_session("conv", token2).await);
+    }
+
+    // =========================================================================
+    // Mid-layer spawn failure cleanup (GH #3445 regression tests)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn abort_layer_cancels_workers_and_aborts_handles() {
+        // Contract (GH #3445): when spawning a layer fails partway (e.g. the
+        // transition emit fails because the webview is gone), the workers
+        // already spawned must be cancelled and their tasks aborted instead
+        // of running — and spending — unsupervised. Hung-cancel boundedness
+        // is covered by hung_worker_cancel_unblocks_stop_at_timeout.
+        let workers: Vec<Arc<dyn Worker>> = vec![
+            Arc::new(CancelProbeWorker { hang_cancel: false }),
+            Arc::new(CancelProbeWorker { hang_cancel: false }),
+        ];
+        let handles: Vec<tokio::task::JoinHandle<()>> = (0..2)
+            .map(|_| tokio::spawn(std::future::pending::<()>()))
+            .collect();
+
+        abort_layer(&workers, &handles).await;
+
+        for handle in handles {
+            let joined = handle.await;
+            assert!(
+                joined.expect_err("pending task must not complete").is_cancelled(),
+                "spawned layer tasks must be aborted"
+            );
+        }
+    }
+
+    #[test]
+    fn finalize_plan_row_sets_terminal_status() {
+        // Contract (GH #3445): the mid-layer failure path must finalize the
+        // plan row so it can never sit 'active' forever.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE orchestration_plans (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                original_prompt TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at INTEGER NOT NULL,
+                completed_at INTEGER
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at)
+             VALUES ('p1', 'c1', 'prompt', 'active', 1000)",
+            [],
+        )
+        .unwrap();
+
+        let updated = finalize_plan_row(&conn, "p1", "failed", 2000).unwrap();
+        assert_eq!(updated, 1);
+
+        let (status, completed_at): (String, i64) = conn
+            .query_row(
+                "SELECT status, completed_at FROM orchestration_plans WHERE id = 'p1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "failed");
+        assert_eq!(completed_at, 2000);
+
+        // Finalizing a plan that does not exist touches nothing.
+        assert_eq!(finalize_plan_row(&conn, "missing", "failed", 3000).unwrap(), 0);
     }
 
     // =========================================================================

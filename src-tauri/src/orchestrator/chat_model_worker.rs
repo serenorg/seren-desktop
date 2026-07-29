@@ -1632,6 +1632,37 @@ created if missing.",
         name: &str,
         arguments: &str,
     ) -> (String, bool) {
+        // Bound the wait. A call registered by a still-running worker *after* a
+        // main-view reload (its response arrived post-drain) has no renderer to
+        // submit or drain it, and an unbounded await would hang the worker — and
+        // leak its tokio task — forever (#3350). The frontend's own 5-minute
+        // approval timeout settles a live request well before this, so a genuine
+        // long human review is never cut off; this only backstops the
+        // renderer-gone case.
+        const FRONTEND_TOOL_RESULT_TIMEOUT: std::time::Duration =
+            std::time::Duration::from_secs(8 * 60);
+        Self::execute_frontend_tool_with_timeout(
+            app,
+            conversation_id,
+            tool_call_id,
+            name,
+            arguments,
+            FRONTEND_TOOL_RESULT_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `execute_frontend_tool` with the result wait bound as a parameter, so
+    /// the timeout branch is exercisable in tests without an 8-minute wait.
+    /// Generic over the runtime for the same reason as `guard_completion`.
+    async fn execute_frontend_tool_with_timeout<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        conversation_id: &str,
+        tool_call_id: &str,
+        name: &str,
+        arguments: &str,
+        result_timeout: std::time::Duration,
+    ) -> (String, bool) {
         log::info!(
             "[ChatModelWorker] Frontend tool execution starting: {} (id: {}, args: {})",
             name,
@@ -1640,7 +1671,7 @@ created if missing.",
         );
 
         let bridge = app.state::<ToolResultBridge>();
-        let rx = bridge.register(tool_call_id).await;
+        let rx = bridge.register(conversation_id, tool_call_id).await;
         log::debug!(
             "[ChatModelWorker] Tool bridge registered for {}",
             tool_call_id
@@ -1662,20 +1693,14 @@ created if missing.",
                 name,
                 e
             );
+            // Nothing can ever submit a request that was never delivered —
+            // drop the entry instead of leaking it (GH #3446).
+            bridge.remove(tool_call_id).await;
             return (format!("Failed to request tool execution: {}", e), true);
         }
         log::debug!("[ChatModelWorker] Tool request emitted, waiting for frontend result");
 
-        // Bound the wait. A call registered by a still-running worker *after* a
-        // main-view reload (its response arrived post-drain) has no renderer to
-        // submit or drain it, and an unbounded await would hang the worker — and
-        // leak its tokio task — forever (#3350). The frontend's own 5-minute
-        // approval timeout settles a live request well before this, so a genuine
-        // long human review is never cut off; this only backstops the
-        // renderer-gone case.
-        const FRONTEND_TOOL_RESULT_TIMEOUT: std::time::Duration =
-            std::time::Duration::from_secs(8 * 60);
-        match tokio::time::timeout(FRONTEND_TOOL_RESULT_TIMEOUT, rx).await {
+        match tokio::time::timeout(result_timeout, rx).await {
             Ok(Ok(result)) => {
                 log::info!(
                     "[ChatModelWorker] Frontend tool completed: {} (is_error={}, result_len={})",
@@ -1698,6 +1723,11 @@ created if missing.",
                     "[ChatModelWorker] Frontend tool result timed out for {} — the app view likely reloaded before it returned",
                     name
                 );
+                // The receiver is gone; only `submit` or a page-load drain
+                // would ever remove the entry, and neither is coming. Remove
+                // it here so it does not linger until the next main-view
+                // reload and swallow a stray late submit (GH #3446).
+                bridge.remove(tool_call_id).await;
                 (
                     "Tool execution was interrupted: no result returned before the wait elapsed \
                      (the app view may have reloaded). The action did not complete; ask again to retry."
@@ -3514,6 +3544,44 @@ mod tests {
         assert!(
             system_msg.contains(&current_year),
             "system prompt must include the current year so stamped dates are fresh"
+        );
+    }
+
+    #[tokio::test]
+    async fn frontend_tool_timeout_removes_bridge_entry() {
+        // Contract (GH #3446): the frontend-tool wait backstop must clean up
+        // its own bridge entry. Before the fix, only `submit` or a page-load
+        // drain removed entries, so a timed-out call lingered until the next
+        // main-view reload and a stray late submit was silently swallowed by
+        // the dead receiver. Real bridge, real timeout path — only the wait
+        // bound is shortened.
+        let app = tauri::test::mock_builder()
+            .manage(ToolResultBridge::new())
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app");
+
+        let (content, is_error) = ChatModelWorker::execute_frontend_tool_with_timeout(
+            app.handle(),
+            "conv-1",
+            "tc_slow",
+            "gateway__gmail__post_send",
+            "{}",
+            std::time::Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(is_error, "a timed-out tool call is an error result");
+        assert!(
+            content.contains("interrupted"),
+            "timeout result must disclose the interruption, got: {content}"
+        );
+
+        // The entry is gone: a stray late submit reports no pending request
+        // instead of sending into a dead receiver.
+        let bridge = app.state::<ToolResultBridge>();
+        assert!(
+            !bridge.submit("tc_slow", "late".to_string(), false).await,
+            "the timed-out entry must have been removed from the bridge"
         );
     }
 }
