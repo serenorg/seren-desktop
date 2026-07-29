@@ -965,12 +965,32 @@ function combinePrompt(prompt, context) {
   return [contextText, prompt].filter(Boolean).join("\n\n");
 }
 
+// Split a tool name into lowercase word segments on underscore/hyphen/other
+// separators and camelCase boundaries: "mcp__fs__read_text_file" →
+// ["mcp", "fs", "read", "text", "file"], "ReadFile" → ["read", "file"].
+function toolNameSegments(toolName) {
+  return String(toolName ?? "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+// All-lowercase concatenations have no boundary for toolNameSegments to
+// split, so known read-tool spellings are matched exactly (lowercased).
+const READ_TOOL_NAMES = new Set(["read", "readfile", "notebookread"]);
+
 function toolKindForName(toolName) {
   const lower = String(toolName ?? "").toLowerCase();
   if (lower.includes("bash") || lower.includes("shell") || lower.includes("exec")) {
     return "commandExecution";
   }
-  if (lower.includes("read")) {
+  // Known names or whole-segment match only. A bare substring test
+  // classified "append_to_spreadsheet" ("sp-read-sheet") and "thread_reply"
+  // as file reads, and since #3426 the fileRead kind replaces the tool's
+  // Happy Mobile output with an "[N lines hidden]" summary — hiding real
+  // output for tools that never read a file (#3453).
+  if (READ_TOOL_NAMES.has(lower) || toolNameSegments(toolName).includes("read")) {
     return "fileRead";
   }
   if (
@@ -3652,4 +3672,5 @@ export {
   countSerenMcpTools as _countSerenMcpTools,
   SEREN_MCP_TOOL_PREFIX as _SEREN_MCP_TOOL_PREFIX,
   applySerenMcpOAuthRouting as _applySerenMcpOAuthRouting,
+  toolKindForName as _toolKindForName,
 };
