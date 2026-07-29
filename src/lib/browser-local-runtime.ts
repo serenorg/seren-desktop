@@ -313,9 +313,11 @@ export function disconnectLocalProviderRuntime(): void {
 }
 
 /**
- * Listen for provider-runtime restarts from the Rust backend.
- * When the runtime crashes and restarts on a new port, the cached config
- * (host/port/token) is stale. Disconnect so the next call re-fetches config.
+ * Listen for provider-runtime restarts and terminal failures from the Rust
+ * backend. In both cases the cached config (host/port/token) is stale.
+ * Disconnect so the next call re-fetches config — after a terminal failure
+ * (#3441) that re-fetch invokes `provider_runtime_get_config`, which spawns a
+ * fresh runtime with a fresh budget, so the user's retry works first try.
  */
 export async function listenForRuntimeRestart(): Promise<void> {
   if (!isDesktopNativeRuntime()) return;
@@ -324,6 +326,12 @@ export async function listenForRuntimeRestart(): Promise<void> {
     await listen("provider-runtime://restarted", () => {
       console.info(
         "[local-provider-runtime] Runtime restarted, invalidating cached config",
+      );
+      disconnectLocalProviderRuntime();
+    });
+    await listen("provider-runtime://failed", () => {
+      console.info(
+        "[local-provider-runtime] Runtime failed, invalidating cached config",
       );
       disconnectLocalProviderRuntime();
     });

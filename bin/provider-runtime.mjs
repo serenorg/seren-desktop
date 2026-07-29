@@ -18,15 +18,19 @@ const RUNTIME_MODE = "desktop-native";
 
 function usage() {
   console.log(`
-Usage: seren-provider-runtime [--host <address>] [--port <number>] [--token <value>]
+Usage: seren-provider-runtime [--host <address>] [--port <number>]
 
 Starts the local provider runtime used by desktop-native and browser-local flows.
 
 Options:
   --host <address>   Bind address. Default: 127.0.0.1
   --port <number>    HTTP port. Default: 0 (choose any free port)
-  --token <value>    Required WebSocket auth token. Default: random
   --help, -h         Show this help message
+
+Environment:
+  SEREN_PROVIDER_RUNTIME_TOKEN   WebSocket auth token. Default: random.
+                                 Env-only so the token never appears in argv
+                                 (visible via ps to other local users, #3442).
 `);
 }
 
@@ -53,11 +57,6 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
-    if (arg === "--token") {
-      config.token = argv[i + 1] ?? "";
-      i += 1;
-      continue;
-    }
     if (arg === "--help" || arg === "-h") {
       usage();
       process.exit(0);
@@ -65,6 +64,10 @@ function parseArgs(argv) {
     throw new Error(`Unknown argument: ${arg}`);
   }
 
+  // #3442: the token arrives via env, never argv. Drop it from process.env
+  // after reading so spawned agent CLIs do not inherit the WS credential.
+  config.token = process.env.SEREN_PROVIDER_RUNTIME_TOKEN ?? "";
+  delete process.env.SEREN_PROVIDER_RUNTIME_TOKEN;
   if (!config.token) {
     config.token = randomBytes(24).toString("hex");
   }
@@ -237,13 +240,15 @@ function startServer(config) {
   server.listen(config.port, config.host, () => {
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : config.port;
+    // #3442: the auth token stays out of this line — the desktop app logs
+    // child stdout verbatim, and Rust learns port/token via its own config,
+    // not by parsing stdout.
     console.log(
       JSON.stringify({
         ok: true,
         mode: RUNTIME_MODE,
         host: config.host,
         port,
-        token: config.token,
       }),
     );
   });
