@@ -19,14 +19,35 @@ use tauri::{Manager, State};
 /// while still surfacing a clearly-broken child in a reasonable window.
 const MCP_INITIALIZE_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Bound on post-initialize JSON-RPC requests (tools/list, tools/call,
+/// resources/*). Generous because tool calls can legitimately run long
+/// (headless browsing, large fetches), but bounded so a wedged server cannot
+/// pin a blocking-pool thread and the per-server mutex forever (#3439). On
+/// expiry the server is killed and its slot removed so queued callers fail
+/// fast instead of piling onto a dead mutex.
+const MCP_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// Global request ID counter for JSON-RPC
 static REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Handle to a server's child process, shared between the per-server slot and
+/// the stdio pipe owner. Kept OUTSIDE the per-server `McpProcess` mutex so
+/// kill paths (disconnect, timeouts, app exit) never wait behind an in-flight
+/// blocking `read_line` (#3437).
+type SharedChild = Arc<Mutex<Child>>;
 
 /// Per-server slot. Each MCP server has its own inner Mutex so one stuck
 /// server cannot block operations on any other — which was a second part of
 /// the hang bug: the old code held a single top-level Mutex across every
 /// blocking stdio read, so a slow child would freeze all MCP commands.
-type McpSlot = Arc<Mutex<McpProcess>>;
+#[derive(Clone)]
+struct McpSlot {
+    /// Pipes + request serialization; blocking stdio I/O locks this.
+    process: Arc<Mutex<McpProcess>>,
+    /// Kill-path handle to the same child, reachable without locking
+    /// `process` so a wedged read cannot make the server unkillable (#3437).
+    child: SharedChild,
+}
 
 /// State for managing MCP server processes.
 ///
@@ -56,11 +77,25 @@ impl McpState {
         };
         for (name, slot) in drained {
             log::info!("[MCP] Killing process on exit: {}", name);
-            if let Ok(mut process) = slot.lock() {
-                let _ = process.child.kill();
-            }
+            kill_and_reap(&slot.child);
         }
     }
+}
+
+/// Kill a child process and reap it with `wait()` so no zombie/defunct entry
+/// accumulates (#3437). Safe to call repeatedly and after the child already
+/// exited — both syscalls' errors are intentionally ignored.
+fn kill_and_reap(child: &SharedChild) {
+    if let Ok(mut child) = child.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+/// `kill_and_reap` on the blocking pool so async callers never park the main
+/// Tauri thread on the kill/wait syscalls.
+async fn kill_and_reap_off_main(child: SharedChild) {
+    let _ = tokio::task::spawn_blocking(move || kill_and_reap(&child)).await;
 }
 
 impl Default for McpState {
@@ -71,7 +106,7 @@ impl Default for McpState {
 
 /// Represents an active MCP server process
 struct McpProcess {
-    child: Child,
+    child: SharedChild,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     /// Buffered stderr output from the background drain thread.
@@ -153,7 +188,13 @@ pub struct McpToolResult {
     is_error: bool,
 }
 
-/// Send a JSON-RPC request and read the response
+/// Send a JSON-RPC request and read stdout lines until THIS request's
+/// response arrives. A server may interleave notifications (no `id`), its own
+/// requests (`method` + `id`), stray log lines, or stale responses to an
+/// earlier request — none of those are this call's response, and treating one
+/// as such desyncs every later call for the life of the process (#3438).
+/// Skip them and keep reading; callers bound the whole exchange with a
+/// timeout, so a server that never answers cannot spin this loop forever.
 fn send_request<T: Serialize>(
     process: &mut McpProcess,
     method: &'static str,
@@ -174,27 +215,71 @@ fn send_request<T: Serialize>(
     writeln!(process.stdin, "{}", request_str).map_err(|e| e.to_string())?;
     process.stdin.flush().map_err(|e| e.to_string())?;
 
-    // Read response
-    let mut response_line = String::new();
-    let bytes_read = process
-        .stdout
-        .read_line(&mut response_line)
-        .map_err(|e| e.to_string())?;
+    loop {
+        let mut response_line = String::new();
+        let bytes_read = process
+            .stdout
+            .read_line(&mut response_line)
+            .map_err(|e| e.to_string())?;
 
-    if bytes_read == 0 {
-        return Err("MCP process closed unexpectedly".to_string());
+        if bytes_read == 0 {
+            return Err("MCP process closed unexpectedly".to_string());
+        }
+
+        let line = response_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => {
+                // Not JSON at all — a server accidentally logging to stdout.
+                // Failing the call here would leave the real response queued
+                // in the pipe and desync every later call, so skip the line.
+                log::warn!(
+                    "[MCP] Ignoring non-JSON stdout line while waiting for '{method}' response"
+                );
+                continue;
+            }
+        };
+
+        if value.get("method").is_some() {
+            // Notification or server-initiated request — not a response.
+            log::debug!(
+                "[MCP] Skipping interleaved server message while waiting for '{method}' response"
+            );
+            continue;
+        }
+
+        match value.get("id").and_then(serde_json::Value::as_u64) {
+            Some(line_id) if line_id == id => {}
+            Some(line_id) => {
+                // Stale response to an earlier (likely timed-out) request.
+                log::warn!(
+                    "[MCP] Skipping stale response id {line_id} while waiting for id {id} ('{method}')"
+                );
+                continue;
+            }
+            None => {
+                log::debug!(
+                    "[MCP] Skipping id-less message while waiting for '{method}' response"
+                );
+                continue;
+            }
+        }
+
+        let response: JsonRpcResponse = serde_json::from_value(value)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if let Some(error) = response.error {
+            return Err(format!("MCP error {}: {}", error.code, error.message));
+        }
+
+        return response
+            .result
+            .ok_or_else(|| "No result in response".to_string());
     }
-
-    let response: JsonRpcResponse = serde_json::from_str(&response_line)
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-    if let Some(error) = response.error {
-        return Err(format!("MCP error {}: {}", error.code, error.message));
-    }
-
-    response
-        .result
-        .ok_or_else(|| "No result in response".to_string())
 }
 
 /// Initialize parameters for MCP handshake
@@ -420,11 +505,13 @@ fn spawn_stderr_drain(
 
 /// Collect diagnostic context from a failed MCP process.
 /// Checks exit code and stderr buffer to build an actionable error message.
-fn collect_process_diagnostics(process: &mut McpProcess, base_error: &str) -> String {
+fn collect_process_diagnostics(process: &McpProcess, base_error: &str) -> String {
     let mut diagnostic = base_error.to_string();
 
     // Check if the process has exited and capture the exit code
-    if let Ok(Some(status)) = process.child.try_wait() {
+    if let Ok(mut child) = process.child.lock()
+        && let Ok(Some(status)) = child.try_wait()
+    {
         let code_str = status
             .code()
             .map(|c| c.to_string())
@@ -482,6 +569,20 @@ pub async fn mcp_connect(
         args
     );
 
+    connect_stdio_server(&state, server_name, resolved_command, args, env).await
+}
+
+/// Spawn a stdio MCP server, run the bounded initialize handshake, and
+/// register the slot. Split from the `mcp_connect` command wrapper so the
+/// full child lifecycle (timeout kill, displaced-slot kill) is exercisable
+/// from tests without a Tauri runtime.
+async fn connect_stdio_server(
+    state: &McpState,
+    server_name: String,
+    resolved_command: String,
+    args: Vec<String>,
+    env: Option<HashMap<String, String>>,
+) -> Result<McpInitializeResult, String> {
     let mut cmd = Command::new(&resolved_command);
     cmd.args(&args)
         .stdin(Stdio::piped())
@@ -537,79 +638,36 @@ pub async fn mcp_connect(
     };
 
     let process = McpProcess {
-        child,
+        child: Arc::new(Mutex::new(child)),
         stdin,
         stdout: BufReader::new(stdout),
         stderr_buffer,
     };
 
-    // Send initialize request on the blocking thread pool with a bounded
-    // timeout. `send_request` does a sync `BufRead::read_line` on the child's
-    // stdout — we MUST NOT run it on the main Tauri thread, or a slow /
-    // broken child will freeze the whole app (this was #1501).
-    let init_params = InitializeParams {
-        protocol_version: "2024-11-05",
-        capabilities: ClientCapabilities {},
-        client_info: ClientInfo {
-            name: "seren-desktop",
-            version: env!("CARGO_PKG_VERSION"),
-        },
-    };
+    let (mut process, result) =
+        run_initialize_handshake(process, &server_name, MCP_INITIALIZE_TIMEOUT).await?;
 
-    let server_name_for_log = server_name.clone();
-    let handshake = tokio::task::spawn_blocking(move || {
-        let mut process = process;
-        match send_request(&mut process, "initialize", Some(init_params)) {
-            Ok(value) => Ok((process, value)),
-            Err(e) => {
-                let diagnostic = collect_process_diagnostics(&mut process, &e);
-                // Kill the child so the background stderr-drain thread (and
-                // any OS resources) can be released promptly.
-                let _ = process.child.kill();
-                Err(diagnostic)
-            }
-        }
-    });
-
-    let handshake_result = tokio::time::timeout(MCP_INITIALIZE_TIMEOUT, handshake).await;
-
-    let (mut process, result) = match handshake_result {
-        Ok(Ok(Ok(pair))) => pair,
-        Ok(Ok(Err(e))) => {
-            log::error!("[MCP:{}] Initialize failed: {}", server_name_for_log, e);
-            return Err(e);
-        }
-        Ok(Err(join_err)) => {
-            let msg = format!("MCP initialize task panicked: {join_err}");
-            log::error!("[MCP:{}] {msg}", server_name_for_log);
-            return Err(msg);
-        }
-        Err(_elapsed) => {
-            // The blocking task is still running and still owns the child.
-            // We can't cancel a sync `read_line` from here, but the spawn_blocking
-            // thread is off the main Tauri thread, so the UI is NOT frozen.
-            // The task will terminate on its own when the child exits or is
-            // killed externally (e.g. next `mcp_disconnect` or app shutdown via
-            // `kill_all`). The user gets a clear, bounded error.
-            let msg = format!(
-                "MCP initialize handshake timed out after {}s — check that the server command is correct and the server emits a valid JSON-RPC response on stdout",
-                MCP_INITIALIZE_TIMEOUT.as_secs()
-            );
-            log::error!("[MCP:{}] {msg}", server_name_for_log);
-            return Err(msg);
+    let init_result: McpInitializeResult = match serde_json::from_value(result) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            // The child spoke, but not the protocol we understand. It was
+            // never registered, so kill it here or it leaks (#3437).
+            kill_and_reap_off_main(process.child.clone()).await;
+            return Err(format!("Failed to parse init result: {}", e));
         }
     };
-
-    let init_result: McpInitializeResult = serde_json::from_value(result)
-        .map_err(|e| format!("Failed to parse init result: {}", e))?;
 
     // Send initialized notification (no response expected, but we need to send it)
     let notification = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "notifications/initialized"
     });
-    writeln!(process.stdin, "{}", notification).map_err(|e| e.to_string())?;
-    process.stdin.flush().map_err(|e| e.to_string())?;
+    let notified =
+        writeln!(process.stdin, "{}", notification).and_then(|_| process.stdin.flush());
+    if let Err(e) = notified {
+        kill_and_reap_off_main(process.child.clone()).await;
+        return Err(e.to_string());
+    }
 
     log::debug!(
         "[MCP:{}] Connected successfully (server: {} v{})",
@@ -620,13 +678,90 @@ pub async fn mcp_connect(
 
     // Store the process in its own per-server slot so subsequent commands
     // lock only this server's Mutex rather than a global one.
-    state
+    let slot = McpSlot {
+        child: process.child.clone(),
+        process: Arc::new(Mutex::new(process)),
+    };
+    let displaced = state
         .processes
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(server_name, Arc::new(Mutex::new(process)));
+        .insert(server_name.clone(), slot);
+    if let Some(old) = displaced {
+        // Reconnecting under an existing name replaces the slot; kill the
+        // displaced child instead of silently orphaning it (#3437).
+        log::info!(
+            "[MCP:{}] Replaced an existing connection; killing the displaced process",
+            server_name
+        );
+        kill_and_reap_off_main(old.child).await;
+    }
 
     Ok(init_result)
+}
+
+/// Run the MCP initialize handshake on the blocking thread pool, bounded by
+/// `timeout`. `send_request` does a sync `BufRead::read_line` on the child's
+/// stdout — it must never run on the main Tauri thread, or a slow / broken
+/// child freezes the whole app (this was #1501). On timeout the child is
+/// killed and reaped before returning: that prevents the process leak
+/// (#3437) and the resulting EOF unblocks the reader so the blocking task
+/// exits instead of pinning a blocking-pool thread for the app's lifetime.
+async fn run_initialize_handshake(
+    process: McpProcess,
+    server_name: &str,
+    timeout: Duration,
+) -> Result<(McpProcess, serde_json::Value), String> {
+    let init_params = InitializeParams {
+        protocol_version: "2024-11-05",
+        capabilities: ClientCapabilities {},
+        client_info: ClientInfo {
+            name: "seren-desktop",
+            version: env!("CARGO_PKG_VERSION"),
+        },
+    };
+
+    let child = process.child.clone();
+    let handshake = tokio::task::spawn_blocking(move || {
+        let mut process = process;
+        match send_request(&mut process, "initialize", Some(init_params)) {
+            Ok(value) => Ok((process, value)),
+            Err(e) => {
+                let diagnostic = collect_process_diagnostics(&process, &e);
+                // Kill the child so the background stderr-drain thread (and
+                // any OS resources) can be released promptly, and reap it so
+                // no zombie lingers (#3437).
+                kill_and_reap(&process.child);
+                Err(diagnostic)
+            }
+        }
+    });
+
+    match tokio::time::timeout(timeout, handshake).await {
+        Ok(Ok(Ok(pair))) => Ok(pair),
+        Ok(Ok(Err(e))) => {
+            log::error!("[MCP:{}] Initialize failed: {}", server_name, e);
+            Err(e)
+        }
+        Ok(Err(join_err)) => {
+            let msg = format!("MCP initialize task panicked: {join_err}");
+            log::error!("[MCP:{}] {msg}", server_name);
+            Err(msg)
+        }
+        Err(_elapsed) => {
+            // The blocking task still owns the pipes, parked in `read_line`.
+            // Kill the child through the shared handle: the process cannot
+            // leak, and the EOF lets the blocking task finish and release
+            // its thread (#3437).
+            kill_and_reap_off_main(child).await;
+            let msg = format!(
+                "MCP initialize handshake timed out after {}s — the server process was terminated; check that the server command is correct and the server emits a valid JSON-RPC response on stdout",
+                timeout.as_secs()
+            );
+            log::error!("[MCP:{}] {msg}", server_name);
+            Err(msg)
+        }
+    }
 }
 
 /// Look up a server's slot without holding the outer `Mutex` across I/O.
@@ -641,10 +776,14 @@ fn lookup_slot(state: &McpState, server_name: &str) -> Result<McpSlot, String> {
 }
 
 /// Run `send_request` against a server on the blocking thread pool so the main
-/// Tauri thread never parks on `BufRead::read_line`. Used by every command
-/// that needs to exchange a JSON-RPC message with a local MCP child process.
+/// Tauri thread never parks on `BufRead::read_line`, bounded by
+/// `MCP_REQUEST_TIMEOUT`. Used by every command that needs to exchange a
+/// JSON-RPC message with a local MCP child process. On expiry the server's
+/// child is killed and its slot removed so queued callers fail fast instead
+/// of piling onto the dead server's mutex (#3439).
 async fn run_request_off_main<T, R>(
-    slot: McpSlot,
+    state: &McpState,
+    server_name: &str,
     method: &'static str,
     params: Option<T>,
 ) -> Result<R, String>
@@ -652,16 +791,57 @@ where
     T: Serialize + Send + 'static,
     R: serde::de::DeserializeOwned + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || -> Result<R, String> {
-        let mut process = slot
+    run_request_with_timeout(state, server_name, method, params, MCP_REQUEST_TIMEOUT).await
+}
+
+async fn run_request_with_timeout<T, R>(
+    state: &McpState,
+    server_name: &str,
+    method: &'static str,
+    params: Option<T>,
+    timeout: Duration,
+) -> Result<R, String>
+where
+    T: Serialize + Send + 'static,
+    R: serde::de::DeserializeOwned + Send + 'static,
+{
+    let slot = lookup_slot(state, server_name)?;
+    let process = slot.process.clone();
+    let request = tokio::task::spawn_blocking(move || -> Result<R, String> {
+        let mut process = process
             .lock()
             .map_err(|e| format!("MCP process mutex poisoned: {e}"))?;
         let value = send_request(&mut *process, method, params)?;
         serde_json::from_value::<R>(value)
             .map_err(|e| format!("Failed to parse {method} response: {e}"))
-    })
-    .await
-    .map_err(|e| format!("MCP {method} task panicked: {e}"))?
+    });
+
+    match tokio::time::timeout(timeout, request).await {
+        Ok(joined) => joined.map_err(|e| format!("MCP {method} task panicked: {e}"))?,
+        Err(_elapsed) => {
+            // Remove the slot first so new callers fail fast with a clear
+            // "not connected" error, then kill the wedged child — the EOF
+            // unblocks the reader holding the per-server mutex, so callers
+            // already queued behind it error out promptly too (#3439).
+            remove_slot_if_same(state, server_name, &slot);
+            kill_and_reap_off_main(slot.child.clone()).await;
+            Err(format!(
+                "MCP '{method}' request to server '{server_name}' timed out after {}s — the server has been disconnected; reconnect it to try again",
+                timeout.as_secs()
+            ))
+        }
+    }
+}
+
+/// Remove a server's slot only if it is still the same connection the caller
+/// timed out against — a concurrent reconnect must not lose its fresh slot.
+fn remove_slot_if_same(state: &McpState, server_name: &str, slot: &McpSlot) {
+    if let Ok(mut processes) = state.processes.lock()
+        && let Some(current) = processes.get(server_name)
+        && Arc::ptr_eq(&current.process, &slot.process)
+    {
+        processes.remove(server_name);
+    }
 }
 
 /// Disconnect from an MCP server.
@@ -680,13 +860,9 @@ pub async fn mcp_disconnect(
     };
 
     if let Some(slot) = removed {
-        tokio::task::spawn_blocking(move || {
-            if let Ok(mut process) = slot.lock() {
-                let _ = process.child.kill();
-            }
-        })
-        .await
-        .map_err(|e| format!("MCP disconnect task panicked: {e}"))?;
+        tokio::task::spawn_blocking(move || kill_and_reap(&slot.child))
+            .await
+            .map_err(|e| format!("MCP disconnect task panicked: {e}"))?;
     }
 
     Ok(())
@@ -698,8 +874,8 @@ pub async fn mcp_list_tools(
     state: State<'_, McpState>,
     server_name: String,
 ) -> Result<Vec<McpTool>, String> {
-    let slot = lookup_slot(&state, &server_name)?;
-    let response: ToolsListResponse = run_request_off_main(slot, "tools/list", None::<()>).await?;
+    let response: ToolsListResponse =
+        run_request_off_main(&state, &server_name, "tools/list", None::<()>).await?;
     Ok(response.tools)
 }
 
@@ -714,9 +890,8 @@ pub async fn mcp_list_resources(
     state: State<'_, McpState>,
     server_name: String,
 ) -> Result<Vec<McpResource>, String> {
-    let slot = lookup_slot(&state, &server_name)?;
     let response: ResourcesListResponse =
-        run_request_off_main(slot, "resources/list", None::<()>).await?;
+        run_request_off_main(&state, &server_name, "resources/list", None::<()>).await?;
     Ok(response.resources)
 }
 
@@ -747,12 +922,11 @@ pub async fn mcp_call_tool(
         &tool_name,
         &crate::tool_authorization::binding_for_publisher_args(&arguments),
     )?;
-    let slot = lookup_slot(&state, &server_name)?;
     let params = serde_json::json!({
         "name": tool_name,
         "arguments": arguments
     });
-    run_request_off_main(slot, "tools/call", Some(params)).await
+    run_request_off_main(&state, &server_name, "tools/call", Some(params)).await
 }
 
 /// Read a resource from an MCP server
@@ -762,9 +936,8 @@ pub async fn mcp_read_resource(
     server_name: String,
     uri: String,
 ) -> Result<serde_json::Value, String> {
-    let slot = lookup_slot(&state, &server_name)?;
     let params = serde_json::json!({ "uri": uri });
-    run_request_off_main(slot, "resources/read", Some(params)).await
+    run_request_off_main(&state, &server_name, "resources/read", Some(params)).await
 }
 
 /// Check if an MCP server is connected
@@ -1146,6 +1319,13 @@ pub async fn mcp_list_connected_http(
 // whole operation returns a timeout error within a bounded wall-clock time
 // rather than hanging. A regression on either `spawn_blocking` or
 // `tokio::time::timeout` would fail this test.
+//
+// The same module covers the transport-hardening contracts, all against real
+// child processes (no mocks): #3437 (timeout/displaced children are killed
+// AND reaped — no orphans, no zombies), #3438 (responses are matched by id
+// past interleaved notifications, log lines, and stale responses), and #3439
+// (post-initialize requests are bounded and a timed-out server's slot is
+// removed so callers fail fast).
 // ============================================================================
 
 #[cfg(test)]
@@ -1335,36 +1515,267 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
-    /// Spawn a child that reads stdin forever but never writes to stdout.
-    /// Returns both the constructed `McpProcess` and the OS pid so the test
-    /// can SIGKILL the child after asserting the timeout fired — without
-    /// killing the child the inner spawn_blocking task would never return,
-    /// leaking a thread and blocking tokio runtime shutdown.
-    fn spawn_hung_child() -> (McpProcess, u32) {
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg("cat > /dev/null")
+    /// Spawn a real stdio child and wrap it in an `McpProcess`. Returns the
+    /// OS pid too, so tests can assert liveness/reaping independently of the
+    /// process handle.
+    fn spawn_stdio_child(command: &str, args: &[&str]) -> (McpProcess, u32) {
+        let mut child = Command::new(command)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("failed to spawn hung-child test process");
+            .expect("failed to spawn stdio test child");
 
         let pid = child.id();
         let stdin = child.stdin.take().expect("test child stdin");
         let stdout = child.stdout.take().expect("test child stdout");
         let stderr_buffer = match child.stderr.take() {
-            Some(stderr) => spawn_stderr_drain(stderr, "hung-child-test".to_string()),
+            Some(stderr) => spawn_stderr_drain(stderr, "stdio-test-child".to_string()),
             None => Arc::new(Mutex::new(String::new())),
         };
 
         let process = McpProcess {
-            child,
+            child: Arc::new(Mutex::new(child)),
             stdin,
             stdout: BufReader::new(stdout),
             stderr_buffer,
         };
         (process, pid)
+    }
+
+    /// Spawn a child that reads stdin forever but never writes to stdout.
+    /// Without killing the child, a blocked `read_line` in a spawn_blocking
+    /// task would never return, leaking a thread and blocking tokio runtime
+    /// shutdown.
+    fn spawn_hung_child() -> (McpProcess, u32) {
+        spawn_stdio_child("sh", &["-c", "cat > /dev/null"])
+    }
+
+    /// True while the OS still knows the pid — including zombies. That is
+    /// what makes it usable as a reap probe: kill WITHOUT wait leaves a
+    /// `<defunct>` entry that still answers signal 0; kill + wait removes
+    /// the pid entirely (ESRCH).
+    fn pid_exists(pid: u32) -> bool {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    /// A real stdio JSON-RPC server (POSIX sh). Before answering every
+    /// request it emits a notification, a non-JSON log line, and a stale
+    /// response under a different id — the exact interleavings from #3438.
+    /// The client must skip all three and return only the id-matched
+    /// response.
+    const FAKE_NOISY_SERVER: &str = r#"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  [ -z "$id" ] && continue
+  printf '{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"noise"}}\n'
+  printf 'plain log line that is not JSON\n'
+  printf '{"jsonrpc":"2.0","id":%s,"result":{"stale":true}}\n' "$((id + 999))"
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"fake-mcp","version":"1.0.0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"echoes input","inputSchema":{"type":"object"}}]}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+  esac
+done
+"#;
+
+    fn write_fake_server(dir: &std::path::Path) -> PathBuf {
+        let script = dir.join("fake-mcp-server.sh");
+        std::fs::write(&script, FAKE_NOISY_SERVER).expect("write fake server script");
+        script
+    }
+
+    /// #3438: the client must find its response behind a notification, a
+    /// non-JSON log line, and a stale response — and must stay in sync on
+    /// the next call (the one-line reader desynced permanently here).
+    #[test]
+    fn send_request_skips_noise_and_matches_response_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let script = write_fake_server(tmp.path());
+        let (mut process, pid) = spawn_stdio_child("sh", &[script.to_str().unwrap()]);
+
+        let result = send_request::<()>(&mut process, "tools/list", None)
+            .expect("id-matched response must be returned despite interleaved noise");
+        assert_eq!(result["tools"][0]["name"], "echo");
+
+        let again = send_request::<()>(&mut process, "tools/list", None)
+            .expect("second request must stay in sync");
+        assert_eq!(again["tools"][0]["name"], "echo");
+
+        kill_and_reap(&process.child);
+        assert!(!pid_exists(pid));
+    }
+
+    /// #3437: a child that starts but never speaks JSON-RPC must be killed
+    /// and reaped when the initialize handshake times out — a live orphan or
+    /// a zombie both keep the pid visible to signal 0.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn initialize_handshake_timeout_kills_and_reaps_child() {
+        let (process, pid) = spawn_hung_child();
+
+        let started = Instant::now();
+        let err = run_initialize_handshake(process, "hung-server", Duration::from_millis(300))
+            .await
+            .err()
+            .expect("a child that never answers must time out");
+
+        assert!(err.contains("timed out"), "unexpected error: {err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "timeout must fire promptly, took {:?}",
+            started.elapsed()
+        );
+        assert!(
+            !pid_exists(pid),
+            "handshake-timeout child must be killed and reaped, not leaked"
+        );
+    }
+
+    /// #3439: a wedged server must not hang a request forever — the call
+    /// times out, the slot is removed so later callers fail fast, and the
+    /// child is killed and reaped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn request_timeout_disconnects_slot_and_kills_child() {
+        let state = McpState::new();
+        let (process, pid) = spawn_hung_child();
+        let slot = McpSlot {
+            child: process.child.clone(),
+            process: Arc::new(Mutex::new(process)),
+        };
+        state
+            .processes
+            .lock()
+            .unwrap()
+            .insert("wedged".to_string(), slot);
+
+        let err = run_request_with_timeout::<(), serde_json::Value>(
+            &state,
+            "wedged",
+            "tools/list",
+            None,
+            Duration::from_millis(300),
+        )
+        .await
+        .expect_err("a wedged server must time out");
+
+        assert!(
+            err.contains("disconnected"),
+            "error must tell the user the server was disconnected: {err}"
+        );
+        assert!(
+            state.processes.lock().unwrap().is_empty(),
+            "timed-out server slot must be removed"
+        );
+        assert!(
+            !pid_exists(pid),
+            "timed-out server child must be killed and reaped"
+        );
+
+        let follow_up = run_request_with_timeout::<(), serde_json::Value>(
+            &state,
+            "wedged",
+            "tools/list",
+            None,
+            Duration::from_secs(5),
+        )
+        .await
+        .expect_err("requests to a removed server must fail immediately");
+        assert!(
+            follow_up.contains("not connected"),
+            "unexpected error: {follow_up}"
+        );
+    }
+
+    /// #3437: every kill site must reap. Kill without wait leaves a
+    /// `<defunct>` entry that still answers signal 0.
+    #[test]
+    fn kill_and_reap_leaves_no_zombie() {
+        let (process, pid) = spawn_hung_child();
+        assert!(pid_exists(pid), "child must be alive before the kill");
+
+        kill_and_reap(&process.child);
+
+        assert!(
+            !pid_exists(pid),
+            "child must be fully reaped, not left as a zombie"
+        );
+    }
+
+    /// Full lifecycle against the real noisy fake server: connect (handshake
+    /// survives interleaved noise — #3438), reconnect under the same name
+    /// (displaced child killed and reaped — #3437), tools/list through the
+    /// command path (#3438), disconnect (killed and reaped — #3437).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connect_kills_displaced_child_and_disconnect_reaps() {
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock app builds");
+        app.manage(McpState::default());
+
+        let tmp = tempfile::tempdir().unwrap();
+        let script = write_fake_server(tmp.path()).to_string_lossy().to_string();
+        // The spawn path replaces PATH with the embedded runtime dirs, which
+        // don't contain `sed`; pin a PATH the fake sh server works with.
+        let env = Some(HashMap::from([(
+            "PATH".to_string(),
+            "/usr/bin:/bin".to_string(),
+        )]));
+
+        let state = app.state::<McpState>();
+        let init = connect_stdio_server(
+            &state,
+            "dup".to_string(),
+            "sh".to_string(),
+            vec![script.clone()],
+            env.clone(),
+        )
+        .await
+        .expect("first connect succeeds against the noisy fake server");
+        assert_eq!(init.server_info.name, "fake-mcp");
+
+        let pid_of = |name: &str| -> u32 {
+            let processes = state.processes.lock().unwrap();
+            processes.get(name).unwrap().child.lock().unwrap().id()
+        };
+        let pid1 = pid_of("dup");
+
+        connect_stdio_server(
+            &state,
+            "dup".to_string(),
+            "sh".to_string(),
+            vec![script],
+            env,
+        )
+        .await
+        .expect("reconnect under the same name succeeds");
+        let pid2 = pid_of("dup");
+        assert_ne!(pid1, pid2);
+        assert!(
+            !pid_exists(pid1),
+            "displaced child must be killed and reaped"
+        );
+        assert_eq!(state.processes.lock().unwrap().len(), 1);
+
+        let tools = mcp_list_tools(app.state(), "dup".to_string())
+            .await
+            .expect("tools/list works through interleaved noise");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "echo");
+
+        mcp_disconnect(app.state(), "dup".to_string())
+            .await
+            .expect("disconnect succeeds");
+        assert!(
+            !pid_exists(pid2),
+            "disconnected child must be killed and reaped"
+        );
     }
 
     /// Force-terminate a child by PID via SIGKILL. Used to unstick a hung
@@ -1439,6 +1850,22 @@ mod tests {
             MCP_INITIALIZE_TIMEOUT >= Duration::from_secs(5),
             "MCP_INITIALIZE_TIMEOUT too aggressive; got {:?}",
             MCP_INITIALIZE_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn mcp_request_timeout_constant_is_bounded() {
+        // The request bound must exist (#3439) but stay generous enough for
+        // legitimately slow tools — expiry disconnects the whole server.
+        assert!(
+            MCP_REQUEST_TIMEOUT <= Duration::from_secs(600),
+            "MCP_REQUEST_TIMEOUT must stay bounded; got {:?}",
+            MCP_REQUEST_TIMEOUT
+        );
+        assert!(
+            MCP_REQUEST_TIMEOUT >= Duration::from_secs(30),
+            "MCP_REQUEST_TIMEOUT too aggressive for slow real tools; got {:?}",
+            MCP_REQUEST_TIMEOUT
         );
     }
 }
