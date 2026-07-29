@@ -15,6 +15,7 @@ import {
   type ReceivedTransferNotificationSummary,
   type WalletBalance,
 } from "@/services/wallet";
+import { authStore } from "@/stores/auth.store";
 
 export type LatestReceivedTransfer = ReceivedTransferNotificationSummary;
 
@@ -68,7 +69,12 @@ const initialState: WalletState = {
   dailyClaimTimerId: null,
 };
 
-const [walletState, setWalletState] = createStore<WalletState>(initialState);
+// Copy so the store never adopts `initialState` as its backing target — Solid
+// wraps the passed object in place, and writing mutations through into
+// `initialState` turns the `setWalletState(initialState)` reset into a no-op.
+const [walletState, setWalletState] = createStore<WalletState>({
+  ...initialState,
+});
 
 // Refresh interval in milliseconds (60 seconds)
 const REFRESH_INTERVAL = 60_000;
@@ -494,8 +500,12 @@ function dismissDailyClaim(): void {
  * or a session that crossed midnight UTC. A fresh eligibility fetch keeps the
  * midnight boundary honest; on a transient failure the existing state is left
  * untouched (mirroring the poll) so a launch is never blocked or falsely reset.
+ * Signed-out sessions skip the fetch entirely — agents are launchable without
+ * a Seren account, and an unauthenticated eligibility call is a guaranteed 401
+ * that only feeds diagnostics noise (#3451).
  */
 async function surfaceDailyClaimIfEligible(): Promise<void> {
+  if (!authStore.isAuthenticated) return;
   try {
     const eligibility = await fetchDailyEligibility();
     setWalletState("dailyClaim", eligibility);
