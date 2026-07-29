@@ -80,10 +80,10 @@ function isAuthRequiredError(message) {
   );
 }
 
-function startProcess(command, args, label) {
+function startProcess(command, args, label, extraEnv) {
   const child = spawn(command, args, {
     cwd: ROOT,
-    env: process.env,
+    env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -466,10 +466,10 @@ async function main() {
       HOST,
       "--port",
       String(PROVIDER_RUNTIME_PORT),
-      "--token",
-      PROVIDER_RUNTIME_TOKEN,
     ],
     "provider-runtime",
+    // #3442: the runtime accepts its WS auth token via env only, never argv.
+    { SEREN_PROVIDER_RUNTIME_TOKEN: PROVIDER_RUNTIME_TOKEN },
   );
 
   const cleanup = () => {

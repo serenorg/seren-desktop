@@ -159,7 +159,7 @@ impl ProviderRuntimeState {
                 deadline.as_secs(),
             );
 
-            pipe_child_output(&mut child);
+            pipe_child_output(&mut child, &config.token);
 
             match wait_for_provider_runtime_with_deadline(&config, &mut child, *deadline).await {
                 Ok(()) => {
@@ -490,11 +490,14 @@ fn spawn_node_process(
         .arg(host)
         .arg("--port")
         .arg(port.to_string())
-        .arg("--token")
-        .arg(token)
         .kill_on_drop(true)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // serenorg/seren-desktop#3442 — the WS auth token rides an env var, never
+    // argv: argv is readable via `ps` by every local user, which defeats the
+    // point of authenticating the localhost socket.
+    command.env("SEREN_PROVIDER_RUNTIME_TOKEN", token);
 
     #[cfg(windows)]
     {
@@ -539,15 +542,16 @@ fn spawn_node_process(
         .map_err(|err| format!("Failed to spawn provider runtime: {err}"))
 }
 
-fn pipe_child_output(child: &mut Child) {
+fn pipe_child_output(child: &mut Child, ws_token: &str) {
     if let Some(stdout) = child.stdout.take() {
+        let token = ws_token.to_string();
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) => log::info!(
                         "[ProviderRuntime stdout] {}",
-                        redact_provider_child_output(&line)
+                        redact_provider_child_output(&line, &token)
                     ),
                     Ok(None) => break,
                     Err(err) => {
@@ -560,13 +564,14 @@ fn pipe_child_output(child: &mut Child) {
     }
 
     if let Some(stderr) = child.stderr.take() {
+        let token = ws_token.to_string();
         tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             loop {
                 match lines.next_line().await {
                     Ok(Some(line)) => log::warn!(
                         "[ProviderRuntime stderr] {}",
-                        redact_provider_child_output(&line)
+                        redact_provider_child_output(&line, &token)
                     ),
                     Ok(None) => break,
                     Err(err) => {
@@ -582,9 +587,13 @@ fn pipe_child_output(child: &mut Child) {
 /// Child-process output reaches the desktop log verbatim unless it is scrubbed
 /// here. Resolve the current runtime environment at capture time so newly
 /// issued session leases and future Seren secret variables are covered too.
-fn redact_provider_child_output(line: &str) -> String {
+/// The WS auth token is scrubbed by value (#3442): it lives only in the child
+/// environment, so the parent-env scan below cannot see it, yet the runtime or
+/// one of its children could still echo it into a logged line.
+fn redact_provider_child_output(line: &str, ws_token: &str) -> String {
     let runtime_secret_values = std::env::vars()
-        .filter_map(|(name, value)| is_seren_secret_env_name(&name).then_some(value));
+        .filter_map(|(name, value)| is_seren_secret_env_name(&name).then_some(value))
+        .chain(std::iter::once(ws_token.to_string()));
     redact_provider_child_output_with_values(line, runtime_secret_values)
 }
 
@@ -1010,6 +1019,32 @@ mod tests {
         assert!(!redacted.contains("canary-session-secret"));
         assert!(!redacted.contains(&lease_shape));
         assert_eq!(redacted.matches("[REDACTED]").count(), 2);
+    }
+
+    /// #3442: the WS auth token is random hex, so the `seren_*` lease pattern
+    /// and the parent-env scan both miss it. It must be scrubbed by value
+    /// wherever it appears in a child output line.
+    #[test]
+    fn child_output_redacts_ws_auth_token_value() {
+        let token = "0f0e0d0c0b0a09080706050403020100aabbccdd";
+        let redacted = redact_provider_child_output(
+            &format!(r#"{{"ok":true,"host":"127.0.0.1","port":4317,"token":"{token}"}}"#),
+            token,
+        );
+        assert!(!redacted.contains(token));
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(redacted.contains("\"port\":4317"));
+    }
+
+    /// An empty secret value (e.g. an unset token) must not corrupt the line
+    /// with zero-width replacements.
+    #[test]
+    fn child_output_with_empty_secret_value_is_untouched() {
+        let line = "plain runtime chatter";
+        assert_eq!(
+            redact_provider_child_output_with_values(line, vec![String::new()]),
+            line
+        );
     }
 
     /// Regression guard for #3156.

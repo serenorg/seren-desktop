@@ -92,13 +92,16 @@ describe("resetUserSessionState", () => {
     expect(sideChannelDisposeIdx).toBeGreaterThan(0);
     const sideChannelDisposeBody = source.slice(
       sideChannelDisposeIdx,
-      sideChannelDisposeIdx + 900,
+      sideChannelDisposeIdx + 1200,
     );
     expect(sideChannelDisposeBody).toContain(
       "providerRuntimeReadyListener = null;",
     );
     expect(sideChannelDisposeBody).toContain(
       "providerRuntimeRestartedListener = null;",
+    );
+    expect(sideChannelDisposeBody).toContain(
+      "providerRuntimeFailedListener = null;",
     );
     expect(sideChannelDisposeBody).toContain("cliScanRejectedUnsub?.();");
     expect(sideChannelDisposeBody).toContain(

@@ -478,6 +478,10 @@ let providerRuntimeReadyListener: Promise<UnlistenFn> | null = null;
  *  initialize() calls don't stack listeners. #1631. */
 let providerRuntimeRestartedListener: Promise<UnlistenFn> | null = null;
 
+/** Set once we've subscribed to `provider-runtime://failed` so repeated
+ *  initialize() calls don't stack listeners. #3441. */
+let providerRuntimeFailedListener: Promise<UnlistenFn> | null = null;
+
 /** Set once we've subscribed to remote Happy archive notifications so the
  *  sidebar and serving pointers cannot outlive the archived DB row. */
 let agentConversationArchivedListener: Promise<UnlistenFn> | null = null;
@@ -536,6 +540,10 @@ function disposeAgentStoreSideChannelListeners(): void {
   const restartedListener = providerRuntimeRestartedListener;
   providerRuntimeRestartedListener = null;
   disposeTauriListener(restartedListener, "provider-runtime restarted");
+
+  const failedListener = providerRuntimeFailedListener;
+  providerRuntimeFailedListener = null;
+  disposeTauriListener(failedListener, "provider-runtime failed");
 
   const archivedListener = agentConversationArchivedListener;
   agentConversationArchivedListener = null;
@@ -694,6 +702,82 @@ function subscribeToProviderRuntimeRestarted(): void {
             );
           }
         })();
+      }
+    },
+  );
+}
+
+/** Terminal message for the inline error bubble when the provider runtime is
+ *  gone for good. Retry is genuinely actionable: a fresh send re-invokes
+ *  `ensure_started`, which gets a brand-new spawn budget. #3441. */
+export const PROVIDER_RUNTIME_FAILED_MESSAGE =
+  "The agent runtime crashed and could not be restarted. Retry to relaunch it, or restart Seren if this keeps happening.";
+
+/** Compute the store transition for `provider-runtime://failed`: every live
+ *  session belongs to the dead runtime process and must drop; every thread
+ *  with an in-flight turn flips to a terminal error so its stalled stream
+ *  surfaces a retry instead of hanging until an unrelated RPC fails. #3441. */
+export function planProviderRuntimeFailure(
+  sessions: Record<string, { conversationId: string }>,
+  threadStates: Record<string, { turnInFlight: boolean }>,
+): { droppedSessionIds: string[]; failedThreadIds: string[] } {
+  const droppedSessionIds = Object.keys(sessions);
+  const failedThreadIds = [
+    ...new Set(
+      Object.values(sessions)
+        .map((session) => session.conversationId)
+        .filter((threadId) => threadStates[threadId]?.turnInFlight === true),
+    ),
+  ];
+  return { droppedSessionIds, failedThreadIds };
+}
+
+/**
+ * Subscribe once to `provider-runtime://failed`. The Rust crash monitor emits
+ * this when the auto-restart budget is exhausted (or the final restart attempt
+ * failed) — the runtime is gone and no `restarted` event will follow (#2563).
+ * Without a listener the UI showed a stalled stream until some later RPC
+ * failed generically (#3441). Mirrors the `restarted` teardown, minus the
+ * silent re-dispatch: there is no live runtime to re-dispatch against, so
+ * in-flight turns surface the terminal error bubble with its retry link.
+ */
+function subscribeToProviderRuntimeFailed(): void {
+  if (providerRuntimeFailedListener) return;
+  providerRuntimeFailedListener = listen<{ attempts?: number; error?: string }>(
+    "provider-runtime://failed",
+    (event) => {
+      console.error(
+        "[AgentStore] provider-runtime://failed — restart budget exhausted:",
+        event.payload,
+      );
+      const { droppedSessionIds, failedThreadIds } = planProviderRuntimeFailure(
+        state.sessions,
+        state.threadStates,
+      );
+      // Flip the error before dropping sessions so the auto-report still
+      // captures model/provider/tool-call context from the live session.
+      for (const threadId of failedThreadIds) {
+        agentStore.setTurnError(
+          threadId,
+          "crash_ceiling",
+          PROVIDER_RUNTIME_FAILED_MESSAGE,
+        );
+      }
+      for (const id of droppedSessionIds) terminatedSessionIds.add(id);
+      setState(
+        produce((draft) => {
+          for (const id of droppedSessionIds) delete draft.sessions[id];
+        }),
+      );
+      setState("activeSessionId", null);
+      for (const id of droppedSessionIds) {
+        // The runtime died, so its children can no longer use these keys.
+        void revokeCredentialLease(id).catch((error) => {
+          console.warn(
+            "[AgentStore] Failed to revoke runtime-failure credential lease:",
+            error,
+          );
+        });
       }
     },
   );
@@ -2830,6 +2914,7 @@ export const agentStore = {
     // to applyAgents just overwrite availableAgents with the same data.
     subscribeToProviderRuntimeReady();
     subscribeToProviderRuntimeRestarted();
+    subscribeToProviderRuntimeFailed();
     subscribeToAgentConversationArchived();
     // Surface CLI-updater scan rejections per #1646. Default-on, runs once
     // at app init, idempotent (the runtime emits the event at most once
