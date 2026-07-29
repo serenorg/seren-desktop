@@ -474,6 +474,7 @@ async function ensureCliBaselineViaUpdater(
     bareCommand,
     packageName,
     resolveBinary,
+    allowUnprobeableInstall = false,
     _runInstalledVersion = runInstalledVersion,
     _backgroundUpdateCli = backgroundUpdateCli,
   },
@@ -482,6 +483,19 @@ async function ensureCliBaselineViaUpdater(
   let resolved = resolveBinary();
   const installed = await _runInstalledVersion(resolved, bareCommand);
   if (!installed) {
+    if (allowUnprobeableInstall && resolved !== bareCommand) {
+      // A resolved install whose version probe fails is usable, not missing:
+      // on an IO-starved machine every `--version` spawn can time out
+      // (5s × 3 attempts), and failing closed here turns a slow disk into
+      // "not installed" for a healthy CLI — the v3.75.0 release gate hit
+      // exactly this (#3471). Spawn permissively; baseline enforcement
+      // resumes on the next probe that succeeds.
+      console.warn(
+        `[agent-registry] ${label} version probe failed at ${resolved}; ` +
+          `spawning without the baseline check`,
+      );
+      return resolved;
+    }
     const url = emitCliActionRequired(emit, {
       label,
       bareCommand,
@@ -560,6 +574,12 @@ async function ensureClaudeCodeCli(emit) {
       bareCommand: "claude",
       packageName: "@anthropic-ai/claude-code",
       resolveBinary: resolveInstalledClaudeBinary,
+      // Unlike Codex (a small native binary that answers --version
+      // instantly), this CLI is a large JS package whose cold start can
+      // outlive the probe timeout on a slow machine. An unprobeable version
+      // at a known install location spawns permissively (#3471), matching
+      // the custom-PATH branch below.
+      allowUnprobeableInstall: true,
     });
   }
 
