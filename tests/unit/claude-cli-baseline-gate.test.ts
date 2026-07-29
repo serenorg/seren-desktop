@@ -46,6 +46,10 @@ describe("#3443 claude-code spawn wiring enforces the baseline", () => {
     // Custom PATH installs cannot be auto-updated, but a determinately
     // below-baseline one must still be refused with an actionable error.
     expect(helper).toContain("isBelowBaseline(installed, baseline)");
+    // A large JS CLI can outlive the version-probe timeout on a slow
+    // machine; failing closed there turned a slow disk into "not
+    // installed" and broke the v3.75.0 release gate (#3471).
+    expect(helper).toContain("allowUnprobeableInstall: true");
   });
 });
 
@@ -152,5 +156,47 @@ describe("#3443 shared baseline gate decision logic", () => {
       (event) => event.name === "provider://cli-update-action-required",
     );
     expect(action?.payload.reason).toBe("installation_required");
+  });
+
+  it("spawns a resolved install permissively when the probe fails and the CLI opts in (#3471)", async () => {
+    const events: EmittedEvent[] = [];
+    const updaterCalls: unknown[] = [];
+    const result = await ensureCliBaselineViaUpdater(makeEmit(events), {
+      ...CLAUDE_BASELINE_CONFIG,
+      resolveBinary: () => "/fake/bin/claude",
+      allowUnprobeableInstall: true,
+      _runInstalledVersion: async () => null,
+      _backgroundUpdateCli: async (options: unknown) => {
+        updaterCalls.push(options);
+        return { outcome: "success" };
+      },
+    });
+
+    expect(result).toBe("/fake/bin/claude");
+    expect(updaterCalls).toHaveLength(0);
+    expect(events).toHaveLength(0);
+  });
+
+  it("still hands off an UNRESOLVED install even when the CLI opts in (#3471)", async () => {
+    await expect(
+      ensureCliBaselineViaUpdater(makeEmit([]), {
+        ...CLAUDE_BASELINE_CONFIG,
+        resolveBinary: () => "claude",
+        allowUnprobeableInstall: true,
+        _runInstalledVersion: async () => null,
+        _backgroundUpdateCli: async () => ({ outcome: "success" }),
+      }),
+    ).rejects.toThrow(/not installed in a verifiable location/);
+  });
+
+  it("keeps the strict handoff for CLIs that do not opt in — the Codex contract (#2904)", async () => {
+    await expect(
+      ensureCliBaselineViaUpdater(makeEmit([]), {
+        ...CLAUDE_BASELINE_CONFIG,
+        resolveBinary: () => "/fake/bin/codex",
+        _runInstalledVersion: async () => null,
+        _backgroundUpdateCli: async () => ({ outcome: "success" }),
+      }),
+    ).rejects.toThrow(/not installed in a verifiable location/);
   });
 });
