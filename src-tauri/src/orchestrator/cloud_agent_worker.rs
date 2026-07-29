@@ -24,6 +24,10 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 const READ_TIMEOUT_SECS: u64 = 600;
 /// Timeout for the run creation POST request (non-streaming, should return quickly).
 const CREATE_RUN_TIMEOUT_SECS: u64 = 60;
+/// Timeout for the best-effort server-side cancel POST. Stop paths must never
+/// hang: the orchestrator bounds worker cancels at WORKER_CANCEL_TIMEOUT (5s),
+/// so this request must resolve well inside that budget.
+const CANCEL_RUN_TIMEOUT_SECS: u64 = 4;
 const RUN_STREAM_ACCEPT: &str = "text/event-stream";
 
 #[derive(Debug, Deserialize)]
@@ -120,6 +124,13 @@ pub struct CloudAgentWorker {
     client: reqwest::Client,
     deployment_id: String,
     cancelled: Arc<Mutex<bool>>,
+    /// App handle captured at execute() start so cancel(&self) can make an
+    /// authenticated Gateway request without receiving the handle itself.
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Run id recorded once create_run succeeds; cancel() targets this run
+    /// server-side so Stop halts billing and cloud tool effects, not just
+    /// the local stream.
+    active_run_id: Arc<Mutex<Option<Uuid>>>,
 }
 
 impl CloudAgentWorker {
@@ -137,6 +148,8 @@ impl CloudAgentWorker {
             client,
             deployment_id,
             cancelled: Arc::new(Mutex::new(false)),
+            app_handle: Arc::new(Mutex::new(None)),
+            active_run_id: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -195,6 +208,60 @@ impl CloudAgentWorker {
             .data
             .run_id
             .ok_or_else(|| "Cloud agent did not return a run_id".to_string())
+    }
+
+    fn cancel_run_url(&self, run_id: Uuid) -> String {
+        format!(
+            "{}/publishers/seren-cloud/deployments/{}/runs/{}/cancel",
+            GATEWAY_BASE_URL, self.deployment_id, run_id
+        )
+    }
+
+    fn build_cancel_request(
+        client: &reqwest::Client,
+        token: &str,
+        url: &str,
+    ) -> reqwest::RequestBuilder {
+        client
+            .post(url)
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(CANCEL_RUN_TIMEOUT_SECS))
+    }
+
+    /// Best-effort server-side cancel of a created run. Failures are logged
+    /// and swallowed so local Stop always succeeds even when the Gateway is
+    /// unreachable or the run already reached a terminal state.
+    async fn cancel_run_server_side(&self, app: &tauri::AppHandle, run_id: Uuid) {
+        let url = self.cancel_run_url(run_id);
+        let result = authenticated_request(app, &self.client, move |client, token| {
+            Self::build_cancel_request(client, token, &url)
+        })
+        .await;
+
+        match result {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    log::info!(
+                        "[CloudAgentWorker] Cancelled cloud run {} server-side",
+                        run_id
+                    );
+                } else {
+                    log::warn!(
+                        "[CloudAgentWorker] Server-side cancel for cloud run {} returned HTTP {}",
+                        run_id,
+                        status
+                    );
+                }
+            }
+            Err(error) => {
+                log::warn!(
+                    "[CloudAgentWorker] Server-side cancel for cloud run {} failed: {}",
+                    run_id,
+                    error
+                );
+            }
+        }
     }
 
     async fn handle_output_events(
@@ -531,13 +598,106 @@ impl Worker for CloudAgentWorker {
             return Ok(());
         }
 
+        *self.app_handle.lock().await = Some(app.clone());
+
         let run_id = self.create_run(app, conversation_id, prompt).await?;
+        *self.active_run_id.lock().await = Some(run_id);
+
+        // Stop may have arrived while create_run was in flight; at that point
+        // cancel() had no run id to target, so the just-created run must be
+        // cancelled here before returning.
+        if *self.cancelled.lock().await {
+            self.cancel_run_server_side(app, run_id).await;
+            return Ok(());
+        }
+
         self.stream_run(app, run_id, &event_tx).await
     }
 
     async fn cancel(&self) -> Result<(), String> {
-        let mut cancelled = self.cancelled.lock().await;
-        *cancelled = true;
+        // Flip the local flag first: streaming must stop regardless of
+        // whether the server-side cancel below succeeds.
+        {
+            let mut cancelled = self.cancelled.lock().await;
+            *cancelled = true;
+        }
+
+        let Some(run_id) = *self.active_run_id.lock().await else {
+            return Ok(());
+        };
+        let Some(app) = self.app_handle.lock().await.clone() else {
+            return Ok(());
+        };
+
+        self.cancel_run_server_side(&app, run_id).await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_DEPLOYMENT_ID: &str = "6f3c9f1e-8f43-4a1c-9be2-0d5f0a6b7c11";
+    const TEST_RUN_ID: &str = "0b7d3c2a-5e64-4f8b-a1d9-3c2e4f5a6b7c";
+
+    #[tokio::test]
+    async fn cancel_before_run_creation_flips_flag_without_server_call() {
+        let worker = CloudAgentWorker::new(TEST_DEPLOYMENT_ID).expect("worker should build");
+
+        worker.cancel().await.expect("cancel should succeed");
+
+        assert!(*worker.cancelled.lock().await);
+        // No run id or app handle was ever recorded, so cancel() returned on
+        // the flag flip alone without constructing an HTTP request.
+        assert!(worker.active_run_id.lock().await.is_none());
+        assert!(worker.app_handle.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn cancel_url_targets_recorded_run() {
+        let worker = CloudAgentWorker::new(TEST_DEPLOYMENT_ID).expect("worker should build");
+        let run_id = Uuid::parse_str(TEST_RUN_ID).expect("valid uuid");
+        *worker.active_run_id.lock().await = Some(run_id);
+
+        let recorded = worker
+            .active_run_id
+            .lock()
+            .await
+            .expect("run id should be recorded");
+        assert_eq!(
+            worker.cancel_run_url(recorded),
+            format!(
+                "https://api.serendb.com/publishers/seren-cloud/deployments/{}/runs/{}/cancel",
+                TEST_DEPLOYMENT_ID, TEST_RUN_ID
+            )
+        );
+    }
+
+    #[test]
+    fn cancel_request_uses_post_bearer_auth_and_short_timeout() {
+        let client = reqwest::Client::new();
+        let url = format!(
+            "https://api.serendb.com/publishers/seren-cloud/deployments/{}/runs/{}/cancel",
+            TEST_DEPLOYMENT_ID, TEST_RUN_ID
+        );
+
+        let request = CloudAgentWorker::build_cancel_request(&client, "test-token", &url)
+            .build()
+            .expect("request should build");
+
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(request.url().as_str(), url);
+        assert_eq!(
+            request
+                .headers()
+                .get(reqwest::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer test-token")
+        );
+        assert_eq!(
+            request.timeout(),
+            Some(&Duration::from_secs(CANCEL_RUN_TIMEOUT_SECS))
+        );
     }
 }
