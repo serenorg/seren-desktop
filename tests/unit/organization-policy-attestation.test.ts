@@ -40,6 +40,48 @@ describe("hasNoTrainingNoRetentionAttestation", () => {
     expect(hasNoTrainingNoRetentionAttestation(policy(affirmative))).toBe(true);
   });
 
+  it("accepts a provider_configuration basis with all substantive fields valid", () => {
+    expect(
+      hasNoTrainingNoRetentionAttestation(
+        policy({
+          ...affirmative,
+          basis: "provider_configuration",
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("denies a provider_configuration basis when a substantive field is wrong", () => {
+    expect(
+      hasNoTrainingNoRetentionAttestation(
+        policy({
+          ...affirmative,
+          basis: "provider_configuration",
+          training_use: "unknown",
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("denies unknown and absent basis values", () => {
+    expect(
+      hasNoTrainingNoRetentionAttestation(
+        policy({
+          ...affirmative,
+          basis: "unrecognized_basis" as never,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      hasNoTrainingNoRetentionAttestation(
+        policy({
+          ...affirmative,
+          basis: undefined,
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("denies absent and unknown declarations", () => {
     expect(hasNoTrainingNoRetentionAttestation(undefined)).toBe(false);
     expect(

@@ -66,7 +66,11 @@ export function hasNoTrainingNoRetentionAttestation(
     attestation.output_retention === "none_after_response" &&
     attestation.derived_data_retention === "none_after_response" &&
     attestation.terms === "no_training_no_retention" &&
-    attestation.basis === "policy_administrator" &&
+    // Both recording authorities (PrivateModelsDataHandlingAttestationBasis)
+    // are accepted: the substantive data-handling fields above carry the
+    // no-training/no-retention guarantee; basis only records who attested.
+    (attestation.basis === "policy_administrator" ||
+      attestation.basis === "provider_configuration") &&
     Boolean(attestation.attested_at)
   );
 }
