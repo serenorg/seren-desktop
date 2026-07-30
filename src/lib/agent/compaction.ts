@@ -55,6 +55,9 @@ export class PredictiveCompactMutex {
  * - `skipped_nothing_to_compact`: message count is below `preserveCount`;
  *   the session was already too small to compact. Usually means a single
  *   message is gigantic — Chat fallback would not help.
+ * - `retry_still_too_long`: compaction succeeded, but the one allowed retry
+ *   was still rejected as prompt-too-long. The replacement session owns the
+ *   terminal error; recursively compacting or falling back to Chat is wrong.
  * - `cancelled`: a Stop / predictive-promotion teardown / other graceful
  *   cancel propagated up as "Task cancelled" while compaction or the
  *   retry was in flight. Not a defect — the error event handler's
@@ -67,6 +70,7 @@ export type CompactionOutcome =
   | "retried"
   | "succeeded"
   | "skipped_nothing_to_compact"
+  | "retry_still_too_long"
   | "cancelled"
   | "failed_catastrophic";
 

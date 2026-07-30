@@ -162,3 +162,42 @@ describe("#1757 — kickPredictiveCompact consumes the new result shape", () => 
     );
   });
 });
+
+describe("#3477 — a post-compaction retry cannot recursively compact", () => {
+  it("marks the replacement as the same retry generation before dispatch", () => {
+    const body = functionBody("async compactAndRetry(");
+    const marker = body.indexOf(
+      'setState("sessions", newSessionId, "compactRetryAttempted", true)',
+    );
+    const dispatch = body.indexOf(
+      "providerService.sendPrompt(newSessionId, retryPrompt)",
+    );
+
+    expect(marker).toBeGreaterThan(0);
+    expect(dispatch).toBeGreaterThan(marker);
+    expect(body).toContain('return "retry_still_too_long"');
+  });
+
+  it("handles a repeated prompt-too-long event before the first-attempt branch", () => {
+    const retryGuard = agentStoreSource.indexOf(
+      "state.sessions[sessionId]?.compactRetryAttempted === true",
+    );
+    const firstAttemptGuard = agentStoreSource.indexOf(
+      "!state.sessions[sessionId]?.promptTooLongHandled",
+      retryGuard,
+    );
+
+    expect(retryGuard).toBeGreaterThan(0);
+    expect(firstAttemptGuard).toBeGreaterThan(retryGuard);
+  });
+
+  it("terminates the replacement turn without compaction or Chat fallback", () => {
+    const body = functionBody("failCompactionRetryTooLong(sessionId:");
+
+    expect(body).toContain("this.addErrorMessage(");
+    expect(body).toContain("this.failTurnForSession(");
+    expect(body).not.toContain("compactAgentConversation");
+    expect(body).not.toContain("acceptRateLimitFallback");
+    expect(compactionSource).toContain('"retry_still_too_long"');
+  });
+});
