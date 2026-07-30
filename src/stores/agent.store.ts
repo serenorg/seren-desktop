@@ -165,6 +165,9 @@ const AGGRESSIVE_RETRY_PRESERVE_COUNT = 2;
  */
 const AGGRESSIVE_RETRY_TAIL_RATIO = 0.15;
 
+const COMPACTION_RETRY_TOO_LONG_MESSAGE =
+  "This thread is too full for the model's context window after compaction. Start a new thread to continue.";
+
 /**
  * Primary and fallback models for the compaction summarizer. Both route through
  * the public "seren" provider. The fallback is tried when the primary errors,
@@ -5797,12 +5800,30 @@ export const agentStore = {
           `[AgentStore] Compaction complete, retrying prompt on session ${newSessionId}`,
         );
         setState("sessions", newSessionId, "lastUserPrompt", lastPrompt);
+        // This is the one allowed retry for the same user turn. The replacement
+        // is a fresh session, so carry the retry-generation marker across the
+        // respawn before dispatch; otherwise another prompt-too-long event can
+        // recursively compact and terminate this session while we await it.
+        // A normal user submit resets the marker in sendPrompt. #3477.
+        setState("sessions", newSessionId, "compactRetryAttempted", true);
         // compactAndRetry bypasses store.sendPrompt (the user's UI message
         // is already on screen from the first failed attempt). Apply the
         // post-compaction prepend ourselves so the model receives the
         // structured summary banner in front of the retry. #1829.
         const retryPrompt = consumeCompactionPrepend(newSessionId, lastPrompt);
-        await providerService.sendPrompt(newSessionId, retryPrompt);
+        try {
+          await providerService.sendPrompt(newSessionId, retryPrompt);
+        } catch (retryError) {
+          const retryMessage =
+            retryError instanceof Error
+              ? retryError.message
+              : String(retryError);
+          if (isPromptTooLongError(retryMessage)) {
+            this.failCompactionRetryTooLong(newSessionId);
+            return "retry_still_too_long";
+          }
+          throw retryError;
+        }
         return "retried";
       }
       console.info(
@@ -7708,6 +7729,19 @@ export const agentStore = {
           );
         } else if (
           isPromptTooLongError(String(event.data.error)) &&
+          state.sessions[sessionId]?.compactRetryAttempted === true
+        ) {
+          // The single post-compaction retry is itself still too large.
+          // Never recurse into compaction on the fresh replacement: doing so
+          // races teardown with compactAndRetry's in-flight dispatch. The
+          // direct dispatch catch calls the same idempotent helper in case the
+          // runtime rejects without emitting this structured event. #3477.
+          console.warn(
+            "[AgentStore] Post-compaction retry is still too long — ending the turn without recursive compaction or Chat fallback",
+          );
+          this.failCompactionRetryTooLong(sessionId);
+        } else if (
+          isPromptTooLongError(String(event.data.error)) &&
           !state.sessions[sessionId]?.promptTooLongHandled
         ) {
           // Context window full — try compaction + retry before falling back.
@@ -7760,6 +7794,13 @@ export const agentStore = {
                   "This thread is too full for the model's context window and there is nothing left to compact. Start a new thread to continue.";
                 this.addErrorMessage(sessionId, terminalMessage);
                 this.failTurnForSession(sessionId, terminalMessage);
+              } else if (outcome === "retry_still_too_long") {
+                // The active replacement session already surfaced the stable
+                // terminal message. Do not fall back through the terminated
+                // serving session or start another recovery. #3477.
+                console.info(
+                  "[AgentStore] Post-compaction retry remained too long — terminal error already handled on replacement session",
+                );
               }
               return outcome;
             },
@@ -8976,6 +9017,11 @@ export const agentStore = {
     }
     // Set session-specific error instead of global error
     setState("sessions", sessionId, "error", prefixedError);
+  },
+
+  failCompactionRetryTooLong(sessionId: string): void {
+    this.addErrorMessage(sessionId, COMPACTION_RETRY_TOO_LONG_MESSAGE);
+    this.failTurnForSession(sessionId, COMPACTION_RETRY_TOO_LONG_MESSAGE);
   },
 
   // ============================================================================
