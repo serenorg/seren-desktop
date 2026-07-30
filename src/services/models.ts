@@ -1,10 +1,7 @@
 // ABOUTME: Models service for fetching the searchable AI model catalog.
-// ABOUTME: Fetches the catalog from the Seren Gateway's seren-models publisher.
+// ABOUTME: Fetches the full catalog from OpenRouter's public models endpoint.
 
-import { apiBase } from "@/lib/config";
 import { appFetch } from "@/lib/fetch";
-import { getGatewayHeaders } from "@/lib/providers/seren";
-import { unwrapPublisherBody } from "@/lib/publisher-response";
 
 export interface Model {
   id: string;
@@ -23,7 +20,7 @@ interface CatalogResponse {
   data?: CatalogModel[];
 }
 
-const CATALOG_URL = `${apiBase}/publishers/seren-models/models`;
+const CATALOG_URL = "https://openrouter.ai/api/v1/models";
 
 let cachedModels: Model[] | null = null;
 let cacheTimestamp = 0;
@@ -42,24 +39,17 @@ export const modelsService = {
     }
 
     try {
-      const response = await appFetch(CATALOG_URL, {
-        method: "GET",
-        headers: await getGatewayHeaders(CATALOG_URL),
-      });
+      const response = await appFetch(CATALOG_URL);
 
       if (!response.ok) {
-        console.warn(
-          "Failed to fetch model catalog from Seren, using defaults",
-        );
+        console.warn("Failed to fetch model catalog from OpenRouter");
         return getDefaultModels();
       }
 
-      const data = unwrapPublisherBody<CatalogResponse>(
-        await response.json(),
-      ) as CatalogResponse;
+      const data = (await response.json()) as CatalogResponse;
 
       if (!Array.isArray(data?.data) || data.data.length === 0) {
-        console.warn("Seren returned an empty model catalog, using defaults");
+        console.warn("OpenRouter returned an empty model catalog");
         return getDefaultModels();
       }
 
@@ -89,7 +79,7 @@ export const modelsService = {
       cacheTimestamp = now;
       return cachedModels;
     } catch (err) {
-      console.warn("Error fetching model catalog from Seren:", err);
+      console.warn("Error fetching model catalog from OpenRouter:", err);
       return getDefaultModels();
     }
   },
