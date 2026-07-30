@@ -157,9 +157,12 @@ pub async fn switch_thread_provider(
             // `agent_model_id` and `agent_cwd` are mirrored on the agent
             // branch and cleared on the chat branch so the row's agent-*
             // columns are coherent with `kind` rather than leaving stale
-            // agent metadata on a now-chat row. `agent_cwd` lets the
-            // sidebar group the freshly-flipped agent row by the right
-            // project before the native spawn callback fires.
+            // agent metadata on a now-chat row. A null model keeps an
+            // override only when the provider itself is unchanged; a new
+            // native agent must choose from its own model namespace.
+            // `agent_cwd` lets the sidebar group the freshly-flipped agent
+            // row by the right project before the native spawn callback
+            // fires.
             // The `selected_model` mirror uses COALESCE so a switch that
             // does not name a new model keeps the conversation's current
             // model in the compatibility column; the runtime row itself
@@ -179,9 +182,12 @@ pub async fn switch_thread_provider(
                  SET kind = ?1,
                      agent_type = ?2,
                      agent_session_id = NULL,
-                     agent_model_id = CASE WHEN ?1 = 'agent'
-                         THEN COALESCE(?3, agent_model_id)
-                         ELSE NULL END,
+                     agent_model_id = CASE
+                         WHEN ?1 != 'agent' THEN NULL
+                         WHEN ?3 IS NOT NULL THEN ?3
+                         WHEN selected_provider = ?4 THEN agent_model_id
+                         ELSE NULL
+                     END,
                      agent_cwd = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?6, agent_cwd)
                          ELSE NULL END,
@@ -407,9 +413,12 @@ mod tests {
                  SET kind = ?1,
                      agent_type = ?2,
                      agent_session_id = NULL,
-                     agent_model_id = CASE WHEN ?1 = 'agent'
-                         THEN COALESCE(?3, agent_model_id)
-                         ELSE NULL END,
+                     agent_model_id = CASE
+                         WHEN ?1 != 'agent' THEN NULL
+                         WHEN ?3 IS NOT NULL THEN ?3
+                         WHEN selected_provider = ?4 THEN agent_model_id
+                         ELSE NULL
+                     END,
                      agent_cwd = CASE WHEN ?1 = 'agent'
                          THEN COALESCE(?6, agent_cwd)
                          ELSE NULL END,
@@ -1147,6 +1156,50 @@ mod tests {
         assert_eq!(agent_type, Some("codex".to_string()));
         assert_eq!(agent_session_id, None);
         assert_eq!(agent_model_id, Some("codex-mid".to_string()));
+    }
+
+    #[test]
+    fn agent_to_agent_type_change_without_model_clears_prior_agent_model() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'claude-code',
+                     'claude-session', 'claude-fable-5[1m]',
+                     'claude-code', 'claude-fable-5[1m]')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(&conn, "t1", "codex", None, None, None, None, 2000).unwrap();
+
+        let (kind, agent_type, agent_session_id, agent_model_id, _, _) =
+            read_conv_compat(&conn, "t1");
+        assert_eq!(kind, "agent");
+        assert_eq!(agent_type, Some("codex".to_string()));
+        assert_eq!(agent_session_id, None);
+        assert_eq!(agent_model_id, None);
+    }
+
+    #[test]
+    fn same_agent_type_without_model_preserves_prior_agent_model() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'codex',
+                     'codex-session', 'gpt-5.6-sol',
+                     'codex', 'gpt-5.6-sol')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(&conn, "t1", "codex", None, None, None, None, 2000).unwrap();
+
+        let (_, _, _, agent_model_id, _, _) = read_conv_compat(&conn, "t1");
+        assert_eq!(agent_model_id, Some("gpt-5.6-sol".to_string()));
     }
 
     #[test]
