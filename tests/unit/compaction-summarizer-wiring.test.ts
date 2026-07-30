@@ -11,7 +11,13 @@ const agentStore = readFileSync(resolve("src/stores/agent.store.ts"), "utf-8");
 describe("#2106 agent compaction runs the resilient summarizer policy", () => {
   it("drives the summary through runSummarizerWithPolicy with a fallback model", () => {
     expect(agentStore).toContain("runSummarizerWithPolicy({");
-    expect(agentStore).toContain("fallbackModels: SUMMARY_FALLBACK_MODELS");
+    expect(agentStore).toContain("fetchSerenModelCatalog()");
+    expect(agentStore).toContain("resolveCompactionSummarizerModels(catalog)");
+    expect(agentStore).toContain(
+      "fallbackModels: summarizerModels?.fallbackModels ?? []",
+    );
+    expect(agentStore).not.toContain('"anthropic/claude-sonnet-4"');
+    expect(agentStore).not.toContain('"anthropic/claude-haiku-4.5"');
     expect(agentStore).toContain("deterministicFallback: () =>");
   });
 

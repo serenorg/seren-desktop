@@ -79,6 +79,7 @@ import {
   pruneCompactedHistory,
   relieveOverBudgetTail,
 } from "@/lib/compaction/prune";
+import { resolveCompactionSummarizerModels } from "@/lib/compaction/summarizer-models";
 import {
   buildDeterministicFallbackSummary,
   compactionCooldown,
@@ -167,19 +168,6 @@ const AGGRESSIVE_RETRY_TAIL_RATIO = 0.15;
 
 const COMPACTION_RETRY_TOO_LONG_MESSAGE =
   "This thread is too full for the model's context window after compaction. Start a new thread to continue.";
-
-/**
- * Primary and fallback models for the compaction summarizer. Both route through
- * the public "seren" provider. The fallback is tried when the primary errors,
- * times out, or returns an invalid summary, before the deterministic local
- * fallback. #2106.
- */
-const SUMMARY_PRIMARY_MODEL = "anthropic/claude-sonnet-4";
-// Fast, cheap model recognized by the seren provider catalog — ideal for a
-// fallback summarizer. A model id outside the catalog/migration map would be
-// rejected by the gateway, dead-ending the fallback tier before the
-// deterministic local summary. #2111.
-const SUMMARY_FALLBACK_MODELS = ["anthropic/claude-haiku-4.5"];
 
 /**
  * Global cap = 1 simultaneous predictive compaction across the whole app.
@@ -395,7 +383,11 @@ import {
   flushAgentThinkingMarkupRemainder,
 } from "@/lib/agent-thinking-markup";
 import { isLikelyAuthError } from "@/lib/auth-errors";
-import { buildChatRequest, sendProviderMessage } from "@/lib/providers";
+import {
+  buildChatRequest,
+  fetchSerenModelCatalog,
+  sendProviderMessage,
+} from "@/lib/providers";
 import {
   isPromptTooLongError,
   isRateLimitError,
@@ -5260,9 +5252,23 @@ export const agentStore = {
       // model, then a deterministic local summary. Only aborts (no-drop) when
       // none of those can produce a summary — the serving session is left
       // intact and a cooldown backs auto-compact off the failing summarizer.
+      let summarizerDiscoveryReason =
+        "Seren model catalog did not advertise a suitable summarizer";
+      let summarizerModels: ReturnType<
+        typeof resolveCompactionSummarizerModels
+      > = null;
+      try {
+        const catalog = await fetchSerenModelCatalog();
+        summarizerModels = resolveCompactionSummarizerModels(catalog);
+      } catch (error) {
+        summarizerDiscoveryReason =
+          error instanceof Error ? error.message : String(error);
+      }
+
       const summaryOutcome = await runSummarizerWithPolicy({
-        primaryModel: SUMMARY_PRIMARY_MODEL,
-        fallbackModels: SUMMARY_FALLBACK_MODELS,
+        primaryModel: summarizerModels?.primaryModel ?? null,
+        fallbackModels: summarizerModels?.fallbackModels ?? [],
+        noModelReason: summarizerDiscoveryReason,
         attempt: (model) =>
           sendProviderMessage("seren", buildChatRequest(summaryPrompt, model)),
         isAuthError: (e) => {
