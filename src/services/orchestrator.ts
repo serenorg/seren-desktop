@@ -1192,7 +1192,18 @@ function handleError(
     };
     conversationStore.setRLMProcessing(false, conversationId);
     conversationStore.finalizeStreaming(conversationId);
-    conversationStore.addMessage(errorMessage, conversationId);
+    const hasMessage = conversationStore
+      .getMessagesFor(conversationId)
+      .some((existing) => existing.id === stream.messageId);
+    if (hasMessage) {
+      conversationStore.updateMessage(
+        stream.messageId,
+        errorMessage,
+        conversationId,
+      );
+    } else {
+      conversationStore.addMessage(errorMessage, conversationId);
+    }
   } else {
     conversationStore.setError(message);
   }
