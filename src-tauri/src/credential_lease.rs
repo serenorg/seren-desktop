@@ -18,15 +18,13 @@ const DEFAULT_ORG_API_KEYS_PATH: &str = "/organizations/default/api-keys";
 const LEASE_STORE: &str = "credential-leases.json";
 const LEASE_LEDGER_KEY: &str = "orphaned_leases";
 const LEASE_EXPIRY_DAYS: u8 = 1;
-// Core now publishes and enforces a per-publisher scope grammar
-// (`publisher:*`, `publisher:<slug>`, `publisher:<slug>:operation:<id>`; see
-// seren-core#222). The lease stays `publisher:*` because a general agent
-// session does not know its publisher set at spawn — the Seren MCP catalog is
-// dynamic — so narrowing needs a per-publisher capability minted at first use,
-// not a scope-string change. One residual on the wildcard is tracked in
-// seren-core#224: for a user key it still authorizes destructive
-// seren-passwords operations. See #3194.
-const VERIFIED_LEASE_SCOPES: &[&str] = &["publisher:*"];
+// A general agent session cannot predict its publisher set at spawn because
+// the Seren MCP catalog is dynamic, so it retains the existing publisher
+// wildcard. Managed deployment mutations are a separate Core capability and
+// must be granted explicitly. Keep this at the narrow update operation needed
+// by managed update/rollback/reconciliation workflows; do not broaden it to
+// `managed-deployment:*`. See #3194 and #3489.
+const VERIFIED_LEASE_SCOPES: &[&str] = &["publisher:*", "managed-deployment:update"];
 
 /// What the renderer and provider runtime are allowed to see. The real key is
 /// deliberately absent: only the loopback broker holds it, and the capability
@@ -496,8 +494,17 @@ fn select_startup_reaper_records(records: &[LeaseLedgerEntry]) -> Vec<LeaseLedge
 mod tests {
     use super::{
         ApiKeyCreated, CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry,
-        select_startup_reaper_records,
+        VERIFIED_LEASE_SCOPES, select_startup_reaper_records,
     };
+
+    #[test]
+    fn credential_lease_requests_exact_managed_update_capability() {
+        assert_eq!(
+            VERIFIED_LEASE_SCOPES,
+            ["publisher:*", "managed-deployment:update"]
+        );
+        assert!(!VERIFIED_LEASE_SCOPES.contains(&"managed-deployment:*"));
+    }
 
     /// The renderer reads these exact names. A rename here silently leaves a
     /// session without Seren MCP, so pin the wire contract rather than trusting

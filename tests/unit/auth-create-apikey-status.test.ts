@@ -62,7 +62,28 @@ describe("createApiKey HTTP status (#2497 Defect 1)", () => {
         name: "Seren Desktop",
         key_type: undefined,
         agent_identity_id: undefined,
-        scopes: ["publisher:*"],
+        scopes: ["publisher:*", "managed-deployment:update"],
+      },
+      throwOnError: false,
+    });
+  });
+
+  it("preserves an explicit caller-supplied scope set", async () => {
+    createDefaultOrgApiKeyMock.mockResolvedValueOnce({
+      data: { data: { api_key: "seren_live_scoped" } },
+      error: undefined,
+      response: { status: 201 },
+    });
+
+    await expect(
+      createApiKey({ scopes: ["publisher:github-api"] }),
+    ).resolves.toBe("seren_live_scoped");
+    expect(createDefaultOrgApiKeyMock).toHaveBeenCalledWith({
+      body: {
+        name: "Seren Desktop",
+        key_type: undefined,
+        agent_identity_id: undefined,
+        scopes: ["publisher:github-api"],
       },
       throwOnError: false,
     });
