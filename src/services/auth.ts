@@ -288,7 +288,10 @@ export async function isLoggedIn(): Promise<boolean> {
 export { getToken };
 
 const DESKTOP_API_KEY_NAME = "Seren Desktop";
-const DESKTOP_API_KEY_SCOPES = ["publisher:*"] as const;
+const DESKTOP_API_KEY_SCOPES = [
+  "publisher:*",
+  "managed-deployment:update",
+] as const;
 
 export interface CreateApiKeyOptions {
   name?: string;
