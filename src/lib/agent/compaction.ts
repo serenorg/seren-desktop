@@ -85,6 +85,29 @@ export type CompactAgentResult = {
   newSessionId?: string;
 };
 
+export const CODEX_TURN_INPUT_MAX_CHARS = 1_048_576;
+
+const COMPACTION_PREPEND_HEADER = "[Auto-compaction restored prior context]\n";
+const COMPACTION_PREPEND_SEPARATOR = "\n\n---\n\n";
+
+export function wrapAgentCompactionPrepend(
+  prepend: string,
+  prompt: string,
+): string {
+  return `${COMPACTION_PREPEND_HEADER}${prepend}${COMPACTION_PREPEND_SEPARATOR}${prompt}`;
+}
+
+export function maxAgentCompactionPrependChars(
+  agentType: string,
+  prompt: string,
+): number | undefined {
+  if (agentType !== "codex") return undefined;
+  return Math.max(
+    0,
+    CODEX_TURN_INPUT_MAX_CHARS - wrapAgentCompactionPrepend("", prompt).length,
+  );
+}
+
 export function prunableAgentMessage(m: AgentMessage): PrunableMessage {
   return {
     id: m.id,
@@ -131,6 +154,10 @@ export function applyPrunedAgentMessages(
 export function buildAgentCompactionPrepend(
   summary: string,
   toPreserve: AgentMessage[],
+  options: {
+    maxChars?: number;
+    omitTrailingUser?: boolean;
+  } = {},
 ): string {
   // Tool messages can be enormous file contents / JSON dumps; user and
   // assistant text keep the original ceiling used by the long-standing
@@ -138,6 +165,14 @@ export function buildAgentCompactionPrepend(
   const MAX_MSG_CHARS = 2000;
   const MAX_TOOL_CHARS = 500;
   const preservedContext = toPreserve
+    .filter(
+      (m, index) =>
+        !(
+          options.omitTrailingUser === true &&
+          index === toPreserve.length - 1 &&
+          m.type === "user"
+        ),
+    )
     .map((m) => {
       if (m.type === "user" || m.type === "assistant") {
         const content =
@@ -160,11 +195,39 @@ export function buildAgentCompactionPrepend(
       }
       return null;
     })
-    .filter((s): s is string => s !== null)
-    .join("\n\n");
-  return preservedContext
-    ? `Prior work summary:\n${summary}\n\n<prior_messages>\n${preservedContext}\n</prior_messages>`
-    : `Prior work summary:\n${summary}`;
+    .filter((s): s is string => s !== null);
+
+  const maxChars = options.maxChars ?? Number.POSITIVE_INFINITY;
+  const summaryBlock = `Prior work summary:\n${summary}`;
+  if (maxChars <= 0) return "";
+  if (summaryBlock.length > maxChars) {
+    const marker = "... [truncated]";
+    if (maxChars <= marker.length) return summaryBlock.slice(0, maxChars);
+    return `${summaryBlock.slice(0, maxChars - marker.length)}${marker}`;
+  }
+  if (preservedContext.length === 0) return summaryBlock;
+
+  const prefix = `${summaryBlock}\n\n<prior_messages>\n`;
+  const suffix = "\n</prior_messages>";
+  if (prefix.length + suffix.length > maxChars) return summaryBlock;
+
+  // An aggregate character cap is independent of the per-message caps above.
+  // Keep a contiguous suffix of the preserved tail so the newest work wins
+  // when Codex's turn/start character limit cannot hold every retained item.
+  const selected: string[] = [];
+  let selectedChars = prefix.length + suffix.length;
+  for (let index = preservedContext.length - 1; index >= 0; index--) {
+    const separatorChars = selected.length > 0 ? 2 : 0;
+    const nextChars =
+      selectedChars + separatorChars + preservedContext[index].length;
+    if (nextChars > maxChars) break;
+    selected.unshift(preservedContext[index]);
+    selectedChars = nextChars;
+  }
+
+  return selected.length > 0
+    ? `${prefix}${selected.join("\n\n")}${suffix}`
+    : summaryBlock;
 }
 
 /** Claude Code model IDs that ship a 1M-token context tier behind the

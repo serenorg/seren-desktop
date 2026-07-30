@@ -20,8 +20,10 @@ import {
   type CompactAgentResult,
   type CompactionOutcome,
   defaultContextWindowFor,
+  maxAgentCompactionPrependChars,
   PredictiveCompactMutex,
   prunableAgentMessage,
+  wrapAgentCompactionPrepend,
 } from "@/lib/agent/compaction";
 import {
   planHappyArchiveInvalidation,
@@ -334,7 +336,7 @@ function consumeCompactionPrepend(sessionId: string, prompt: string): string {
   const prepend = session?.pendingCompactionPrepend;
   if (!prepend) return prompt;
   setState("sessions", sessionId, "pendingCompactionPrepend", undefined);
-  return `[Auto-compaction restored prior context]\n${prepend}\n\n---\n\n${prompt}`;
+  return wrapAgentCompactionPrepend(prepend, prompt);
 }
 
 /**
@@ -5071,9 +5073,22 @@ export const agentStore = {
           const tailReliefSummary = relief.stillOverBudget
             ? "No older transcript prefix was available to summarize. Reducible tool payloads in the preserved tail were pruned, but the retained context may still be close to the model limit."
             : "No older transcript prefix was available to summarize. Reducible tool payloads in the preserved tail were pruned before retrying the failed request.";
+          const retryPrompt =
+            session.compactRetryAttempted === true
+              ? session.lastUserPrompt
+              : undefined;
+          const retryPrependMaxChars = retryPrompt
+            ? maxAgentCompactionPrependChars(agentType, retryPrompt)
+            : undefined;
           const prependText = buildAgentCompactionPrepend(
             `${tailReliefSummary}\n\nVERIFY-BEFORE-ACTING: Files, projects, and databases mentioned above may not exist on disk. Re-read the workspace, list .worktrees/, and resolve SerenDB projects/tables before acting on any claim.`,
             toPreserve,
+            retryPrependMaxChars !== undefined
+              ? {
+                  maxChars: retryPrependMaxChars,
+                  omitTrailingUser: true,
+                }
+              : undefined,
           );
 
           try {
@@ -5336,7 +5351,23 @@ export const agentStore = {
       // the transcript inside its assistant content instead of treating
       // the block as quoted context, bleeding the prepend into the chat
       // and starving the Thinking budget. #1941.
-      const prependText = buildAgentCompactionPrepend(summary, toPreserve);
+      const retryPrompt =
+        mode === "reactive" && session.compactRetryAttempted === true
+          ? session.lastUserPrompt
+          : undefined;
+      const retryPrependMaxChars = retryPrompt
+        ? maxAgentCompactionPrependChars(agentType, retryPrompt)
+        : undefined;
+      const prependText = buildAgentCompactionPrepend(
+        summary,
+        toPreserve,
+        retryPrependMaxChars !== undefined
+          ? {
+              maxChars: retryPrependMaxChars,
+              omitTrailingUser: true,
+            }
+          : undefined,
+      );
 
       // The synthetic-transcript builder interprets this as a count of REAL
       // user turns to keep from the parent JSONL (findCutIndex in
