@@ -829,7 +829,7 @@ describe("switchChatProvider", () => {
       agent_type: "claude-code",
       agent_session_id: null,
       agent_cwd: "/Users/dev/my-project",
-      agent_model_id: "gpt-5.1-codex",
+      agent_model_id: null,
       agent_permission_mode: null,
       agent_metadata: null,
       project_id: null,
@@ -848,6 +848,9 @@ describe("switchChatProvider", () => {
     );
     expect(agentStoreMock.upsertAgentConversationFromDb).toHaveBeenCalledTimes(
       1,
+    );
+    expect(agentStoreMock.upsertAgentConversationFromDb).toHaveBeenCalledWith(
+      expect.objectContaining({ agent_model_id: null }),
     );
     expect(agentStoreMock.spawnSession).toHaveBeenCalledWith(
       "/Users/dev/my-project",
