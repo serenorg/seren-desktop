@@ -1,5 +1,5 @@
 // ABOUTME: Model selector dropdown for choosing AI models in chat.
-// ABOUTME: Shows searchable model list from the Seren catalog with provider filtering.
+// ABOUTME: Shows the searchable OpenRouter catalog with provider filtering.
 
 import type { Component } from "solid-js";
 import {
