@@ -43,6 +43,7 @@ import {
 } from "@/services/organization-policy";
 import { serenPrivateModelsAttested } from "@/services/private-models";
 import { assertPrivilegedConversationProvider } from "@/services/providers";
+import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { chatStore } from "@/stores/chat.store";
@@ -305,9 +306,31 @@ export async function orchestrate(
   // user switching providers on one thread cannot leak into orchestration
   // on another. Threads with no recorded selection fall back to the
   // user's globally-active default.
-  await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);
   const threadProvider = selectedProvider as ProviderId;
   const threadModel = conv?.selectedModel ?? providerStore.activeModel;
+  const needsLiveSerenCatalog =
+    threadProvider === "seren" &&
+    threadModel === AUTO_MODEL_ID &&
+    allowsSerenPublicModels(authStore.privateChatPolicy);
+
+  if (needsLiveSerenCatalog) {
+    try {
+      const liveModels = await getLiveSerenModelCatalog();
+      providerStore.setProviderModels("seren", liveModels);
+    } catch (error) {
+      console.warn(
+        "[orchestrator] SerenModels catalog unavailable before Auto routing:",
+        error,
+      );
+      conversationStore.setError(
+        "Seren Models could not load its current model catalog. Please retry.",
+      );
+      conversationStore.setLoading(false, conversationId);
+      return;
+    }
+  }
+
+  await skillsStore.ensureContextLoaded(fileTreeState.rootPath, conversationId);
   const capabilities = buildCapabilities(
     conversationId,
     threadProvider,
