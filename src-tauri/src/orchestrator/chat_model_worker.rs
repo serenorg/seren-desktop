@@ -174,12 +174,20 @@ struct ToolCallChunk {
     arguments: String,
 }
 
+/// Sanitized failure parsed from an SSE data payload.
+#[derive(Debug, Clone)]
+struct ParsedStreamError {
+    message: String,
+    retryable: bool,
+}
+
 /// Result of parsing a single SSE data line.
 struct ParseResult {
     events: Vec<WorkerEvent>,
     cost: Option<f64>,
     tool_call_chunks: Vec<ToolCallChunk>,
     finish_reason: Option<String>,
+    stream_error: Option<ParsedStreamError>,
 }
 
 /// Outcome of streaming an API response.
@@ -216,6 +224,73 @@ enum StreamOutcome {
 /// Permanent client errors (400, 401, 403, 404, 422, etc.) are not retryable.
 fn gateway_status_is_retryable(status: u64) -> bool {
     matches!(status, 408 | 429) || (500..600).contains(&status)
+}
+
+/// Classify provider error codes using the same transient/permanent split as
+/// gateway HTTP statuses. Unknown codes fail closed as non-retryable.
+fn embedded_stream_error_is_retryable(code: Option<&serde_json::Value>) -> bool {
+    let Some(code) = code else {
+        return false;
+    };
+
+    if let Some(status) = code.as_u64() {
+        return gateway_status_is_retryable(status);
+    }
+
+    let Some(code) = code.as_str() else {
+        return false;
+    };
+    if let Ok(status) = code.parse::<u64>() {
+        return gateway_status_is_retryable(status);
+    }
+
+    matches!(
+        code.to_ascii_lowercase().as_str(),
+        "upstream_error"
+            | "timeout"
+            | "rate_limit_exceeded"
+            | "server_error"
+            | "service_unavailable"
+    )
+}
+
+/// Extract only stable code/message fields from an embedded provider error.
+/// Provider metadata may contain request or infrastructure details, so it is
+/// intentionally excluded from the user-facing event.
+fn parse_embedded_stream_error(
+    payload: &serde_json::Value,
+) -> Option<ParsedStreamError> {
+    let error = payload.get("error")?;
+    if error.is_null() {
+        return None;
+    }
+
+    let message = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .or_else(|| error.as_str());
+    let code = error.get("code");
+    let code_text = code.and_then(|value| {
+        value
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| value.as_u64().map(|number| number.to_string()))
+    });
+
+    if message.is_none() && code_text.is_none() {
+        return None;
+    }
+
+    let message = message.unwrap_or("Model stream failed");
+    let display_message = match code_text.as_deref() {
+        Some(code) if code != message => format!("{}: {}", code, message),
+        _ => message.to_string(),
+    };
+
+    Some(ParsedStreamError {
+        message: display_message,
+        retryable: embedded_stream_error_is_retryable(code),
+    })
 }
 
 /// Extract unique publisher names from tool calls in recent conversation messages.
@@ -664,6 +739,7 @@ created if missing.",
             cost: None,
             tool_call_chunks: Vec::new(),
             finish_reason: None,
+            stream_error: None,
         };
 
         let parsed: serde_json::Value = match serde_json::from_str(data) {
@@ -692,14 +768,27 @@ created if missing.",
                     .pointer("/body/error/message")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Gateway API error");
+                let message = format!("HTTP {}: {}", status, error_msg);
                 result.events.push(WorkerEvent::Error {
-                    message: format!("HTTP {}: {}", status, error_msg),
+                    message: message.clone(),
+                });
+                result.stream_error = Some(ParsedStreamError {
+                    message,
+                    retryable: gateway_status_is_retryable(status),
                 });
                 return result;
             }
         }
 
         let effective = unwrap_publisher_body(&parsed);
+
+        if let Some(stream_error) = parse_embedded_stream_error(effective) {
+            result.events.push(WorkerEvent::Error {
+                message: stream_error.message.clone(),
+            });
+            result.stream_error = Some(stream_error);
+            return result;
+        }
 
         // Extract content delta (handles string, array-of-parts, or object with "text")
         let content_value = effective
@@ -865,7 +954,7 @@ created if missing.",
         accumulated_cost: &mut f64,
         last_finish_reason: &mut Option<String>,
         event_tx: &mpsc::Sender<WorkerEvent>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<StreamOutcome>, String> {
         if let Some(c) = result.cost {
             *accumulated_cost += c;
         }
@@ -921,7 +1010,16 @@ created if missing.",
                 .map_err(|e| format!("Failed to send event: {}", e))?;
         }
 
-        Ok(())
+        Ok(
+            result
+                .stream_error
+                .as_ref()
+                .map(|stream_error| StreamOutcome::Failed {
+                    error: stream_error.message.clone(),
+                    cost: *accumulated_cost,
+                    retryable: stream_error.retryable,
+                }),
+        )
     }
 
     /// Stream SSE response and return the outcome (complete or tool calls pending).
@@ -1019,7 +1117,7 @@ created if missing.",
                 }
 
                 let result = Self::parse_sse_data(&data_str);
-                Self::process_parse_result(
+                if let Some(failure) = Self::process_parse_result(
                     &result,
                     &mut pending_tool_calls,
                     &mut accumulated_content,
@@ -1028,7 +1126,10 @@ created if missing.",
                     &mut last_finish_reason,
                     event_tx,
                 )
-                .await?;
+                .await?
+                {
+                    return Ok(failure);
+                }
             }
         }
 
@@ -1119,7 +1220,7 @@ created if missing.",
                             break;
                         }
                         let result = Self::parse_sse_data(data_str);
-                        Self::process_parse_result(
+                        if let Some(failure) = Self::process_parse_result(
                             &result,
                             &mut pending_tool_calls,
                             &mut accumulated_content,
@@ -1128,14 +1229,17 @@ created if missing.",
                             &mut last_finish_reason,
                             event_tx,
                         )
-                        .await?;
+                        .await?
+                        {
+                            return Ok(failure);
+                        }
                     }
                 } else if let Some(body_obj) = envelope.get("body") {
                     // body is a JSON object (non-streaming response), extract content directly
                     if body_obj.is_object() {
                         log::info!("[ChatModelWorker] Gateway returned non-streaming JSON body");
                         let result = Self::parse_sse_data(&body_obj.to_string());
-                        Self::process_parse_result(
+                        if let Some(failure) = Self::process_parse_result(
                             &result,
                             &mut pending_tool_calls,
                             &mut accumulated_content,
@@ -1144,7 +1248,10 @@ created if missing.",
                             &mut last_finish_reason,
                             event_tx,
                         )
-                        .await?;
+                        .await?
+                        {
+                            return Ok(failure);
+                        }
                     }
                 }
             }
@@ -2265,42 +2372,14 @@ impl Worker for ChatModelWorker {
                         retryable,
                         total
                     );
-                    // The error event was already forwarded by stream_response,
-                    // so the destructive UI is already showing. Send a final
-                    // Complete event to clear the loading spinner — but mark
-                    // this conversation as failed in logs so metrics and
-                    // downstream consumers don't count it as a successful
-                    // completion. If tools fired this turn, backfill a recap
-                    // so the next user prompt arrives with usable history
-                    // (#1812).
-                    let failed_final_content = if tool_call_count > 0 {
-                        format!(
-                            "(Stream failed mid-turn; {} tool calls fired, {} failed.)",
-                            tool_call_count, tool_failure_count
-                        )
-                    } else {
-                        String::new()
-                    };
-                    if let Err(e) = event_tx
-                        .send(WorkerEvent::Complete {
-                            final_content: failed_final_content,
-                            thinking: None,
-                            cost: total,
-                            rlm_steps: None,
-                        })
-                        .await
-                    {
-                        log::debug!(
-                            "[ChatModelWorker] Channel closed, cannot send Complete after Failed: {}",
-                            e
-                        );
-                        return Ok(());
-                    }
                     log::info!(
-                        "[ChatModelWorker] Execution failed, breaking from tool loop (retryable={})",
+                        "[ChatModelWorker] Execution failed, returning error (retryable={})",
                         retryable
                     );
-                    break;
+                    // stream_response already forwarded WorkerEvent::Error.
+                    // Returning an error keeps the orchestrator from treating
+                    // this failed turn as a successful empty completion.
+                    return Err(error);
                 }
             }
         }
@@ -2636,7 +2715,7 @@ mod tests {
 
         for chunk in &chunks {
             let result = ChatModelWorker::parse_sse_data(chunk);
-            ChatModelWorker::process_parse_result(
+            let outcome = ChatModelWorker::process_parse_result(
                 &result,
                 &mut pending,
                 &mut content,
@@ -2647,6 +2726,7 @@ mod tests {
             )
             .await
             .unwrap();
+            assert!(outcome.is_none());
         }
 
         // Match the stream-end emission in stream_response: the worker must
@@ -2715,6 +2795,52 @@ mod tests {
                 assert!(message.contains("Insufficient credits"));
             }
             _ => panic!("Expected Error event"),
+        }
+    }
+
+    #[tokio::test]
+    async fn embedded_sse_upstream_error_returns_failed_outcome() {
+        let data = r#"{"error":{"code":"upstream_error","message":"upstream request failed","metadata":{"model":"live/model"}}}"#;
+        let result = ChatModelWorker::parse_sse_data(data);
+        let (tx, mut rx) = mpsc::channel::<WorkerEvent>(2);
+        let mut pending = HashMap::new();
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut cost = 0.0;
+        let mut finish_reason = None;
+
+        let outcome = ChatModelWorker::process_parse_result(
+            &result,
+            &mut pending,
+            &mut content,
+            &mut thinking,
+            &mut cost,
+            &mut finish_reason,
+            &tx,
+        )
+        .await
+        .expect("embedded error should process")
+        .expect("embedded error must terminate the stream");
+
+        match outcome {
+            StreamOutcome::Failed {
+                error,
+                cost,
+                retryable,
+            } => {
+                assert_eq!(error, "upstream_error: upstream request failed");
+                assert_eq!(cost, 0.0);
+                assert!(retryable);
+            }
+            other => panic!("Expected Failed outcome, got: {:?}", other),
+        }
+
+        match rx.recv().await {
+            Some(WorkerEvent::Error { message }) => {
+                assert_eq!(message, "upstream_error: upstream request failed");
+                assert!(!message.contains("live/model"));
+            }
+            other => panic!("Expected sanitized Error event, got: {:?}", other),
         }
     }
 
