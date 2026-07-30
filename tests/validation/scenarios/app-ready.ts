@@ -4,7 +4,7 @@
 import type { ScenarioContext } from "../../../scripts/validate-walkthrough";
 
 export default async function run(ctx: ScenarioContext): Promise<void> {
-  await ctx.client.waitFor("body", 30_000);
+  await ctx.client.waitFor("[data-testid='thread-sidebar']", 30_000);
   const text = await ctx.client.dumpText("body");
   await ctx.writeArtifact("ui-text.json", text);
 
