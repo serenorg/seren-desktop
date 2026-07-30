@@ -133,6 +133,39 @@ const DEFAULT_MODELS: ProviderModel[] = [
   },
 ];
 
+/**
+ * Fetch the authoritative SerenModels catalog without substituting local
+ * defaults. Callers that must only send advertised IDs can treat failures or
+ * an empty response as "no model" and use their own safe fallback.
+ */
+export async function fetchSerenModelCatalog(): Promise<ProviderModel[]> {
+  const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/models`;
+  const response = await appFetch(url, {
+    method: "GET",
+    headers: await getGatewayHeaders(url),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Seren model catalog failed: ${response.status}`);
+  }
+
+  const result = await response.json();
+  const data = unwrapPublisherBody<{
+    data?: Array<{ id: string; name?: string; context_length?: number }>;
+  }>(result) as {
+    data?: Array<{ id: string; name?: string; context_length?: number }>;
+  };
+  if (!Array.isArray(data.data) || data.data.length === 0) {
+    throw new Error("Seren model catalog returned no models");
+  }
+
+  return data.data.map((model) => ({
+    id: model.id,
+    name: model.name || model.id,
+    contextWindow: model.context_length || 128000,
+  }));
+}
+
 export async function getGatewayHeaders(
   url: string,
   includeJsonContentType = false,
@@ -446,34 +479,7 @@ export const serenProvider: ProviderAdapter = {
   async getModels(_apiKey: string): Promise<ProviderModel[]> {
     // Try to fetch from Seren's models endpoint
     try {
-      const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/models`;
-
-      const response = await appFetch(url, {
-        method: "GET",
-        headers: await getGatewayHeaders(url),
-      });
-
-      if (!response.ok) {
-        return DEFAULT_MODELS;
-      }
-
-      const result = await response.json();
-      const data = unwrapPublisherBody<{
-        data?: Array<{ id: string; name?: string; context_length?: number }>;
-      }>(result);
-      if (Array.isArray((data as { data?: unknown[] }).data)) {
-        return (
-          data as {
-            data: Array<{ id: string; name?: string; context_length?: number }>;
-          }
-        ).data.map((m) => ({
-          id: m.id,
-          name: m.name || m.id,
-          contextWindow: m.context_length || 128000,
-        }));
-      }
-
-      return DEFAULT_MODELS;
+      return await fetchSerenModelCatalog();
     } catch {
       return DEFAULT_MODELS;
     }

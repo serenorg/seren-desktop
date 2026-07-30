@@ -17,6 +17,7 @@ import type {
   ProviderModel,
 } from "./types";
 
+export { fetchSerenModelCatalog } from "./seren";
 // Re-export types
 export * from "./types";
 

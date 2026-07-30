@@ -5,10 +5,12 @@
 export type SummarizerAttempt = (model: string) => Promise<string>;
 
 export interface SummarizerPolicyInput {
-  /** Preferred summarizer model. */
-  primaryModel: string;
+  /** Preferred summarizer model, or null when live discovery found none. */
+  primaryModel: string | null;
   /** Models tried, in order, when the primary fails or returns garbage. */
   fallbackModels?: string[];
+  /** Diagnostic used when discovery cannot supply a primary model. */
+  noModelReason?: string;
   /** Invoke the summarizer with a model id. */
   attempt: SummarizerAttempt;
   /** Treat an error as an auth failure that a token refresh might fix. */
@@ -46,6 +48,7 @@ export async function runSummarizerWithPolicy(
   const {
     primaryModel,
     fallbackModels = [],
+    noModelReason,
     attempt,
     isAuthError = () => false,
     refreshAuth,
@@ -53,7 +56,7 @@ export async function runSummarizerWithPolicy(
     deterministicFallback,
   } = input;
 
-  let lastError = "unknown summarizer failure";
+  let lastError = noModelReason ?? "unknown summarizer failure";
 
   const tryModel = async (
     model: string,
@@ -70,32 +73,34 @@ export async function runSummarizerWithPolicy(
     }
   };
 
-  // Primary attempt.
-  let result = await tryModel(primaryModel);
-  if (result.ok) {
-    return {
-      status: "ok",
-      summary: result.summary,
-      model: primaryModel,
-      usedFallbackModel: false,
-    };
-  }
-  lastError = errMessage(result.err);
+  if (primaryModel) {
+    // Primary attempt.
+    let result = await tryModel(primaryModel);
+    if (result.ok) {
+      return {
+        status: "ok",
+        summary: result.summary,
+        model: primaryModel,
+        usedFallbackModel: false,
+      };
+    }
+    lastError = errMessage(result.err);
 
-  // Auth-refresh retry on the primary, once.
-  if (isAuthError(result.err) && refreshAuth) {
-    const refreshed = await refreshAuth();
-    if (refreshed) {
-      result = await tryModel(primaryModel);
-      if (result.ok) {
-        return {
-          status: "ok",
-          summary: result.summary,
-          model: primaryModel,
-          usedFallbackModel: false,
-        };
+    // Auth-refresh retry on the primary, once.
+    if (isAuthError(result.err) && refreshAuth) {
+      const refreshed = await refreshAuth();
+      if (refreshed) {
+        result = await tryModel(primaryModel);
+        if (result.ok) {
+          return {
+            status: "ok",
+            summary: result.summary,
+            model: primaryModel,
+            usedFallbackModel: false,
+          };
+        }
+        lastError = errMessage(result.err);
       }
-      lastError = errMessage(result.err);
     }
   }
 

@@ -8,6 +8,7 @@ import {
   type FallbackTurn,
   runSummarizerWithPolicy,
 } from "@/lib/compaction/summarizer-policy";
+import { resolveCompactionSummarizerModels } from "@/lib/compaction/summarizer-models";
 
 describe("#2106 runSummarizerWithPolicy", () => {
   it("returns the primary summary on success", async () => {
@@ -83,6 +84,23 @@ describe("#2106 runSummarizerWithPolicy", () => {
     }
   });
 
+  it("does not attempt inference when discovery supplied no model", async () => {
+    const attempt = vi.fn(async () => "SHOULD NOT RUN");
+    const out = await runSummarizerWithPolicy({
+      primaryModel: null,
+      noModelReason: "live catalog unavailable",
+      attempt,
+      deterministicFallback: () => "LOCAL FALLBACK SUMMARY",
+    });
+
+    expect(attempt).not.toHaveBeenCalled();
+    expect(out).toEqual({
+      status: "fallback",
+      summary: "LOCAL FALLBACK SUMMARY",
+      reason: "live catalog unavailable",
+    });
+  });
+
   it("aborts (no-drop) when no model and no deterministic fallback can produce a summary", async () => {
     const out = await runSummarizerWithPolicy({
       primaryModel: "primary",
@@ -92,6 +110,45 @@ describe("#2106 runSummarizerWithPolicy", () => {
     });
     expect(out.status).toBe("aborted");
     if (out.status === "aborted") expect(out.reason).toContain("provider unavailable");
+  });
+});
+
+describe("#3481 catalog-aware compaction model selection", () => {
+  it("uses only current advertised IDs for primary and fallback", () => {
+    const selection = resolveCompactionSummarizerModels([
+      {
+        id: "anthropic/claude-sonnet-5",
+        name: "Anthropic Claude Sonnet 5",
+        contextWindow: 1_000_000,
+      },
+      {
+        id: "deepseek/deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        contextWindow: 1_048_576,
+      },
+      {
+        id: "google/gemini-3.6-flash",
+        name: "Google Gemini 3.6 Flash",
+        contextWindow: 1_048_576,
+      },
+    ]);
+
+    expect(selection).toEqual({
+      primaryModel: "anthropic/claude-sonnet-5",
+      fallbackModels: ["deepseek/deepseek-v4-flash"],
+    });
+  });
+
+  it("returns no candidate when the catalog has no suitable summarizer", () => {
+    expect(
+      resolveCompactionSummarizerModels([
+        {
+          id: "meta-llama/llama-3.3-70b-instruct",
+          name: "Meta Llama 3.3 70B Instruct",
+          contextWindow: 131_072,
+        },
+      ]),
+    ).toBeNull();
   });
 });
 
