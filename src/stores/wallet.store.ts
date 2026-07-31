@@ -42,7 +42,7 @@ interface WalletState {
   refreshTimerId: ReturnType<typeof setInterval> | null;
   /** Daily claim eligibility data */
   dailyClaim: DailyClaimEligibility | null;
-  /** Whether user dismissed the daily claim popup this session */
+  /** Whether the daily claim popup is suppressed until an agent launch */
   dailyClaimDismissed: boolean;
   /** Whether daily claim check is in progress */
   dailyClaimLoading: boolean;
@@ -64,7 +64,7 @@ const initialState: WalletState = {
   autoRefreshActive: false,
   refreshTimerId: null,
   dailyClaim: null,
-  dailyClaimDismissed: false,
+  dailyClaimDismissed: true,
   dailyClaimLoading: false,
   dailyClaimTimerId: null,
 };
@@ -449,7 +449,8 @@ function setTopUpInProgress(inProgress: boolean): void {
 
 /**
  * Check if the user is eligible to claim daily credits.
- * Called after login to determine if popup should show.
+ * Called after login to keep wallet eligibility current without surfacing a
+ * modal before the user launches an agent.
  */
 async function checkDailyClaim(): Promise<void> {
   setWalletState("dailyClaimLoading", true);
@@ -483,6 +484,9 @@ async function claimDaily(): Promise<DailyClaimResponse> {
     reason: "Already claimed today",
     resets_in_seconds: null,
   });
+  // A completed claim should stay quiet across the next UTC reset. The next
+  // intentional agent launch can clear this suppression if a claim is due.
+  setWalletState("dailyClaimDismissed", true);
   return result;
 }
 
@@ -522,20 +526,16 @@ async function surfaceDailyClaimIfEligible(): Promise<void> {
 
 /**
  * Start periodic re-checking of daily claim eligibility.
- * Surfaces the claim popup for long-running sessions that span midnight UTC.
+ * Keeps wallet data current for non-modal UI such as the Settings banner.
+ * Only an intentional agent launch may clear popup suppression.
  */
 function startDailyClaimPolling(): void {
   if (walletState.dailyClaimTimerId) return;
 
   const timerId = setInterval(async () => {
-    const wasPreviouslyEligible = walletState.dailyClaim?.can_claim ?? false;
     try {
       const eligibility = await fetchDailyEligibility();
       setWalletState("dailyClaim", eligibility);
-      // New eligibility appeared — reset dismiss so popup re-surfaces
-      if (!wasPreviouslyEligible && eligibility.can_claim) {
-        setWalletState("dailyClaimDismissed", false);
-      }
     } catch {
       // Silently ignore — don't clear existing state on transient errors
     }

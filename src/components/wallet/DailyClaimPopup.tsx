@@ -1,4 +1,4 @@
-// ABOUTME: Modal popup for claiming daily SerenBucks credits after login.
+// ABOUTME: Modal popup for claiming daily SerenBucks credits at agent launch.
 // ABOUTME: Shows eligibility, handles claim action, and supports dismissal.
 
 import { type Component, createSignal, Show } from "solid-js";
@@ -11,7 +11,7 @@ import {
 
 /**
  * Daily SerenBucks claim popup modal.
- * Appears after login when user is eligible to claim.
+ * Appears after an authenticated agent launch when the user is eligible.
  */
 export const DailyClaimPopup: Component = () => {
   const [claiming, setClaiming] = createSignal(false);
