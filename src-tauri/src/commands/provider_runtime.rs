@@ -160,6 +160,10 @@ pub async fn switch_thread_provider(
             // agent metadata on a now-chat row. A null model keeps an
             // override only when the provider itself is unchanged; a new
             // native agent must choose from its own model namespace.
+            // `agent_permission_mode` follows the same rule: a permission
+            // mode is provider-specific (e.g. Codex `auto` is not a valid
+            // Claude mode), so a provider change clears it and the chat
+            // branch drops it; only a same-provider switch keeps it (#3506).
             // `agent_cwd` lets the sidebar group the freshly-flipped agent
             // row by the right project before the native spawn callback
             // fires.
@@ -186,6 +190,11 @@ pub async fn switch_thread_provider(
                          WHEN ?1 != 'agent' THEN NULL
                          WHEN ?3 IS NOT NULL THEN ?3
                          WHEN selected_provider = ?4 THEN agent_model_id
+                         ELSE NULL
+                     END,
+                     agent_permission_mode = CASE
+                         WHEN ?1 != 'agent' THEN NULL
+                         WHEN selected_provider = ?4 THEN agent_permission_mode
                          ELSE NULL
                      END,
                      agent_cwd = CASE WHEN ?1 = 'agent'
@@ -417,6 +426,11 @@ mod tests {
                          WHEN ?1 != 'agent' THEN NULL
                          WHEN ?3 IS NOT NULL THEN ?3
                          WHEN selected_provider = ?4 THEN agent_model_id
+                         ELSE NULL
+                     END,
+                     agent_permission_mode = CASE
+                         WHEN ?1 != 'agent' THEN NULL
+                         WHEN selected_provider = ?4 THEN agent_permission_mode
                          ELSE NULL
                      END,
                      agent_cwd = CASE WHEN ?1 = 'agent'
@@ -1200,6 +1214,63 @@ mod tests {
 
         let (_, _, _, agent_model_id, _, _) = read_conv_compat(&conn, "t1");
         assert_eq!(agent_model_id, Some("gpt-5.6-sol".to_string()));
+    }
+
+    #[test]
+    fn agent_provider_change_clears_prior_permission_mode() {
+        // A Codex thread using the Codex-native `auto` permission mode must not
+        // carry that mode onto Claude after a provider switch — Claude rejects
+        // `auto` ("Unsupported Claude mode: auto"). #3506.
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        agent_permission_mode,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'codex',
+                     'codex-session', 'gpt-5.6-sol', 'auto',
+                     'codex', 'gpt-5.6-sol')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(&conn, "t1", "claude-code", None, None, None, None, 2000).unwrap();
+
+        let mode: Option<String> = conn
+            .query_row(
+                "SELECT agent_permission_mode FROM conversations WHERE id = 't1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mode, None);
+    }
+
+    #[test]
+    fn same_provider_switch_preserves_permission_mode() {
+        let conn = open();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at, kind, agent_type,
+                                        agent_session_id, agent_model_id,
+                                        agent_permission_mode,
+                                        selected_provider, selected_model)
+             VALUES ('t1', 'Thread', 1000, 'agent', 'codex',
+                     'codex-session', 'gpt-5.6-sol', 'auto',
+                     'codex', 'gpt-5.6-sol')",
+            [],
+        )
+        .unwrap();
+
+        try_perform_switch(&conn, "t1", "codex", None, None, None, None, 2000).unwrap();
+
+        let mode: Option<String> = conn
+            .query_row(
+                "SELECT agent_permission_mode FROM conversations WHERE id = 't1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(mode, Some("auto".to_string()));
     }
 
     #[test]
