@@ -8,6 +8,7 @@ import readline from "node:readline";
 import {
   buildProviderMcpConfig,
   resolveBrokeredSerenCredential,
+  SEREN_MCP_SERVER_NAME,
 } from "./mcp-config.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
@@ -74,6 +75,7 @@ function createAcpSessionRecord({
   currentModeId,
   currentModelId,
   logPrefix,
+  serenMcpConfigured = false,
   serenMcpProxy = null,
 }) {
   return {
@@ -99,6 +101,7 @@ function createAcpSessionRecord({
     currentModelId: currentModelId ?? adapter.defaultModelId,
     availableModels: adapter.availableModels,
     configOptions: [],
+    serenMcpConfigured,
     serenMcpProxy,
   };
 }
@@ -746,12 +749,16 @@ export function createAcpRuntime({
       // the user's configured MCP servers. The agent child is a separate
       // process and cannot see the Tauri-side MCP supervisor, so the
       // wiring must be passed explicitly on every session/new.
+      const acpMcpServers = mcpConfig.acpMcpServers(mcpCapabilities);
+      session.serenMcpConfigured = acpMcpServers.some(
+        (server) => server.name === SEREN_MCP_SERVER_NAME,
+      );
       const sessionResult = await sendRequest(
         session,
         "session/new",
         {
           cwd,
-          mcpServers: mcpConfig.acpMcpServers(mcpCapabilities),
+          mcpServers: acpMcpServers,
         },
         20_000,
       );
@@ -769,6 +776,7 @@ export function createAcpRuntime({
         createdAt: session.createdAt,
         agentSessionId: session.agentSessionId,
         timeoutSecs: session.timeoutSecs,
+        serenMcpConfigured: session.serenMcpConfigured,
         // OS PID of the agent child, so Rust can force-kill this one session
         // when the cooperative cancel/terminate RPCs are unreachable. #2313
         pid: session.process?.pid ?? null,
@@ -970,6 +978,7 @@ export function createAcpRuntime({
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      serenMcpConfigured: session.serenMcpConfigured,
       pid: session.process?.pid ?? null,
     }));
   }

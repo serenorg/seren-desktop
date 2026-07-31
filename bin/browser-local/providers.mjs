@@ -574,6 +574,7 @@ function createCodexSessionRecord({
   sessionId,
   cwd,
   processHandle,
+  serenMcpConfigured = false,
   serenMcpProxy,
   timeoutSecs,
   currentModeId,
@@ -585,6 +586,7 @@ function createCodexSessionRecord({
     status: "initializing",
     createdAt: new Date().toISOString(),
     process: processHandle,
+    serenMcpConfigured,
     serenMcpProxy,
     output: readline.createInterface({ input: processHandle.stdout }),
     pendingRequests: new Map(),
@@ -1831,6 +1833,7 @@ export function createProviderHandlers({
     const resolvedSandbox = sandboxFromMode(sandboxMode, networkEnabled);
     const serenCredential = resolveBrokeredSerenCredential(params);
     let serenMcpProxy = null;
+    let serenMcpConfigured = false;
     let processHandle;
     try {
       if (serenCredential) {
@@ -1839,6 +1842,11 @@ export function createProviderHandlers({
           apiUrl: serenCredential.apiBaseUrl,
         });
       }
+      serenMcpConfigured = buildProviderMcpConfig({
+        serenCapability: serenCredential?.capability,
+        mcpServers,
+        serenMcpGatewayUrl: serenMcpProxy?.url,
+      }).serenMcpConfigured;
       processHandle = spawnCodex(cwd, {
         serenCapability: serenCredential?.capability,
         mcpServers,
@@ -1853,6 +1861,7 @@ export function createProviderHandlers({
       sessionId,
       cwd,
       processHandle,
+      serenMcpConfigured,
       serenMcpProxy,
       timeoutSecs,
       currentModeId: resolvedMode,
@@ -2039,6 +2048,7 @@ export function createProviderHandlers({
         createdAt: session.createdAt,
         agentSessionId: session.agentSessionId,
         timeoutSecs: session.timeoutSecs,
+        serenMcpConfigured: session.serenMcpConfigured,
         // OS PID of the agent child, so Rust can force-kill this one session
         // when the cooperative cancel/terminate RPCs are unreachable. #2313
         pid: session.process?.pid ?? null,
@@ -2345,6 +2355,7 @@ export function createProviderHandlers({
         currentModelId: session.currentModelId,
         currentModeId: session.currentModeId,
         pendingPermissions: listPendingPermissions(session),
+        serenMcpConfigured: session.serenMcpConfigured,
         pid: session.process?.pid ?? null,
       })),
       ...(await claudeRuntime.listSessions()),

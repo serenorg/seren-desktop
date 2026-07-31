@@ -1094,6 +1094,7 @@ export function createPairedRuntime({ emit, inner }) {
       status: "initializing",
       createdAt: new Date().toISOString(),
       timeoutSecs: params.timeoutSecs ?? undefined,
+      serenMcpConfigured: false,
       state: "idle",
       activeRole: null,
       roles: {
@@ -1112,8 +1113,21 @@ export function createPairedRuntime({ emit, inner }) {
     pairedSessions.set(pairedId, paired);
 
     try {
-      await spawnRole(paired, "planner", params, params.paired);
-      await spawnRole(paired, "executor", params, params.paired);
+      const plannerInfo = await spawnRole(
+        paired,
+        "planner",
+        params,
+        params.paired,
+      );
+      const executorInfo = await spawnRole(
+        paired,
+        "executor",
+        params,
+        params.paired,
+      );
+      paired.serenMcpConfigured =
+        plannerInfo?.serenMcpConfigured === true &&
+        executorInfo?.serenMcpConfigured === true;
 
       paired.status = "ready";
       if (!resumeIds) {
@@ -1129,6 +1143,7 @@ export function createPairedRuntime({ emit, inner }) {
         createdAt: paired.createdAt,
         agentSessionId: compositeAgentSessionId(paired),
         timeoutSecs: paired.timeoutSecs,
+        serenMcpConfigured: paired.serenMcpConfigured,
         // Two child processes back this session; per-PID force-kill cannot
         // target both, so cancel/terminate are the supported stop paths.
         pid: null,
@@ -1518,6 +1533,7 @@ export function createPairedRuntime({ emit, inner }) {
       createdAt: paired.createdAt,
       agentSessionId: compositeAgentSessionId(paired),
       timeoutSecs: paired.timeoutSecs,
+      serenMcpConfigured: paired.serenMcpConfigured,
       pid: null,
     }));
   }

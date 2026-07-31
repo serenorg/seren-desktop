@@ -2,7 +2,21 @@
 // ABOUTME: must force a live list_agent_publishers query, never embed a stale snapshot.
 
 import { describe, expect, it } from "vitest";
-import { PUBLISHER_LIVE_QUERY_INSTRUCTION } from "@/stores/agent.store";
+import {
+  PUBLISHER_LIVE_QUERY_INSTRUCTION,
+  resolvePublisherLiveQueryInstruction,
+} from "@/stores/agent.store";
+const modulePath = new URL(
+  "../../bin/browser-local/mcp-config.mjs",
+  import.meta.url,
+).href;
+const {
+  buildProviderMcpConfig,
+  serenMcpToolName,
+} = await import(/* @vite-ignore */ modulePath);
+
+const CAPABILITY = "test-capability";
+const MCP_URL = "http://127.0.0.1:51234/session/mcp";
 
 describe("#1622 — PUBLISHER_LIVE_QUERY_INSTRUCTION", () => {
   it("does not embed any publisher slug or comma-separated list", () => {
@@ -24,10 +38,23 @@ describe("#1622 — PUBLISHER_LIVE_QUERY_INSTRUCTION", () => {
     ).not.toMatch(slugListPattern);
   });
 
-  it("forces the agent to call list_agent_publishers live before refusing", () => {
+  it("names the registered list_agent_publishers tool before refusing", () => {
     const txt = PUBLISHER_LIVE_QUERY_INSTRUCTION;
-    // Must mention the tool name — that's how the agent knows what to call.
-    expect(txt).toContain("list_agent_publishers");
+    const { claudeMcpConfigJson, serenMcpConfigured } =
+      buildProviderMcpConfig({
+        serenCapability: CAPABILITY,
+        serenMcpGatewayUrl: MCP_URL,
+        mcpServers: [],
+      });
+    const registeredServer = Object.keys(
+      JSON.parse(claudeMcpConfigJson).mcpServers,
+    )[0];
+
+    expect(serenMcpConfigured).toBe(true);
+    expect(serenMcpToolName("list_agent_publishers")).toBe(
+      `mcp__${registeredServer}__list_agent_publishers`,
+    );
+    expect(txt).toContain(serenMcpToolName("list_agent_publishers"));
     // Must state the rule as a MUST, not a suggestion, and must call out
     // the staleness of any prior belief — without these the model has
     // discretion and will revert to "I don't have that tool" on low confidence.
@@ -35,8 +62,24 @@ describe("#1622 — PUBLISHER_LIVE_QUERY_INSTRUCTION", () => {
     expect(txt.toLowerCase()).toContain("stale");
   });
 
-  it("mentions call_publisher so the agent can invoke after discovery", () => {
-    expect(PUBLISHER_LIVE_QUERY_INSTRUCTION).toContain("call_publisher");
+  it("names the registered call_publisher tool after discovery", () => {
+    expect(PUBLISHER_LIVE_QUERY_INSTRUCTION).toContain(
+      serenMcpToolName("call_publisher"),
+    );
+  });
+
+  it("omits the instruction when the Seren MCP server was not registered", () => {
+    const { serenMcpConfigured } = buildProviderMcpConfig({
+      serenCapability: CAPABILITY,
+      serenMcpGatewayUrl: undefined,
+      mcpServers: [],
+    });
+
+    expect(serenMcpConfigured).toBe(false);
+    expect(resolvePublisherLiveQueryInstruction(serenMcpConfigured)).toBeNull();
+    expect(resolvePublisherLiveQueryInstruction(true)).toBe(
+      PUBLISHER_LIVE_QUERY_INSTRUCTION,
+    );
   });
 
   it("forbids parameterized discovery failures from becoming absence claims (#2910)", () => {

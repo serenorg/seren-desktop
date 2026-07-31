@@ -46,14 +46,16 @@ describe("brokered agent credentials (#3194)", () => {
   it("configures no Seren MCP server when the broker endpoints are absent", () => {
     // Without a broker there is no safe place for a credential, so the gateway
     // must simply be unavailable rather than fall back to a raw key.
-    const { childEnv, claudeMcpConfigJson } = buildProviderMcpConfig({
-      serenCapability: CAPABILITY,
-      serenMcpGatewayUrl: undefined,
-      mcpServers: [],
-    });
+    const { childEnv, claudeMcpConfigJson, serenMcpConfigured } =
+      buildProviderMcpConfig({
+        serenCapability: CAPABILITY,
+        serenMcpGatewayUrl: undefined,
+        mcpServers: [],
+      });
 
     expect(childEnv).toEqual({ SEREN_MCP_CAPABILITY_TOKEN: CAPABILITY });
     expect(claudeMcpConfigJson).toBeNull();
+    expect(serenMcpConfigured).toBe(false);
   });
 
   it("resolves a spawn credential only when every broker field is present", () => {
