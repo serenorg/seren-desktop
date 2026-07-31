@@ -84,6 +84,7 @@ function createClient() {
       ),
     },
     sendAgentMessage: vi.fn(),
+    sendClaudeSessionMessage: vi.fn(),
     sendSessionDeath: vi.fn(),
     sendSessionEvent: vi.fn(),
     sendSessionProtocolMessage: vi.fn(),
@@ -348,6 +349,72 @@ function createLayerHarness({
 }
 
 describe("Happy session liveness", () => {
+  it("publishes one first-prompt summary so Happy threads receive distinct titles", async () => {
+    const summary = {
+      sessionId: "title-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+
+    await harness.layer.start();
+    harness.publish({
+      kind: "user-message",
+      sessionId: summary.sessionId,
+      payload: {
+        text: "Investigate Happy thread title propagation",
+        origin: "desktop",
+      },
+    });
+
+    await vi.waitFor(() =>
+      expect(harness.client.sendClaudeSessionMessage).toHaveBeenCalledWith({
+        type: "summary",
+        summary: "Investigate Happy thread\u2026",
+        leafUuid: expect.any(String),
+      }),
+    );
+
+    harness.publish({
+      kind: "user-message",
+      sessionId: summary.sessionId,
+      payload: { text: "A later prompt", origin: "desktop" },
+    });
+    await Promise.resolve();
+    expect(harness.client.sendClaudeSessionMessage).toHaveBeenCalledTimes(1);
+
+    await harness.layer.close();
+  });
+
+  it("preserves a Happy thread summary that already exists", async () => {
+    const summary = {
+      sessionId: "already-titled-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+    harness.api.getOrCreateSession.mockImplementation(async ({ metadata }) => ({
+      id: "relay-session",
+      metadata: {
+        ...metadata,
+        summary: { text: "Existing Happy title", updatedAt: 1 },
+      },
+    }));
+
+    await harness.layer.start();
+    harness.publish({
+      kind: "user-message",
+      sessionId: summary.sessionId,
+      payload: { text: "Do not overwrite me", origin: "desktop" },
+    });
+    await Promise.resolve();
+
+    expect(harness.client.sendClaudeSessionMessage).not.toHaveBeenCalled();
+    await harness.layer.close();
+  });
+
   it("retires an archive delivered while the session client is being constructed", async () => {
     const summary = {
       sessionId: "constructor-archive-session",
