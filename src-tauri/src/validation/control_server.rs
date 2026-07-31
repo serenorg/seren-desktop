@@ -252,6 +252,21 @@ fn handle_request(
         }
     };
 
+    if incoming.command == "expireCredentialLeases" {
+        let Some(manager) = app.try_state::<crate::credential_lease::CredentialLeaseManager>()
+        else {
+            return text_response(StatusCode(503), "credential lease manager is unavailable");
+        };
+        return match manager.expire_active_routes_for_validation() {
+            Ok(expired) if expired > 0 => json_response(
+                StatusCode(200),
+                serde_json::json!({ "ok": true, "expiredRoutes": expired }),
+            ),
+            Ok(_) => text_response(StatusCode(409), "no active credential routes"),
+            Err(error) => text_response(StatusCode(500), &error),
+        };
+    }
+
     if !is_allowed_command(&incoming.command) {
         return text_response(StatusCode(400), "unsupported validation command");
     }

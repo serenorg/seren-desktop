@@ -30,3 +30,19 @@ pub async fn credential_lease_revoke_all(
 ) -> Result<(), String> {
     state.revoke_all(&app).await
 }
+
+#[tauri::command]
+pub async fn credential_lease_suspend_all(
+    app: AppHandle,
+    state: State<'_, CredentialLeaseManager>,
+) -> Result<(), String> {
+    state.suspend_all(&app).await
+}
+
+#[tauri::command]
+pub async fn credential_lease_resume_all(
+    app: AppHandle,
+    state: State<'_, CredentialLeaseManager>,
+) -> Result<(), String> {
+    state.resume_leases(&app).await
+}

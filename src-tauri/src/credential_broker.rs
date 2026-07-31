@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -24,6 +25,7 @@ const API_UPSTREAM_PREFIX: &str = "publishers/";
 const MAX_REQUEST_BODY_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CONCURRENT_REQUESTS: usize = 64;
 const UPSTREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const LEASE_RECOVERY_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Request headers the broker relays upstream. `authorization`, `cookie`,
 /// `host`, and every `proxy-*` header are absent by construction: anything not
@@ -76,12 +78,23 @@ struct BrokerRoute {
     /// stale capability stops working even if revocation never ran.
     expires_at: Option<jiff::Timestamp>,
     revoked: Arc<AtomicBool>,
+    generation: u64,
+}
+
+/// A rejected upstream lease asks the async credential manager to rotate the
+/// key in place. The broker thread waits only long enough to retry the current
+/// request once; no secret crosses this channel. #3508
+pub(crate) struct BrokerRecoveryRequest {
+    pub session_id: String,
+    pub generation: u64,
+    pub completed: mpsc::Sender<bool>,
 }
 
 struct BrokerInner {
     /// Keyed by the unguessable path segment, so an unknown route is rejected
     /// before any comparison touches key material.
     routes: Mutex<HashMap<String, BrokerRoute>>,
+    recovery_tx: Mutex<Option<tokio::sync::mpsc::UnboundedSender<BrokerRecoveryRequest>>>,
     port: u16,
     in_flight: AtomicUsize,
     client: reqwest::blocking::Client,
@@ -122,6 +135,7 @@ impl PublisherCredentialBroker {
 
         let inner = Arc::new(BrokerInner {
             routes: Mutex::new(HashMap::new()),
+            recovery_tx: Mutex::new(None),
             port,
             in_flight: AtomicUsize::new(0),
             client,
@@ -174,6 +188,7 @@ impl PublisherCredentialBroker {
                 api_key: api_key.to_string(),
                 expires_at: expires_at.parse::<jiff::Timestamp>().ok(),
                 revoked: Arc::new(AtomicBool::new(false)),
+                generation: 0,
             },
         );
         Ok(BrokeredEndpoints {
@@ -181,6 +196,93 @@ impl PublisherCredentialBroker {
             api_base_url: format!("http://127.0.0.1:{}/{route_id}/api/", self.inner.port),
             capability,
         })
+    }
+
+    /// Install the host-side recovery queue after the Tauri runtime exists.
+    /// Replacing the sender is harmless and makes test/app construction simple.
+    pub(crate) fn set_recovery_sender(
+        &self,
+        sender: tokio::sync::mpsc::UnboundedSender<BrokerRecoveryRequest>,
+    ) {
+        let Ok(mut recovery_tx) = self.inner.recovery_tx.lock() else {
+            log::warn!("[credential-broker] Recovery channel is poisoned");
+            return;
+        };
+        *recovery_tx = Some(sender);
+    }
+
+    /// Swap a renewed key into every route for one live session without
+    /// changing its URL or opaque capability. Existing request snapshots are
+    /// revoked before new requests get a fresh flag and key. #3508
+    pub(crate) fn rotate_session(
+        &self,
+        session_id: &str,
+        api_key: &str,
+        expires_at: &str,
+        expected_generation: u64,
+    ) -> Result<bool, String> {
+        let expires_at = expires_at
+            .parse::<jiff::Timestamp>()
+            .map_err(|error| format!("Credential lease expiry was invalid: {error}"))?;
+        let mut routes = self
+            .inner
+            .routes
+            .lock()
+            .map_err(|_| "Credential broker route table is poisoned".to_string())?;
+        let mut rotated = false;
+        for route in routes.values_mut() {
+            if route.session_id != session_id || route.generation != expected_generation {
+                continue;
+            }
+            route.revoked.store(true, Ordering::Release);
+            route.api_key = api_key.to_string();
+            route.expires_at = Some(expires_at);
+            route.revoked = Arc::new(AtomicBool::new(false));
+            route.generation = route.generation.saturating_add(1);
+            rotated = true;
+        }
+        Ok(rotated)
+    }
+
+    pub(crate) fn session_generation(&self, session_id: &str) -> Option<u64> {
+        self.inner.routes.lock().ok().and_then(|routes| {
+            routes
+                .values()
+                .find(|route| route.session_id == session_id)
+                .map(|route| route.generation)
+        })
+    }
+
+    #[cfg(feature = "validation")]
+    pub(crate) fn expire_all_for_validation(&self) -> Result<usize, String> {
+        let expired_at = "1970-01-01T00:00:00Z"
+            .parse::<jiff::Timestamp>()
+            .map_err(|error| format!("Validation expiry was invalid: {error}"))?;
+        let mut routes = self
+            .inner
+            .routes
+            .lock()
+            .map_err(|_| "Credential broker route table is poisoned".to_string())?;
+        for route in routes.values_mut() {
+            route.expires_at = Some(expired_at);
+        }
+        Ok(routes.len())
+    }
+
+    /// Logout drops key material and denies every route immediately, but keeps
+    /// the opaque route identity so a successful sign-in can restore a still-
+    /// running agent without replacing its MCP configuration. #3508
+    pub(crate) fn suspend_all(&self) {
+        let Ok(mut routes) = self.inner.routes.lock() else {
+            log::warn!("[credential-broker] Route table is poisoned; cannot suspend all");
+            return;
+        };
+        for route in routes.values_mut() {
+            route.revoked.store(true, Ordering::Release);
+            route.api_key.clear();
+            route.expires_at = None;
+            route.generation = route.generation.saturating_add(1);
+        }
     }
 
     /// Deny the session's capability. Requests already streaming stop at their
@@ -255,7 +357,7 @@ impl PublisherCredentialBroker {
             };
             routes.get(&target.route_id).cloned()
         };
-        let Some(route) = route else {
+        let Some(mut route) = route else {
             respond_error(request, 401, "capability_revoked");
             return;
         };
@@ -266,9 +368,23 @@ impl PublisherCredentialBroker {
             return;
         }
 
-        if lease_has_expired(route.expires_at, jiff::Timestamp::now()) {
-            respond_error(request, 401, "capability_expired");
+        if route.revoked.load(Ordering::Acquire) {
+            respond_error(request, 401, "capability_revoked");
             return;
+        }
+
+        if lease_has_expired(route.expires_at, jiff::Timestamp::now()) {
+            if self.recover_route(&route) {
+                if let Some(refreshed) = self.route_after_recovery(&target.route_id, &route) {
+                    route = refreshed;
+                } else {
+                    respond_error(request, 401, "capability_expired");
+                    return;
+                }
+            } else {
+                respond_error(request, 401, "capability_expired");
+                return;
+            }
         }
 
         let method = request.method().clone();
@@ -288,24 +404,8 @@ impl PublisherCredentialBroker {
             }
         };
 
-        let mut builder = self
-            .inner
-            .client
-            .request(upstream.method, &upstream.url)
-            // The one place a real credential is ever attached, against a URL
-            // built from constants rather than from anything the child sent.
-            .bearer_auth(&route.api_key)
-            // Node's fetch decodes transparently; ask for identity so relayed
-            // bytes always match the relayed content-type.
-            .header("accept-encoding", "identity");
-        for (name, value) in forwarded_request_headers(&request) {
-            builder = builder.header(name, value);
-        }
-        if !body.is_empty() {
-            builder = builder.body(body);
-        }
-
-        let response = match builder.send() {
+        let request_headers = forwarded_request_headers(&request);
+        let mut response = match self.send_upstream(&upstream, &route, &request_headers, &body) {
             Ok(response) => response,
             Err(error) => {
                 log::warn!(
@@ -316,6 +416,30 @@ impl PublisherCredentialBroker {
                 return;
             }
         };
+
+        // A remotely revoked/invalidated lease used to permanently disconnect
+        // every provider runtime. Ask the async manager for one in-place
+        // rotation, then replay this exact request once before the child ever
+        // sees the 401. Publisher-account re-auth challenges are not lease
+        // failures and retain their existing response. #3508
+        if gateway_lease_was_rejected(&response) && self.recover_route(&route) {
+            if let Some(refreshed) = self.route_after_recovery(&target.route_id, &route) {
+                match self.send_upstream(&upstream, &refreshed, &request_headers, &body) {
+                    Ok(retried) => {
+                        response = retried;
+                        route = refreshed;
+                    }
+                    Err(error) => {
+                        log::warn!(
+                            "[credential-broker] Upstream retry after lease recovery failed: {}",
+                            error.without_url()
+                        );
+                        respond_error(request, 502, "upstream_unreachable");
+                        return;
+                    }
+                }
+            }
+        }
 
         let status = StatusCode(response.status().as_u16());
         let headers = forwarded_response_headers(&response);
@@ -328,6 +452,74 @@ impl PublisherCredentialBroker {
                 revoked: Arc::clone(&route.revoked),
             },
         );
+    }
+
+    fn send_upstream(
+        &self,
+        upstream: &UpstreamRequest,
+        route: &BrokerRoute,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<reqwest::blocking::Response, reqwest::Error> {
+        let mut builder = self
+            .inner
+            .client
+            .request(upstream.method.clone(), &upstream.url)
+            // The one place a real credential is ever attached, against a URL
+            // built from constants rather than from anything the child sent.
+            .bearer_auth(&route.api_key)
+            // Node's fetch decodes transparently; ask for identity so relayed
+            // bytes always match the relayed content-type.
+            .header("accept-encoding", "identity");
+        for (name, value) in headers {
+            builder = builder.header(name, value);
+        }
+        if !body.is_empty() {
+            builder = builder.body(body.to_vec());
+        }
+        builder.send()
+    }
+
+    fn recover_route(&self, failed_route: &BrokerRoute) -> bool {
+        let sender = self
+            .inner
+            .recovery_tx
+            .lock()
+            .ok()
+            .and_then(|sender| sender.clone());
+        let Some(sender) = sender else {
+            return false;
+        };
+        let (completed, result) = mpsc::channel();
+        if sender
+            .send(BrokerRecoveryRequest {
+                session_id: failed_route.session_id.clone(),
+                generation: failed_route.generation,
+                completed,
+            })
+            .is_err()
+        {
+            return false;
+        }
+        result.recv_timeout(LEASE_RECOVERY_TIMEOUT).unwrap_or(false)
+    }
+
+    fn route_after_recovery(
+        &self,
+        route_id: &str,
+        failed_route: &BrokerRoute,
+    ) -> Option<BrokerRoute> {
+        self.inner.routes.lock().ok().and_then(|routes| {
+            routes.get(route_id).and_then(|route| {
+                (route.generation > failed_route.generation
+                    && !route.revoked.load(Ordering::Acquire)
+                    && constant_time_eq(
+                        route.capability.as_bytes(),
+                        failed_route.capability.as_bytes(),
+                    ))
+                .then(|| route.clone())
+            })
+        })
     }
 }
 
@@ -618,6 +810,11 @@ fn forwarded_response_headers(response: &reqwest::blocking::Response) -> Vec<Hea
         .collect()
 }
 
+fn gateway_lease_was_rejected(response: &reqwest::blocking::Response) -> bool {
+    response.status() == reqwest::StatusCode::UNAUTHORIZED
+        && !response.headers().contains_key("x-seren-reauth-required")
+}
+
 fn respond_error(request: Request, status: u16, reason: &str) {
     let body = format!(r#"{{"error":"{reason}"}}"#);
     let response = Response::from_string(body)
@@ -750,5 +947,96 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"ab"));
+    }
+
+    #[test]
+    fn broker_rotates_a_suspended_session_without_changing_child_endpoints() {
+        let broker = PublisherCredentialBroker::start().expect("broker starts");
+        let endpoints = broker
+            .register("session-a", "old-secret", "2030-01-01T00:00:00Z")
+            .expect("route registers");
+        let route_id = endpoints
+            .mcp_url
+            .split('/')
+            .nth_back(1)
+            .expect("route id")
+            .to_string();
+        let before = broker
+            .inner
+            .routes
+            .lock()
+            .expect("routes lock")
+            .get(&route_id)
+            .expect("route exists")
+            .clone();
+
+        broker.suspend_all();
+        assert!(before.revoked.load(Ordering::Acquire));
+        {
+            let routes = broker.inner.routes.lock().expect("routes lock");
+            let suspended = routes.get(&route_id).expect("route stays reserved");
+            assert_eq!(suspended.capability, endpoints.capability);
+            assert!(suspended.api_key.is_empty());
+            assert!(suspended.revoked.load(Ordering::Acquire));
+        }
+
+        assert!(
+            !broker
+                .rotate_session(
+                    "session-a",
+                    "racing-secret",
+                    "2030-01-02T00:00:00Z",
+                    before.generation,
+                )
+                .expect("stale rotation is refused")
+        );
+
+        assert!(
+            broker
+                .rotate_session(
+                    "session-a",
+                    "renewed-secret",
+                    "2030-01-02T00:00:00Z",
+                    before.generation + 1,
+                )
+                .expect("route rotates")
+        );
+        let routes = broker.inner.routes.lock().expect("routes lock");
+        let renewed = routes.get(&route_id).expect("route remains");
+        assert_eq!(renewed.capability, endpoints.capability);
+        assert_eq!(renewed.api_key, "renewed-secret");
+        assert_eq!(renewed.generation, before.generation + 2);
+        assert!(!renewed.revoked.load(Ordering::Acquire));
+        // The old stream snapshot stays revoked after the new route is active.
+        assert!(before.revoked.load(Ordering::Acquire));
+        drop(routes);
+
+        let active_endpoints = broker
+            .register("session-b", "active-secret", "2030-01-01T00:00:00Z")
+            .expect("active route registers");
+        let active_route_id = active_endpoints
+            .mcp_url
+            .split('/')
+            .nth_back(1)
+            .expect("active route id");
+        let active_before = broker
+            .inner
+            .routes
+            .lock()
+            .expect("routes lock")
+            .get(active_route_id)
+            .expect("active route exists")
+            .clone();
+        assert!(
+            broker
+                .rotate_session(
+                    "session-b",
+                    "active-renewed-secret",
+                    "2030-01-02T00:00:00Z",
+                    active_before.generation,
+                )
+                .expect("active route rotates")
+        );
+        assert!(active_before.revoked.load(Ordering::Acquire));
     }
 }

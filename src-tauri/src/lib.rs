@@ -707,6 +707,9 @@ pub fn run() {
                 {
                     log::warn!("[credential-lease] Startup reaper deferred: {error}");
                 }
+                credential_lease_manager
+                    .run_maintenance(credential_lease_app)
+                    .await;
             });
 
             // Create the configured windows here rather than letting Tauri
@@ -1185,6 +1188,8 @@ pub fn run() {
             commands::credential_lease::credential_lease_create,
             commands::credential_lease::credential_lease_revoke,
             commands::credential_lease::credential_lease_revoke_all,
+            commands::credential_lease::credential_lease_suspend_all,
+            commands::credential_lease::credential_lease_resume_all,
             commands::tool_authorization::authorize_tool_operation,
             commands::tool_authorization::record_tool_operation_decision,
             commands::tool_authorization::reserve_lease_spend,

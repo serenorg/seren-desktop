@@ -13,11 +13,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
   createCredentialLease,
+  resumeCredentialLeases,
   revokeAllCredentialLeases,
   revokeCredentialLease,
+  suspendAllCredentialLeases,
 } from "@/services/credential-lease";
 
-describe("credential lease renderer bridge (#3194)", () => {
+describe("credential lease renderer bridge (#3194, #3508)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -32,6 +34,8 @@ describe("credential lease renderer bridge (#3194)", () => {
 
     await createCredentialLease("session-a");
     await revokeCredentialLease("session-a");
+    await suspendAllCredentialLeases();
+    await resumeCredentialLeases();
     await revokeAllCredentialLeases();
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, "credential_lease_create", {
@@ -40,6 +44,8 @@ describe("credential lease renderer bridge (#3194)", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(2, "credential_lease_revoke", {
       sessionId: "session-a",
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(3, "credential_lease_revoke_all");
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "credential_lease_suspend_all");
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "credential_lease_resume_all");
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "credential_lease_revoke_all");
   });
 });

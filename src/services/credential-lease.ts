@@ -35,3 +35,16 @@ export async function revokeCredentialLease(sessionId: string): Promise<void> {
 export async function revokeAllCredentialLeases(): Promise<void> {
   await invoke("credential_lease_revoke_all");
 }
+
+/**
+ * Drop every usable session key on logout while reserving opaque loopback
+ * routes for any provider process that is still attached to its thread.
+ */
+export async function suspendAllCredentialLeases(): Promise<void> {
+  await invoke("credential_lease_suspend_all");
+}
+
+/** Restore suspended or expired live-session routes after sign-in. */
+export async function resumeCredentialLeases(): Promise<void> {
+  await invoke("credential_lease_resume_all");
+}

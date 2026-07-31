@@ -8,7 +8,7 @@ const { events, mocks } = vi.hoisted(() => {
   return {
     events: eventLog,
     mocks: {
-      revokeAllCredentialLeases: vi.fn(async () => eventLog.push("revoke")),
+      suspendAllCredentialLeases: vi.fn(async () => eventLog.push("suspend")),
       clearToken: vi.fn(async () => eventLog.push("clear-token")),
       clearRefreshToken: vi.fn(async () => eventLog.push("clear-refresh")),
       clearDefaultOrganizationId: vi.fn(async () => eventLog.push("clear-org")),
@@ -36,7 +36,7 @@ vi.mock("@/lib/tauri-bridge", () => ({
 }));
 
 vi.mock("@/services/credential-lease", () => ({
-  revokeAllCredentialLeases: mocks.revokeAllCredentialLeases,
+  suspendAllCredentialLeases: mocks.suspendAllCredentialLeases,
 }));
 
 vi.mock("@/stores/auth.store", () => ({
@@ -46,15 +46,15 @@ vi.mock("@/stores/auth.store", () => ({
 
 import { logout } from "@/services/auth";
 
-describe("logout credential lease revocation (#3194)", () => {
+describe("logout credential lease suspension (#3508)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     events.length = 0;
   });
 
-  it("revokes all leases before clearing stored authentication", async () => {
+  it("suspends all leases before clearing stored authentication", async () => {
     await logout();
 
-    expect(events).toEqual(["revoke", "clear-token", "clear-refresh", "clear-org"]);
+    expect(events).toEqual(["suspend", "clear-token", "clear-refresh", "clear-org"]);
   });
 });
