@@ -3,9 +3,10 @@
 
 use super::status::is_legal_transition;
 use super::types::{
-    AgentAssignment, Attempt, Evidence, Finding, FindingConfidence, FindingStatus, LeaseMode,
-    LeaseState, NewLease, NewRunEvent, ProposedArtifact, Run, RunEvent, RunEventType, RunSnapshot,
-    RunStatus, Task, TaskDependency, TaskState, WorkspaceLease,
+    AgentAssignment, Attempt, CheckResult, CoverageGap, Evidence, Finding, FindingConfidence,
+    FindingStatus, LeaseMode, LeaseState, NewLease, NewRunEvent, ProposedArtifact, Run, RunCheck,
+    RunEvent, RunEventType, RunSnapshot, RunStatus, Task, TaskDependency, TaskState,
+    WorkspaceLease,
 };
 use crate::services::database::now_ms;
 use rusqlite::{Connection, OptionalExtension, Result, params};
@@ -294,6 +295,177 @@ pub fn insert_finding(conn: &Connection, finding: &Finding) -> Result<()> {
     Ok(())
 }
 
+pub fn insert_check(conn: &Connection, check: &RunCheck) -> Result<()> {
+    conn.execute(
+        "INSERT INTO run_checks (id, run_id, name, command, approved, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            check.id,
+            check.run_id,
+            check.name,
+            check.command,
+            i64::from(check.approved),
+            check.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn check_from_row(row: &rusqlite::Row<'_>) -> Result<RunCheck> {
+    Ok(RunCheck {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        name: row.get(2)?,
+        command: row.get(3)?,
+        approved: row.get::<_, i64>(4)? != 0,
+        created_at: row.get(5)?,
+    })
+}
+
+pub fn get_check(conn: &Connection, check_id: &str) -> Result<Option<RunCheck>> {
+    conn.query_row(
+        "SELECT id, run_id, name, command, approved, created_at
+         FROM run_checks WHERE id = ?1",
+        params![check_id],
+        check_from_row,
+    )
+    .optional()
+}
+
+pub fn approve_check(conn: &Connection, check_id: &str) -> Result<RunCheck> {
+    let updated = conn.execute(
+        "UPDATE run_checks SET approved = 1 WHERE id = ?1",
+        params![check_id],
+    )?;
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    get_check(conn, check_id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+pub fn list_checks(conn: &Connection, run_id: &str) -> Result<Vec<RunCheck>> {
+    let mut statement = conn.prepare(
+        "SELECT id, run_id, name, command, approved, created_at
+         FROM run_checks WHERE run_id = ?1 ORDER BY created_at ASC, id ASC",
+    )?;
+    statement
+        .query_map(params![run_id], check_from_row)?
+        .collect()
+}
+
+pub fn insert_check_result(conn: &Connection, result: &CheckResult) -> Result<()> {
+    conn.execute(
+        "INSERT INTO run_check_results
+            (id, check_id, task_id, attempt_id, kind, exit_code, duration_ms,
+             output_tail, pre_existing_failure, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            result.id,
+            result.check_id,
+            result.task_id,
+            result.attempt_id,
+            result.kind,
+            result.exit_code,
+            result.duration_ms,
+            result.output_tail,
+            i64::from(result.pre_existing_failure),
+            result.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn check_result_from_row(row: &rusqlite::Row<'_>) -> Result<CheckResult> {
+    Ok(CheckResult {
+        id: row.get(0)?,
+        check_id: row.get(1)?,
+        task_id: row.get(2)?,
+        attempt_id: row.get(3)?,
+        kind: row.get(4)?,
+        exit_code: row.get(5)?,
+        duration_ms: row.get(6)?,
+        output_tail: row.get(7)?,
+        pre_existing_failure: row.get::<_, i64>(8)? != 0,
+        created_at: row.get(9)?,
+    })
+}
+
+pub fn list_check_results(conn: &Connection, run_id: &str) -> Result<Vec<CheckResult>> {
+    let mut statement = conn.prepare(
+        "SELECT r.id, r.check_id, r.task_id, r.attempt_id, r.kind, r.exit_code,
+                r.duration_ms, r.output_tail, r.pre_existing_failure, r.created_at
+         FROM run_check_results r
+         JOIN run_checks c ON c.id = r.check_id
+         WHERE c.run_id = ?1
+         ORDER BY r.created_at ASC, r.id ASC",
+    )?;
+    statement
+        .query_map(params![run_id], check_result_from_row)?
+        .collect()
+}
+
+pub fn insert_coverage_gap(conn: &Connection, gap: &CoverageGap) -> Result<()> {
+    conn.execute(
+        "INSERT INTO run_coverage_gaps
+            (id, run_id, task_id, kind, subject, detail, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            gap.id,
+            gap.run_id,
+            gap.task_id,
+            gap.kind,
+            gap.subject,
+            gap.detail,
+            gap.created_at,
+        ],
+    )?;
+    Ok(())
+}
+
+fn coverage_gap_from_row(row: &rusqlite::Row<'_>) -> Result<CoverageGap> {
+    Ok(CoverageGap {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        task_id: row.get(2)?,
+        kind: row.get(3)?,
+        subject: row.get(4)?,
+        detail: row.get(5)?,
+        created_at: row.get(6)?,
+    })
+}
+
+pub fn list_coverage_gaps(conn: &Connection, run_id: &str) -> Result<Vec<CoverageGap>> {
+    let mut statement = conn.prepare(
+        "SELECT id, run_id, task_id, kind, subject, detail, created_at
+         FROM run_coverage_gaps WHERE run_id = ?1 ORDER BY created_at ASC, id ASC",
+    )?;
+    statement
+        .query_map(params![run_id], coverage_gap_from_row)?
+        .collect()
+}
+
+pub fn task_has_evidence(conn: &Connection, task_id: &str) -> Result<bool> {
+    let mut statement = conn.prepare(
+        "SELECT evidence_json FROM run_findings WHERE task_id = ?1
+         ORDER BY created_at ASC, id ASC",
+    )?;
+    let mut rows = statement.query(params![task_id])?;
+    while let Some(row) = rows.next()? {
+        let evidence_json: String = row.get(0)?;
+        let evidence: Vec<Evidence> = serde_json::from_str(&evidence_json).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        if !evidence.is_empty() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub fn transition_task(
     conn: &Connection,
     task_id: &str,
@@ -491,6 +663,10 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         })?
         .collect::<Result<Vec<_>>>()?;
 
+    let checks = list_checks(conn, run_id)?;
+    let check_results = list_check_results(conn, run_id)?;
+    let coverage_gaps = list_coverage_gaps(conn, run_id)?;
+
     Ok(Some(RunSnapshot {
         run,
         tasks,
@@ -498,6 +674,9 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         assignments,
         attempts,
         findings,
+        checks,
+        check_results,
+        coverage_gaps,
     }))
 }
 
@@ -713,6 +892,47 @@ mod tests {
             },
         )
         .unwrap();
+        insert_check(
+            &conn,
+            &RunCheck {
+                id: "check-1".to_string(),
+                run_id: "run-1".to_string(),
+                name: "cargo test".to_string(),
+                command: "cargo test".to_string(),
+                approved: true,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        insert_check_result(
+            &conn,
+            &CheckResult {
+                id: "check-result-1".to_string(),
+                check_id: "check-1".to_string(),
+                task_id: Some("task-a".to_string()),
+                attempt_id: Some("attempt-1".to_string()),
+                kind: "baseline".to_string(),
+                exit_code: Some(0),
+                duration_ms: 1,
+                output_tail: "ok".to_string(),
+                pre_existing_failure: false,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        insert_coverage_gap(
+            &conn,
+            &CoverageGap {
+                id: "gap-1".to_string(),
+                run_id: "run-1".to_string(),
+                task_id: Some("task-a".to_string()),
+                kind: "skipped".to_string(),
+                subject: "lint".to_string(),
+                detail: Some("test gap".to_string()),
+                created_at: 1,
+            },
+        )
+        .unwrap();
         append_event(&conn, &event("event-1", "run-1", None)).unwrap();
 
         conn.execute("DELETE FROM runs WHERE id = 'run-1'", [])
@@ -725,6 +945,9 @@ mod tests {
             "run_workspace_leases",
             "run_findings",
             "run_events",
+            "run_checks",
+            "run_check_results",
+            "run_coverage_gaps",
         ] {
             let count: i64 = conn
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0))

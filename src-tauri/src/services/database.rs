@@ -1359,6 +1359,49 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
          ON run_events(run_id, sequence)",
         [],
     )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_checks (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            command TEXT NOT NULL,
+            approved INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_check_results (
+            id TEXT PRIMARY KEY,
+            check_id TEXT NOT NULL,
+            task_id TEXT,
+            attempt_id TEXT,
+            kind TEXT NOT NULL,
+            exit_code INTEGER,
+            duration_ms INTEGER NOT NULL,
+            output_tail TEXT NOT NULL DEFAULT '',
+            pre_existing_failure INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (check_id) REFERENCES run_checks(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_coverage_gaps (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            kind TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            detail TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
 
     // Runtime sessions table for computer-use sessions
     conn.execute(
