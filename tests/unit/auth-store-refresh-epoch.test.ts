@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => {
     isLoggedIn: vi.fn(async () => true),
     hasStoredToken: vi.fn(async () => true),
     createApiKey: vi.fn(async () => "seren-api-key-fresh"),
+    getDesktopApiKeyStatus: vi.fn(async () => ({
+      state: "current",
+      needsRepair: false,
+    })),
+    repairDesktopApiKey: vi.fn(),
     authLogout: vi.fn(async () => {}),
     initializeGateway: vi.fn(async () => {}),
     resetGateway: vi.fn(async () => {}),
@@ -39,6 +44,11 @@ vi.mock("@/services/auth", () => ({
   hasStoredToken: mocks.hasStoredToken,
   createApiKey: mocks.createApiKey,
   logout: mocks.authLogout,
+}));
+
+vi.mock("@/services/desktop-api-access", () => ({
+  getDesktopApiKeyStatus: mocks.getDesktopApiKeyStatus,
+  repairDesktopApiKey: mocks.repairDesktopApiKey,
 }));
 
 vi.mock("@/services/mcp-gateway", () => ({

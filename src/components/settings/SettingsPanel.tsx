@@ -64,6 +64,7 @@ import {
 } from "@/stores/settings.store";
 import { claimDaily, walletState } from "@/stores/wallet.store";
 import { SendTransferModal } from "../wallet/SendTransferModal";
+import { ApiAccessSettings } from "./ApiAccessSettings";
 import { ConnectorSettings } from "./ConnectorSettings";
 import { HappyRemoteSettings } from "./HappyRemoteSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
@@ -81,6 +82,7 @@ type SettingsSection =
   | "agent"
   | "providers"
   | "logins"
+  | "api-access"
   | "sync"
   | "keys"
   | "toolsets"
@@ -459,6 +461,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
     { id: "agent", label: "Agent", icon: "🛡️" },
     { id: "providers", label: "AI Providers", icon: "🤖" },
     { id: "logins", label: "Logins", icon: "🔐" },
+    { id: "api-access", label: "API Access", icon: "🪪" },
     { id: "sync", label: "Cloud Sync", icon: "☁️" },
     { id: "keys", label: "Passwords", icon: "🔑" },
     { id: "toolsets", label: "Toolsets", icon: "📦" },
@@ -782,6 +785,10 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
 
         <Show when={activeSection() === "logins"}>
           <OAuthLogins onSignInClick={props.onSignInClick} />
+        </Show>
+
+        <Show when={activeSection() === "api-access"}>
+          <ApiAccessSettings />
         </Show>
 
         <Show when={activeSection() === "keys"}>

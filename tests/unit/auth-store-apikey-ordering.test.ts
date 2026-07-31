@@ -11,6 +11,8 @@ const {
   isLoggedInMock,
   hasStoredTokenMock,
   createApiKeyMock,
+  getDesktopApiKeyStatusMock,
+  repairDesktopApiKeyMock,
   authLogoutMock,
   initializeGatewayMock,
   resetGatewayMock,
@@ -37,6 +39,8 @@ const {
     isLoggedInMock: vi.fn(async () => true),
     hasStoredTokenMock: vi.fn(async () => true),
     createApiKeyMock: vi.fn(async () => "seren-api-key-fresh"),
+    getDesktopApiKeyStatusMock: vi.fn(),
+    repairDesktopApiKeyMock: vi.fn(),
     authLogoutMock: vi.fn(async () => {}),
     initializeGatewayMock: vi.fn(async () => {}),
     resetGatewayMock: vi.fn(async () => {}),
@@ -72,6 +76,11 @@ vi.mock("@/services/auth", () => ({
   hasStoredToken: hasStoredTokenMock,
   createApiKey: createApiKeyMock,
   logout: authLogoutMock,
+}));
+
+vi.mock("@/services/desktop-api-access", () => ({
+  getDesktopApiKeyStatus: getDesktopApiKeyStatusMock,
+  repairDesktopApiKey: repairDesktopApiKeyMock,
 }));
 
 vi.mock("@/api", () => ({
@@ -139,6 +148,14 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     isTauriRuntimeMock.mockReturnValue(false);
     hasStoredTokenMock.mockResolvedValue(true);
     runtimeHasCapabilityMock.mockReturnValue(false);
+    getDesktopApiKeyStatusMock.mockResolvedValue({
+      state: "current",
+      needsRepair: false,
+    });
+    repairDesktopApiKeyMock.mockResolvedValue({
+      status: { state: "current", needsRepair: false },
+      warning: null,
+    });
     resetAuthStore();
   });
 
@@ -211,7 +228,37 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
 
     expect(createApiKeyMock).not.toHaveBeenCalled();
     expect(storeSerenApiKeyMock).not.toHaveBeenCalled();
+    expect(getDesktopApiKeyStatusMock).toHaveBeenCalledWith("cached-key");
+    expect(repairDesktopApiKeyMock).not.toHaveBeenCalled();
     expect(authAtGetTime).toBe(false);
+    expect(authStore.isAuthenticated).toBe(true);
+  });
+
+  it("setAuthenticated: repairs an under-scoped stored key before authentication", async () => {
+    storedKeyRef.value = "seren_legacy_secret";
+    const staleStatus = {
+      state: "outdated",
+      needsRepair: true,
+      missingScopes: ["managed-deployment:update"],
+    };
+    getDesktopApiKeyStatusMock.mockResolvedValueOnce(staleStatus);
+
+    let authAtRepairTime: boolean | null = null;
+    repairDesktopApiKeyMock.mockImplementationOnce(async () => {
+      authAtRepairTime = authStore.isAuthenticated;
+      storedKeyRef.value = "seren_replacement_secret";
+      return {
+        status: { state: "current", needsRepair: false },
+        warning: null,
+      };
+    });
+
+    await setAuthenticated({ id: "u1", email: "u@test", name: "U" });
+
+    expect(repairDesktopApiKeyMock).toHaveBeenCalledWith(staleStatus);
+    expect(createApiKeyMock).not.toHaveBeenCalled();
+    expect(authAtRepairTime).toBe(false);
+    expect(storedKeyRef.value).toBe("seren_replacement_secret");
     expect(authStore.isAuthenticated).toBe(true);
   });
 
@@ -258,6 +305,14 @@ describe("auth.store #2497 — API key provisioning failure handling", () => {
     hasStoredTokenMock.mockResolvedValue(true);
     isLoggedInMock.mockResolvedValue(true);
     runtimeHasCapabilityMock.mockReturnValue(false);
+    getDesktopApiKeyStatusMock.mockResolvedValue({
+      state: "current",
+      needsRepair: false,
+    });
+    repairDesktopApiKeyMock.mockResolvedValue({
+      status: { state: "current", needsRepair: false },
+      warning: null,
+    });
     resetAuthStore();
   });
 

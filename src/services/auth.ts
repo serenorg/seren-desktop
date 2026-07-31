@@ -2,8 +2,6 @@
 // ABOUTME: Wraps the generated seren-core SDK with token storage and rate-limit policy.
 
 import {
-  type ApiKeyType,
-  createDefaultOrgApiKey,
   getCurrentUser,
   type LoginResult,
   login as loginSdk,
@@ -22,6 +20,12 @@ import {
 } from "@/lib/tauri-bridge";
 import { suspendAllCredentialLeases } from "@/services/credential-lease";
 import { clearAuthState, requestSignInModal } from "@/stores/auth.store";
+
+export type { CreateApiKeyOptions } from "@/services/desktop-api-access";
+export {
+  ApiKeyProvisioningError,
+  createApiKey,
+} from "@/services/desktop-api-access";
 
 export type { LoginResult };
 
@@ -286,77 +290,3 @@ export async function isLoggedIn(): Promise<boolean> {
  * Returns null if not logged in.
  */
 export { getToken };
-
-const DESKTOP_API_KEY_NAME = "Seren Desktop";
-const DESKTOP_API_KEY_SCOPES = [
-  "publisher:*",
-  "managed-deployment:update",
-] as const;
-
-export interface CreateApiKeyOptions {
-  name?: string;
-  keyType?: ApiKeyType;
-  agentIdentityId?: string;
-  scopes?: readonly string[];
-}
-
-/**
- * Thrown when provisioning the SerenDB desktop API key fails. Carries the HTTP
- * `status` so the auth store can distinguish a non-transient auth/permission
- * failure (401/403 → re-sign-in) from a retryable one (5xx/network → keep the
- * session, chat still works on the JWT). See #2497.
- */
-export class ApiKeyProvisioningError extends Error {
-  readonly status?: number;
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = "ApiKeyProvisioningError";
-    this.status = status;
-  }
-}
-
-/**
- * Create a new API key for MCP authentication.
- * Uses POST /organizations/default/api-keys, which resolves "default" to
- * the user's first organization.
- * @returns API key (seren_xxx_yyy format)
- * @throws ApiKeyProvisioningError if not authenticated or the request fails
- */
-export async function createApiKey(
-  options: CreateApiKeyOptions = {},
-): Promise<string> {
-  const { data, error, response } = await createDefaultOrgApiKey({
-    body: {
-      name: options.name ?? DESKTOP_API_KEY_NAME,
-      key_type: options.keyType,
-      agent_identity_id: options.agentIdentityId,
-      scopes: options.scopes
-        ? [...options.scopes]
-        : [...DESKTOP_API_KEY_SCOPES],
-    },
-    throwOnError: false,
-  });
-
-  if (error || !data?.data) {
-    const status = response?.status;
-    let message = "Failed to create API key";
-    try {
-      const parsed = (await response?.clone().json()) as Partial<AuthError>;
-      if (typeof parsed?.message === "string") {
-        message = parsed.message;
-      }
-    } catch {
-      // Non-JSON body — fall back to default message.
-    }
-    // Carry the HTTP status both as a property (so callers can branch on
-    // 401/403 vs 5xx without regex) and in the message via the same
-    // `returned HTTP <status>` marker App.tsx already parses. Without this,
-    // downstream telemetry/dialogs can't tell a non-transient auth/permission
-    // failure from a retryable one. #2497.
-    const statusSuffix =
-      typeof status === "number" ? ` (returned HTTP ${status})` : "";
-    throw new ApiKeyProvisioningError(`${message}${statusSuffix}`, status);
-  }
-
-  return data.data.api_key;
-}
