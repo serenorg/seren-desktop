@@ -18,6 +18,10 @@ import {
   isLoggedIn,
 } from "@/services/auth";
 import { resumeCredentialLeases } from "@/services/credential-lease";
+import {
+  getDesktopApiKeyStatus,
+  repairDesktopApiKey,
+} from "@/services/desktop-api-access";
 import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
 import {
   getDefaultOrganizationPrivateChatPolicy,
@@ -72,14 +76,27 @@ type EnsureApiKeyResult =
 
 /**
  * Ensure we have a Seren API key for MCP authentication.
- * Checks local storage first, only creates a new key if none stored.
+ * Fresh installs create one. Existing installs reconcile the server-side scope
+ * record so keys minted by an older Desktop build cannot remain under-scoped.
  */
 export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
   try {
-    // Check if we already have a stored API key
     const existingKey = await getSerenApiKey();
     if (existingKey) {
-      verboseRuntimeConsole.debug("[Auth Store] Using existing stored API key");
+      const status = await getDesktopApiKeyStatus(existingKey);
+      if (status.needsRepair) {
+        verboseRuntimeConsole.debug(
+          `[Auth Store] Repairing ${status.state} Desktop API key`,
+        );
+        const repaired = await repairDesktopApiKey(status);
+        if (repaired.warning) {
+          console.warn(`[Auth Store] ${repaired.warning}`);
+        }
+      } else {
+        verboseRuntimeConsole.debug(
+          "[Auth Store] Stored API key scopes are current",
+        );
+      }
       return { ok: true };
     }
 
