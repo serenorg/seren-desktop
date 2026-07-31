@@ -252,7 +252,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev dbus-x11 gnome-keyring
       - run: pnpm install --frozen-lockfile
       - name: Build (Windows)
         if: matrix.os == 'windows-latest'
@@ -268,6 +268,17 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: pnpm tauri build --bundles deb,appimage --config src-tauri/tauri.ci.json
+      - name: Verify native credential store (macOS and Windows)
+        if: matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_backend_round_trip_uses_platform_credential_store -- --nocapture
+      - name: Verify native credential store (Linux Secret Service)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            eval "$(echo -n seren-ci-keyring | gnome-keyring-daemon --unlock --components=secrets)"
+            cargo test --locked --manifest-path src-tauri/Cargo.toml --lib native_backend_round_trip_uses_platform_credential_store -- --ignored --nocapture
+          '
       - name: Verify Happy bridge graceful shutdown (Windows)
         # Windows has no SIGTERM, so the bridge is stopped by a supervisor
         # notification instead (#3031). That path cannot be exercised on the

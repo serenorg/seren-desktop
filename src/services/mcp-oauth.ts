@@ -357,7 +357,9 @@ export async function isMcpAuthenticated(): Promise<boolean> {
   return token !== null;
 }
 
-// Token storage functions using Tauri store
+// Access and refresh values are intercepted by the Rust setting command and
+// stored in the native OS credential store. Expiry and client id are non-secret
+// metadata and remain in the Tauri JSON store.
 
 async function storeTokens(tokens: TokenResponse): Promise<void> {
   const expiry = Date.now() + tokens.expires_in * 1000;

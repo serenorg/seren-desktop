@@ -132,7 +132,7 @@ Run any skill, employee, or custom prompt as a hosted workflow that keeps workin
 
 ### Security and control
 
-- All credentials stored with OS-level encryption - never in plain text
+- Desktop authentication tokens, Seren/provider API keys, and provider OAuth credentials are stored in the native OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service) - never in app-data JSON or browser storage in packaged builds
 - All connections made over HTTPS
 - Agents operate within the limits and permissions you define - no surprises
 - Option to connect directly to AI providers using your own API keys

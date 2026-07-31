@@ -10,12 +10,10 @@ use std::sync::{Arc, Mutex};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_store::StoreExt;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-const AUTH_STORE: &str = "auth.json";
 /// Sentinel comments wrapping the auto-rendered index inside `MEMORY.md`.
 /// Only content between these markers is replaced when SerenDB intercepts
 /// refresh the file; everything outside is hand-curated and must survive.
@@ -23,10 +21,8 @@ const AUTO_INDEX_BEGIN: &str = "<!-- BEGIN AUTO-INDEX -->";
 const AUTO_INDEX_END: &str = "<!-- END AUTO-INDEX -->";
 /// The user's SerenDB API key. This is the credential for the SerenDB SQL
 /// data plane at `api.serendb.com/publishers/seren-db/query` — NOT the
-/// OAuth bearer token in `auth.json.token`, which is the Seren Desktop
-/// session credential for Gateway API calls. They are different keys and
-/// are not interchangeable on the SQL endpoint.
-const SEREN_API_KEY_KEY: &str = "seren_api_key";
+/// Seren Desktop OAuth bearer token. Both live in the native OS credential
+/// store under different accounts and are not interchangeable.
 const RENDERED_INDEX_FILENAME: &str = "MEMORY.md";
 const PROJECT_ID_FILENAME: &str = "project_id";
 const DEFAULT_PREF_TYPE: &str = "claude_preference";
@@ -1047,18 +1043,13 @@ pub async fn recall_preference_from_db(
 // Tauri-facing auth + client bootstrap
 // ---------------------------------------------------------------------------
 
-/// Read the user's SerenDB API key from the Tauri store. This is the data
+/// Read the user's SerenDB API key from the native OS credential store. This is the data
 /// plane credential for `api.serendb.com/publishers/seren-db/query` and is
 /// different from the OAuth bearer token used elsewhere in the app. If the
 /// API key is missing the user needs to log in to Seren Desktop (the login
 /// flow stores the key via `storeSerenApiKey()`).
 fn read_seren_api_key(app: &AppHandle) -> Result<String, String> {
-    let key = app
-        .store(AUTH_STORE)
-        .map_err(|e| e.to_string())?
-        .get(SEREN_API_KEY_KEY)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_default();
+    let key = crate::credential_store::get_seren_api_key(app)?.unwrap_or_default();
     if key.is_empty() {
         return Err(
             "SerenDB API key not available — log in to Seren Desktop so the key is provisioned"

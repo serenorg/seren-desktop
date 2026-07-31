@@ -383,7 +383,7 @@ pub async fn gateway_http_start(
 
     let client = state.client.clone();
 
-    let has_credentials = crate::auth::has_stored_credentials(&app);
+    let has_credentials = crate::auth::has_stored_credentials(&app)?;
     let response = if should_attach_stored_auth(&url, &headers, has_credentials) {
         crate::auth::authenticated_request(&app, &client, |client, token| {
             build_request(

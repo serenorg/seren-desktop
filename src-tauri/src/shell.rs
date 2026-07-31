@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_store::StoreExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -42,8 +41,6 @@ fn consume_subprocess_handle<R: Runtime>(
 const SHELL_PROGRESS_EVENT: &str = "shell://progress";
 const SHELL_PROGRESS_CHANNEL_DEPTH: usize = 256;
 
-const AUTH_STORE: &str = "auth.json";
-const SEREN_API_KEY_KEY: &str = "seren_api_key";
 const MAX_OUTPUT_BYTES: usize = 50_000;
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_TIMEOUT_SECS: u64 = 300;
@@ -682,12 +679,7 @@ async fn spawn_one_shot(
 }
 
 fn read_stored_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
-    let key = app
-        .store(AUTH_STORE)
-        .map_err(|err| err.to_string())?
-        .get(SEREN_API_KEY_KEY)
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_default();
+    let key = crate::credential_store::get_seren_api_key(app)?.unwrap_or_default();
 
     let trimmed = key.trim();
     if trimmed.is_empty() {
@@ -812,8 +804,6 @@ fn truncate_output(s: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
-    use tauri_plugin_store::StoreExt;
 
     fn print_seren_key_env_command() -> &'static str {
         if cfg!(target_os = "windows") {
@@ -825,21 +815,13 @@ mod tests {
 
     fn mock_app_with_api_key(api_key: Option<&str>) -> tauri::App<tauri::test::MockRuntime> {
         let app = tauri::test::mock_builder()
-            .plugin(tauri_plugin_store::Builder::default().build())
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("mock app builds");
 
-        // Open the store and ALWAYS reset the key — `tauri-plugin-store`
-        // persists `auth.json` to the mock runtime's data dir, which is
-        // shared across sibling test invocations on the same host. Without
-        // an explicit delete, a prior `mock_app_with_api_key(Some("..."))`
-        // call leaves the key on disk; the next `Some(None)` call inherits
-        // it and the "logged out" assertion fails. Per-test self-containment
-        // is the only safe contract here. #1945.
-        let store = app.store(AUTH_STORE).expect("auth store opens");
-        store.delete(SEREN_API_KEY_KEY);
+        app.manage(crate::credential_store::CredentialStoreState::new_memory_for_tests());
         if let Some(api_key) = api_key {
-            store.set(SEREN_API_KEY_KEY, json!(api_key));
+            crate::credential_store::store_seren_api_key(app.handle(), api_key)
+                .expect("test API key stores in memory");
         }
 
         // The subprocess commands redeem a dispatch handle before spawning
