@@ -3407,6 +3407,12 @@ export const agentStore = {
             apiBaseUrl: lease.apiBaseUrl,
           };
           credentialLeaseCreated = true;
+        } else {
+          // A signed-out spawn can still run the local provider, but it cannot
+          // receive publisher tools. Reuse the existing session-expired modal
+          // so this degraded mode is explicit and immediately actionable.
+          // #3504
+          requestSignInModal();
         }
         const enabledMcpServers = getEnabledMcpServers();
 
@@ -7587,11 +7593,19 @@ export const agentStore = {
         if (!degradedSession) {
           break;
         }
-        const degradedNotice =
-          "Seren publisher tools could not be loaded for this thread — the " +
-          "Seren gateway was reachable but its tool list stayed unavailable " +
-          "after several retries. Publisher actions may fail here; start a " +
-          "new thread to try again.";
+        const signedOut = !authStore.isAuthenticated;
+        if (signedOut) {
+          // Re-raise the existing modal even if it was previously dismissed.
+          // A new thread cannot restore publisher tools until auth is repaired.
+          requestSignInModal();
+        }
+        const degradedNotice = signedOut
+          ? "Seren publisher tools are off because your Seren session expired. " +
+            "Sign in to restore them."
+          : "Seren publisher tools could not be loaded for this thread — the " +
+            "Seren gateway was reachable but its tool list stayed unavailable " +
+            "after several retries. Publisher actions may fail here; start a " +
+            "new thread to try again.";
         const lastDegradedMessage = degradedSession.messages.at(-1);
         if (
           lastDegradedMessage?.type !== "error" ||
@@ -7618,7 +7632,9 @@ export const agentStore = {
         }
         void captureSupportError({
           kind: "agent.seren_mcp_tools_unavailable",
-          message: `seren-mcp registered 0 tools after reconnect recovery (server: ${event.data.serverName})`,
+          message: signedOut
+            ? `seren-mcp unavailable because the Desktop session is signed out (server: ${event.data.serverName})`
+            : `seren-mcp registered 0 tools after reconnect recovery (server: ${event.data.serverName})`,
           agentContext: {
             model: degradedSession.currentModelId,
             provider: degradedSession.info.agentType,
