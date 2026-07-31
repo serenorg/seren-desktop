@@ -1,20 +1,22 @@
-// ABOUTME: Builds the verified OS provider sandbox launch spec and exposes it to trusted callers.
-// ABOUTME: Credential-store paths are denied before the policy crosses into the child runtime.
+// ABOUTME: Builds the trusted OS provider sandbox launch spec and exposes it to trusted callers.
+// ABOUTME: Fails closed when a platform cannot enforce the requested filesystem boundary.
 
 use std::io::Write;
+#[cfg(not(target_os = "windows"))]
 use std::path::PathBuf;
 use std::str::FromStr;
 
 use serde::Serialize;
 
+use crate::sandbox::SandboxMode;
+#[cfg(not(target_os = "windows"))]
+use crate::sandbox::SandboxPolicy;
 #[cfg(target_os = "linux")]
-use crate::sandbox::encode_policy;
-#[cfg(target_os = "windows")]
 use crate::sandbox::encode_policy;
 #[cfg(target_os = "macos")]
 use crate::sandbox::seatbelt_profile;
-use crate::sandbox::{SandboxMode, SandboxPolicy};
 
+#[cfg(not(target_os = "windows"))]
 const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
     ".ssh",
     ".aws",
@@ -26,6 +28,12 @@ const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
     "Library/LaunchAgents",
     ".netrc",
 ];
+
+#[cfg(not(target_os = "windows"))]
+const SEREN_APP_IDENTIFIER: &str = "com.serendb.desktop";
+
+#[cfg(target_os = "windows")]
+const WINDOWS_BOUNDED_UNAVAILABLE: &str = "Bounded local Claude Code sessions are blocked on native Windows because the current restricted-token backend cannot prevent reads outside the selected project. Select Full Access only if you accept unconfined file and network access.";
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]
@@ -199,7 +207,7 @@ fn resolve_backend_kind() -> &'static str {
 
     #[cfg(target_os = "windows")]
     {
-        return "windows-restricted-token";
+        return "windows-bounded-blocked";
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -221,7 +229,7 @@ fn launch_enforcement_detail() -> &'static str {
 
     #[cfg(target_os = "windows")]
     {
-        return "Restricted-token support is checked when the agent launches; a missing OS primitive fails the bounded session closed.";
+        return WINDOWS_BOUNDED_UNAVAILABLE;
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -245,71 +253,63 @@ fn build_launch_spec(
         return Err("A project root is required to generate a sandbox profile.".to_string());
     }
 
-    let home =
-        dirs::home_dir().ok_or_else(|| "Could not resolve the home directory.".to_string())?;
-    // The Seatbelt and Landlock backends deny reads of the user's credential
-    // directories. The Windows restricted-token backend confines writes but
-    // cannot deny reads, so populating deny_read there only makes the launcher
-    // refuse to run (leaving Windows with no bounded sandbox at all). Ship
-    // write-confinement on Windows now; a DACL-based deny-read is tracked in
-    // serenorg/seren-desktop#3342.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = network_enabled;
+        return Err(WINDOWS_BOUNDED_UNAVAILABLE.to_string());
+    }
+
     #[cfg(not(target_os = "windows"))]
-    let deny_read = CREDENTIAL_STORE_SUFFIXES
-        .iter()
-        .map(|suffix| home.join(suffix))
-        .filter(|path| path.exists())
-        .collect::<Vec<PathBuf>>();
-    #[cfg(target_os = "windows")]
-    let deny_read = {
-        let _ = &home;
-        Vec::<PathBuf>::new()
-    };
-
-    let policy = SandboxPolicy::new(
-        mode,
-        vec![PathBuf::from(project_root)],
-        deny_read,
-        network_enabled,
-    )
-    .map_err(|error| error.to_string())?;
-
-    #[cfg(target_os = "macos")]
     {
-        return seatbelt_profile(&policy)
-            .map(|profile| AgentSandboxLaunchSpec::Seatbelt { profile })
-            .map_err(|error| error.to_string());
-    }
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not resolve the home directory.".to_string())?;
+        let mut deny_read = CREDENTIAL_STORE_SUFFIXES
+            .iter()
+            .map(|suffix| home.join(suffix))
+            .filter(|path| path.exists())
+            .collect::<Vec<PathBuf>>();
+        if let Some(data_dir) = dirs::data_dir() {
+            let app_data_dir = data_dir.join(SEREN_APP_IDENTIFIER);
+            if app_data_dir.exists() {
+                deny_read.push(app_data_dir);
+            }
+        }
+        deny_read.sort();
+        deny_read.dedup();
 
-    #[cfg(target_os = "linux")]
-    {
-        let launcher_path = std::env::current_exe()
-            .map_err(|error| format!("Could not resolve the sandbox launcher: {error}"))?
-            .to_string_lossy()
-            .into_owned();
-        let policy_base64 = encode_policy(&policy).map_err(|error| error.to_string())?;
-        return Ok(AgentSandboxLaunchSpec::LinuxLauncher {
-            launcher_path,
-            policy_base64,
-        });
-    }
+        let policy = SandboxPolicy::new(
+            mode,
+            vec![PathBuf::from(project_root)],
+            deny_read,
+            network_enabled,
+        )
+        .map_err(|error| error.to_string())?;
 
-    #[cfg(target_os = "windows")]
-    {
-        let launcher_path = std::env::current_exe()
-            .map_err(|error| format!("Could not resolve the sandbox launcher: {error}"))?
-            .to_string_lossy()
-            .into_owned();
-        let policy_base64 = encode_policy(&policy).map_err(|error| error.to_string())?;
-        return Ok(AgentSandboxLaunchSpec::WindowsLauncher {
-            launcher_path,
-            policy_base64,
-        });
-    }
+        #[cfg(target_os = "macos")]
+        {
+            return seatbelt_profile(&policy)
+                .map(|profile| AgentSandboxLaunchSpec::Seatbelt { profile })
+                .map_err(|error| error.to_string());
+        }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-    {
-        let _ = policy;
-        Err("The provider sandbox backend is unavailable on this platform.".to_string())
+        #[cfg(target_os = "linux")]
+        {
+            let launcher_path = std::env::current_exe()
+                .map_err(|error| format!("Could not resolve the sandbox launcher: {error}"))?
+                .to_string_lossy()
+                .into_owned();
+            let policy_base64 = encode_policy(&policy).map_err(|error| error.to_string())?;
+            return Ok(AgentSandboxLaunchSpec::LinuxLauncher {
+                launcher_path,
+                policy_base64,
+            });
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            let _ = policy;
+            Err("The provider sandbox backend is unavailable on this platform.".to_string())
+        }
     }
 }
 
@@ -329,6 +329,7 @@ mod tests {
         assert!(status.detail.contains("unconfined"));
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn workspace_write_status_reports_a_launchable_fail_closed_spec() {
         let workspace = tempfile::tempdir().expect("workspace tempdir");
@@ -344,6 +345,24 @@ mod tests {
         assert!(status.fail_closed);
         assert_eq!(status.effective_mode, "workspace-write");
         assert!(!status.network_enabled);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn workspace_write_status_reports_windows_containment_block() {
+        let workspace = tempfile::tempdir().expect("workspace tempdir");
+        let status = agent_sandbox_status(
+            "workspace-write".to_string(),
+            workspace.path().display().to_string(),
+            Some(true),
+        );
+
+        assert_eq!(status.backend, "windows-bounded-blocked");
+        assert!(!status.spec_available);
+        assert!(!status.enforced_at_launch);
+        assert!(status.fail_closed);
+        assert_eq!(status.effective_mode, "workspace-write");
+        assert!(status.detail.contains("cannot prevent reads outside"));
     }
 
     #[test]

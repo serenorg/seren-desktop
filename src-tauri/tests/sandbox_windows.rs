@@ -37,6 +37,51 @@ fn workspace_fixture() -> (TempDir, PathBuf) {
     (root, workspace)
 }
 
+/// Production must refuse to serialize the unsafe restricted-token policy.
+/// `provider_spawn` cannot reach `__seren-sandbox-run` without this spec, so a
+/// sibling sentinel that the signed-in user can read never becomes reachable
+/// by a bounded Claude child. This is intentionally the production spec path,
+/// not a hand-built empty-deny policy like the lower-level backend canaries.
+#[test]
+fn sandbox_windows_production_spec_blocks_outside_read_canary() {
+    let (root, workspace) = workspace_fixture();
+    let outside_sentinel = root.path().join("outside-read-sentinel.txt");
+    fs::write(&outside_sentinel, b"sentinel-only").expect("outside sentinel is written");
+    assert_eq!(
+        fs::read(&outside_sentinel).expect("host can read the outside sentinel"),
+        b"sentinel-only"
+    );
+    let workspace_arg = workspace.to_string_lossy().into_owned();
+
+    for mode in ["read-only", "workspace-write"] {
+        for network_enabled in ["true", "false"] {
+            let output = Command::new(env!("CARGO_BIN_EXE_Seren"))
+                .args([
+                    "__seren-sandbox-spec",
+                    mode,
+                    network_enabled,
+                    workspace_arg.as_str(),
+                ])
+                .output()
+                .expect("production sandbox spec command starts");
+
+            assert_eq!(
+                output.status.code(),
+                Some(70),
+                "unsafe Windows bounded spec was serialized for mode={mode} network={network_enabled}: stdout={} stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stderr)
+                    .contains("cannot prevent reads outside the selected project"),
+                "containment reason missing for mode={mode} network={network_enabled}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    }
+}
+
 fn prove_target_is_writable(target: &Path) {
     fs::write(target, b"preflight").expect("canary target is writable before sandboxing");
     fs::remove_file(target).expect("canary preflight target is removed");

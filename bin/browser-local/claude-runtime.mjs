@@ -1434,19 +1434,11 @@ function buildClaudePolicySettings({
 
   // Claude's native sandbox constrains Bash subprocesses on macOS/Linux.
   // Built-in file tools are independently constrained by the hook above.
-  // Native Windows permits Bash only after the verified restricted-token/job
-  // launcher spec is present. Missing backend proof keeps the stage-1 deny in
-  // place; Full Access remains an explicit user-selected escape hatch. #3192
+  // Native Windows always denies Bash in bounded modes. A launcher-shaped
+  // object is not proof of read confinement, and must never re-enable arbitrary
+  // child processes. Full Access remains the explicit escape hatch. #3514
   if (process.platform === "win32") {
-    const windowsLauncherReady =
-      sandboxProfile?.kind === "windows-launcher" &&
-      typeof sandboxProfile.launcherPath === "string" &&
-      sandboxProfile.launcherPath.trim().length > 0 &&
-      typeof sandboxProfile.policyBase64 === "string" &&
-      sandboxProfile.policyBase64.trim().length > 0;
-    if (!windowsLauncherReady) {
-      settings.permissions = { deny: ["Bash"] };
-    }
+    settings.permissions = { deny: ["Bash"] };
   }
 
   if (process.platform !== "win32") {
