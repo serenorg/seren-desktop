@@ -161,6 +161,19 @@ pub async fn run_add_coverage_gap(
 }
 
 #[tauri::command]
+pub async fn run_update_finding_status(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    finding_id: String,
+    status: String,
+) -> Result<(), String> {
+    state
+        .update_finding_status(&app, run_id, finding_id, status)
+        .await
+}
+
+#[tauri::command]
 pub async fn run_provision_workspace(
     app: AppHandle,
     state: State<'_, RunEngineState>,
