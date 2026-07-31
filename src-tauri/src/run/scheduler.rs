@@ -4,13 +4,18 @@
 use super::status::derive_run_status;
 use super::store::{self, AppendOutcome};
 use super::types::{
-    AgentAssignment, NewRunEvent, Run, RunEvent, RunEventType, RunStatus, Task, TaskState,
+    AgentAssignment, LeaseMode, NewLease, NewRunEvent, Run, RunEvent, RunEventType, RunStatus,
+    Task, TaskState, WorkspaceLease,
 };
+use super::workspace::{self, ProvisionRequest, ProvisionedWorkspace};
+use crate::embedded_runtime;
 use crate::services::database::{init_db, now_ms};
 use rusqlite::{Connection, params};
 use serde_json::json;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::{AppHandle, Emitter};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -41,6 +46,24 @@ enum SchedulerCommand {
     RecordEvent {
         event: NewRunEvent,
         reply: oneshot::Sender<Result<AppendOutcome, String>>,
+    },
+    ProvisionWorkspace {
+        run_id: String,
+        task_id: String,
+        mode: LeaseMode,
+        source_path: Option<String>,
+        setup_script: Option<String>,
+        reply: oneshot::Sender<Result<WorkspaceLease, String>>,
+    },
+    FinishProvision {
+        lease_id: String,
+        run_id: String,
+        task_id: String,
+        outcome: Result<ProvisionedWorkspace, String>,
+    },
+    ReleaseLease {
+        lease_id: String,
+        reply: oneshot::Sender<Result<WorkspaceLease, String>>,
     },
 }
 
@@ -78,10 +101,23 @@ impl RunEngineState {
         }
 
         let connection = init_db(app).map_err(|error| error.to_string())?;
+        let workspaces_root = app
+            .path()
+            .app_data_dir()
+            .map_err(|error| error.to_string())?
+            .join("run-workspaces");
         let (sender, receiver) = mpsc::channel(128);
         let scheduler_app = app.clone();
+        let scheduler_sender = sender.clone();
         tauri::async_runtime::spawn(async move {
-            scheduler_loop(scheduler_app, connection, receiver).await;
+            scheduler_loop(
+                scheduler_app,
+                connection,
+                receiver,
+                scheduler_sender,
+                workspaces_root,
+            )
+            .await;
         });
         *self
             .sender
@@ -192,6 +228,49 @@ impl RunEngineState {
             .await
             .map_err(|_| "run scheduler dropped event response".to_string())?
     }
+
+    pub async fn provision_workspace(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        task_id: String,
+        mode: LeaseMode,
+        source_path: Option<String>,
+        setup_script: Option<String>,
+    ) -> Result<WorkspaceLease, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::ProvisionWorkspace {
+                run_id,
+                task_id,
+                mode,
+                source_path,
+                setup_script,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped provision response".to_string())?
+    }
+
+    pub async fn release_lease(
+        &self,
+        app: &AppHandle,
+        lease_id: String,
+    ) -> Result<WorkspaceLease, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::ReleaseLease { lease_id, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped release response".to_string())?
+    }
 }
 
 impl Default for RunEngineState {
@@ -204,13 +283,21 @@ async fn scheduler_loop(
     app: AppHandle,
     connection: Connection,
     mut receiver: mpsc::Receiver<SchedulerCommand>,
+    sender: mpsc::Sender<SchedulerCommand>,
+    workspaces_root: PathBuf,
 ) {
     while let Some(command) = receiver.recv().await {
-        process_command(&app, &connection, command);
+        process_command(&app, &connection, &sender, &workspaces_root, command);
     }
 }
 
-fn process_command(app: &AppHandle, conn: &Connection, command: SchedulerCommand) {
+fn process_command(
+    app: &AppHandle,
+    conn: &Connection,
+    sender: &mpsc::Sender<SchedulerCommand>,
+    workspaces_root: &Path,
+    command: SchedulerCommand,
+) {
     match command {
         SchedulerCommand::CreateRun {
             objective,
@@ -250,6 +337,316 @@ fn process_command(app: &AppHandle, conn: &Connection, command: SchedulerCommand
         SchedulerCommand::RecordEvent { event, reply } => {
             let _ = reply.send(record_event(app, conn, event));
         }
+        SchedulerCommand::ProvisionWorkspace {
+            run_id,
+            task_id,
+            mode,
+            source_path,
+            setup_script,
+            reply,
+        } => {
+            let result = start_provision(
+                app,
+                conn,
+                sender,
+                workspaces_root,
+                run_id,
+                task_id,
+                mode,
+                source_path,
+                setup_script,
+            );
+            let _ = reply.send(result);
+        }
+        SchedulerCommand::FinishProvision {
+            lease_id,
+            run_id,
+            task_id,
+            outcome,
+        } => {
+            if let Err(error) = finish_provision(app, conn, lease_id, run_id, task_id, outcome) {
+                log::error!("[run-engine] workspace provision completion failed: {error}");
+            }
+        }
+        SchedulerCommand::ReleaseLease { lease_id, reply } => {
+            let _ = reply.send(release_lease(app, conn, lease_id));
+        }
+    }
+}
+
+fn start_provision(
+    app: &AppHandle,
+    conn: &Connection,
+    sender: &mpsc::Sender<SchedulerCommand>,
+    workspaces_root: &Path,
+    run_id: String,
+    task_id: String,
+    mode: LeaseMode,
+    source_path: Option<String>,
+    setup_script: Option<String>,
+) -> Result<WorkspaceLease, String> {
+    let (title, state) = conn
+        .query_row(
+            "SELECT title, state FROM run_tasks WHERE id = ?1 AND run_id = ?2",
+            params![task_id, run_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    if TaskState::parse(&state) != Some(TaskState::Ready) {
+        return Err(format!(
+            "task must be ready before provisioning; current state is {state}"
+        ));
+    }
+
+    let lease_id = Uuid::new_v4().to_string();
+    store::insert_lease(
+        conn,
+        NewLease {
+            id: lease_id.clone(),
+            run_id: run_id.clone(),
+            task_id: task_id.clone(),
+            mode,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    store::update_lease_state(conn, &lease_id, "provisioning", None, None)
+        .map_err(|error| error.to_string())?;
+    store::transition_task(conn, &task_id, TaskState::Provisioning, None)
+        .map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        lease_state_event(
+            &run_id,
+            Some(&task_id),
+            &lease_id,
+            "provisioning",
+            None,
+            None,
+            None,
+            None,
+        ),
+    )?;
+    append_and_emit(
+        app,
+        conn,
+        task_state_event(&run_id, &task_id, TaskState::Provisioning),
+    )?;
+    recompute_ready_and_status(app, conn, &run_id)?;
+
+    let lease = store::get_lease(conn, &lease_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "workspace lease disappeared after insertion".to_string())?;
+    let request = ProvisionRequest {
+        run_id: run_id.clone(),
+        task_id: task_id.clone(),
+        task_slug: workspace::slugify(&title),
+        mode,
+        source_path: source_path.map(PathBuf::from),
+        setup_script,
+        workspaces_root: workspaces_root.to_path_buf(),
+    };
+    let finish_sender = sender.clone();
+    let finish_lease_id = lease_id.clone();
+    let finish_run_id = run_id.clone();
+    let finish_task_id = task_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let outcome = tauri::async_runtime::spawn_blocking(move || provision_and_setup(request))
+            .await
+            .map_err(|error| format!("workspace worker join failed: {error}"))
+            .and_then(|outcome| outcome);
+        let _ = finish_sender
+            .send(SchedulerCommand::FinishProvision {
+                lease_id: finish_lease_id,
+                run_id: finish_run_id,
+                task_id: finish_task_id,
+                outcome,
+            })
+            .await;
+    });
+
+    Ok(lease)
+}
+
+fn provision_and_setup(
+    request: ProvisionRequest,
+) -> Result<ProvisionedWorkspace, String> {
+    let mut provisioned = workspace::provision(&request).map_err(|error| error.to_string())?;
+    let setup_script = request.setup_script.clone().or_else(|| {
+        matches!(request.mode, LeaseMode::Scratch | LeaseMode::Worktree)
+            .then(|| workspace::default_setup_script(&provisioned.root_path))
+            .flatten()
+    });
+    if let Some(script) = setup_script {
+        let embedded_path = embedded_runtime::get_embedded_path();
+        let env_path = (!embedded_path.is_empty()).then(|| embedded_path.to_string());
+        provisioned.setup = Some(workspace::run_setup_script(
+            &provisioned.root_path,
+            &script,
+            env_path,
+            Duration::from_secs(300),
+        ));
+    }
+    Ok(provisioned)
+}
+
+fn finish_provision(
+    app: &AppHandle,
+    conn: &Connection,
+    lease_id: String,
+    run_id: String,
+    task_id: String,
+    outcome: Result<ProvisionedWorkspace, String>,
+) -> Result<(), String> {
+    match outcome {
+        Ok(provisioned) => {
+            let root_path = provisioned.root_path.to_string_lossy().to_string();
+            let base_revision = provisioned.base_revision.clone();
+            let setup_exit_code = provisioned.setup.as_ref().map(|setup| setup.exit_code);
+            let setup_failed = setup_exit_code.is_some_and(|exit_code| exit_code != 0);
+            let lease_state = if setup_failed { "setup_failed" } else { "active" };
+            store::update_lease_state(
+                conn,
+                &lease_id,
+                lease_state,
+                Some(&root_path),
+                base_revision.as_deref(),
+            )
+            .map_err(|error| error.to_string())?;
+            store::transition_task(conn, &task_id, TaskState::Ready, None)
+                .map_err(|error| error.to_string())?;
+            append_and_emit(
+                app,
+                conn,
+                lease_state_event(
+                    &run_id,
+                    Some(&task_id),
+                    &lease_id,
+                    lease_state,
+                    Some(&provisioned),
+                    setup_exit_code,
+                    None,
+                    None,
+                ),
+            )?;
+            append_and_emit(
+                app,
+                conn,
+                task_state_event(&run_id, &task_id, TaskState::Ready),
+            )?;
+            recompute_ready_and_status(app, conn, &run_id)?;
+        }
+        Err(error) => {
+            store::update_lease_state(conn, &lease_id, "failed", None, None)
+                .map_err(|db_error| db_error.to_string())?;
+            store::transition_task(conn, &task_id, TaskState::Failed, None)
+                .map_err(|db_error| db_error.to_string())?;
+            append_and_emit(
+                app,
+                conn,
+                lease_state_event(
+                    &run_id,
+                    Some(&task_id),
+                    &lease_id,
+                    "failed",
+                    None,
+                    None,
+                    None,
+                    Some(&error),
+                ),
+            )?;
+            append_and_emit(
+                app,
+                conn,
+                task_state_event(&run_id, &task_id, TaskState::Failed),
+            )?;
+            recompute_ready_and_status(app, conn, &run_id)?;
+        }
+    }
+    Ok(())
+}
+
+fn release_lease(
+    app: &AppHandle,
+    conn: &Connection,
+    lease_id: String,
+) -> Result<WorkspaceLease, String> {
+    store::update_lease_state(conn, &lease_id, "released", None, None)
+        .map_err(|error| error.to_string())?;
+    let lease = store::get_lease(conn, &lease_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "workspace lease not found after release".to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        lease_state_event(
+            &lease.run_id,
+            lease.task_id.as_deref(),
+            &lease.id,
+            "released",
+            None,
+            None,
+            None,
+            None,
+        ),
+    )?;
+    recompute_ready_and_status(app, conn, &lease.run_id)?;
+    Ok(lease)
+}
+
+fn task_state_event(run_id: &str, task_id: &str, state: TaskState) -> NewRunEvent {
+    NewRunEvent {
+        id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        task_id: Some(task_id.to_string()),
+        attempt_id: None,
+        agent_id: None,
+        event_type: RunEventType::TaskStateChanged,
+        payload: json!({"state": state}),
+        provider_event_id: None,
+        created_at: now_ms(),
+    }
+}
+
+fn lease_state_event(
+    run_id: &str,
+    task_id: Option<&str>,
+    lease_id: &str,
+    state: &str,
+    provisioned: Option<&ProvisionedWorkspace>,
+    setup_exit_code: Option<i32>,
+    uncommitted_warning: Option<&str>,
+    error: Option<&str>,
+) -> NewRunEvent {
+    let (root_path, base_revision, branch_name, provisioned_warning) = provisioned
+        .map(|workspace| {
+            (
+                Some(workspace.root_path.to_string_lossy().to_string()),
+                workspace.base_revision.clone(),
+                workspace.branch_name.clone(),
+                workspace.uncommitted_warning.clone(),
+            )
+        })
+        .unwrap_or((None, None, None, None));
+    NewRunEvent {
+        id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        task_id: task_id.map(str::to_string),
+        attempt_id: None,
+        agent_id: None,
+        event_type: RunEventType::LeaseStateChanged,
+        payload: json!({
+            "lease_id": lease_id,
+            "state": state,
+            "root_path": root_path,
+            "base_revision": base_revision,
+            "branch_name": branch_name,
+            "uncommitted_warning": uncommitted_warning.or(provisioned_warning.as_deref()),
+            "setup_exit_code": setup_exit_code,
+            "error": error,
+        }),
+        provider_event_id: None,
+        created_at: now_ms(),
     }
 }
 

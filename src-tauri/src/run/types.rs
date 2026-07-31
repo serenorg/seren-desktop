@@ -128,6 +128,42 @@ impl LeaseMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum LeaseState {
+    Requested,
+    Provisioning,
+    Active,
+    SetupFailed,
+    Released,
+    Failed,
+}
+
+impl LeaseState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Requested => "requested",
+            Self::Provisioning => "provisioning",
+            Self::Active => "active",
+            Self::SetupFailed => "setup_failed",
+            Self::Released => "released",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "requested" => Self::Requested,
+            "provisioning" => Self::Provisioning,
+            "active" => Self::Active,
+            "setup_failed" => Self::SetupFailed,
+            "released" => Self::Released,
+            "failed" => Self::Failed,
+            _ => return None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FindingConfidence {
     Asserted,
     Verified,
@@ -267,6 +303,7 @@ pub enum RunEventType {
     ApprovalRequested,
     RunCancelRequested,
     RunFinalized,
+    LeaseStateChanged,
 }
 
 impl RunEventType {
@@ -284,6 +321,7 @@ impl RunEventType {
             Self::ApprovalRequested => "approval_requested",
             Self::RunCancelRequested => "run_cancel_requested",
             Self::RunFinalized => "run_finalized",
+            Self::LeaseStateChanged => "lease_state_changed",
         }
     }
 
@@ -301,6 +339,7 @@ impl RunEventType {
             "approval_requested" => Self::ApprovalRequested,
             "run_cancel_requested" => Self::RunCancelRequested,
             "run_finalized" => Self::RunFinalized,
+            "lease_state_changed" => Self::LeaseStateChanged,
             _ => return None,
         })
     }
@@ -369,6 +408,14 @@ pub struct WorkspaceLease {
     pub state: String,
     pub created_at: i64,
     pub released_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewLease {
+    pub id: String,
+    pub run_id: String,
+    pub task_id: String,
+    pub mode: LeaseMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
