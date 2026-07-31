@@ -933,14 +933,16 @@ async fn execute_single_task(
             }
             Err(e) => {
                 log::error!("[Orchestrator] Worker task panicked: {}", e);
+                let error_message = "Internal error: worker task failed".to_string();
                 let error_event = OrchestratorEvent {
                     conversation_id: conversation_id.to_string(),
                     worker_event: WorkerEvent::Error {
-                        message: "Internal error: worker task failed".to_string(),
+                        message: error_message.clone(),
                     },
                     subtask_id: None,
                 };
                 let _ = app.emit("orchestrator://event", &error_event);
+                reroutable_error = Some(error_message);
             }
         }
 
@@ -982,7 +984,9 @@ async fn execute_single_task(
                 router::MAX_NETWORK_RETRIES,
                 reroutable_error.as_deref().unwrap_or("unknown"),
             );
-            break;
+            return Err(
+                reroutable_error.unwrap_or_else(|| "Network request failed".to_string()),
+            );
         }
 
         // Reset network retry counter on non-network outcomes (success or other errors)
@@ -994,6 +998,9 @@ async fn execute_single_task(
             .is_some_and(|msg| router::is_reroutable_error(msg));
 
         if !is_transient {
+            if let Some(error_message) = reroutable_error {
+                return Err(error_message);
+            }
             break;
         }
 
@@ -1040,7 +1047,7 @@ async fn execute_single_task(
             }
             // All large-context models exhausted — fall through to give up
             log::warn!("[Orchestrator] Context overflow but all large-context fallbacks exhausted");
-            break;
+            return Err(error_msg);
         }
 
         // When user explicitly selected a model, try cascading fallback on timeout errors.
@@ -1100,7 +1107,7 @@ async fn execute_single_task(
                     same_model_retry_count,
                     error_msg,
                 );
-                break;
+                return Err(error_msg);
             }
 
             same_model_retry_count += 1;
@@ -1130,7 +1137,7 @@ async fn execute_single_task(
                 "[Orchestrator] Giving up after {} reroute attempts",
                 reroute_count
             );
-            break;
+            return Err(error_msg);
         }
 
         let failed_model = routing.model_id.clone();
@@ -1196,7 +1203,7 @@ async fn execute_single_task(
                     "[Orchestrator] No fallback model available, giving up after {} reroute attempts",
                     reroute_count
                 );
-                break;
+                return Err(error_msg);
             }
         }
     }
