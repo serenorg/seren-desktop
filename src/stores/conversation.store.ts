@@ -23,6 +23,7 @@ import { deserializeMetadata, serializeMetadata } from "@/types/conversation";
 
 const DEFAULT_MODEL = "arcee-ai/trinity-large-thinking";
 const MAX_MESSAGES_PER_CONVERSATION = 1000;
+type StreamingSegment = { content: string; thinking: string };
 
 export interface Conversation {
   id: string;
@@ -45,6 +46,7 @@ interface ConversationState {
   error: string | null;
   streamingContent: Record<string, string>;
   streamingThinking: Record<string, string>;
+  streamingSegments: Record<string, Record<string, StreamingSegment>>;
   streamingStalled: Record<string, boolean>;
 }
 
@@ -57,6 +59,7 @@ const [state, setState] = createStore<ConversationState>({
   error: null,
   streamingContent: {},
   streamingThinking: {},
+  streamingSegments: {},
   streamingStalled: {},
 });
 
@@ -144,6 +147,24 @@ function findConversationIdForToolCall(toolCallId: string): string | null {
   return null;
 }
 
+function appendStreamingSegment(
+  conversationId: string,
+  streamKey: string,
+  field: keyof StreamingSegment,
+  text: string,
+): void {
+  setState("streamingSegments", conversationId, (segments = {}) => {
+    const segment = segments[streamKey] ?? { content: "", thinking: "" };
+    return {
+      ...segments,
+      [streamKey]: {
+        ...segment,
+        [field]: segment[field] + text,
+      },
+    };
+  });
+}
+
 export const conversationStore = {
   // === Getters ===
 
@@ -218,6 +239,18 @@ export const conversationStore = {
 
   getStreamingThinkingFor(conversationId: string): string {
     return state.streamingThinking[conversationId] ?? "";
+  },
+
+  getStreamingSegmentsFor(
+    conversationId: string,
+  ): Array<{ key: string; content: string; thinking: string }> {
+    return Object.entries(state.streamingSegments[conversationId] ?? {}).map(
+      ([key, segment]) => ({
+        key,
+        content: segment.content,
+        thinking: segment.thinking,
+      }),
+    );
   },
 
   /**
@@ -312,6 +345,7 @@ export const conversationStore = {
       "rlmProcessing",
       "streamingContent",
       "streamingThinking",
+      "streamingSegments",
       "streamingStalled",
     ] as const) {
       setState(key, (prev) => {
@@ -439,6 +473,7 @@ export const conversationStore = {
       "rlmProcessing",
       "streamingContent",
       "streamingThinking",
+      "streamingSegments",
       "streamingStalled",
     ] as const) {
       setState(key, id, undefined as never);
@@ -541,28 +576,49 @@ export const conversationStore = {
   appendStreamingContent(
     text: string,
     conversationId = state.activeConversationId,
+    streamKey?: string,
   ) {
     if (!conversationId) return;
+    if (streamKey !== undefined) {
+      appendStreamingSegment(conversationId, streamKey, "content", text);
+      return;
+    }
     setState("streamingContent", conversationId, (prev = "") => prev + text);
   },
 
   appendStreamingThinking(
     text: string,
     conversationId = state.activeConversationId,
+    streamKey?: string,
   ) {
     if (!conversationId) return;
+    if (streamKey !== undefined) {
+      appendStreamingSegment(conversationId, streamKey, "thinking", text);
+      return;
+    }
     setState("streamingThinking", conversationId, (prev = "") => prev + text);
   },
 
   clearStreamingContent(conversationId = state.activeConversationId) {
     if (!conversationId) return;
     setState("streamingContent", conversationId, "");
+    setState("streamingSegments", conversationId, {});
+  },
+
+  clearStreamingSegment(conversationId: string, streamKey: string) {
+    setState(
+      "streamingSegments",
+      conversationId,
+      streamKey,
+      undefined as never,
+    );
   },
 
   finalizeStreaming(conversationId = state.activeConversationId) {
     if (!conversationId) return;
     setState("streamingContent", conversationId, "");
     setState("streamingThinking", conversationId, "");
+    setState("streamingSegments", conversationId, {});
     setState("streamingStalled", conversationId, false);
   },
 
@@ -624,6 +680,7 @@ export const conversationStore = {
       error: null,
       streamingContent: {},
       streamingThinking: {},
+      streamingSegments: {},
       streamingStalled: {},
     });
   },
@@ -717,6 +774,7 @@ export const conversationStore = {
     this.clearMessages(conversationId);
     setState("streamingContent", conversationId, "");
     setState("streamingThinking", conversationId, "");
+    setState("streamingSegments", conversationId, {});
     setState("loading", conversationId, false);
     setState("rlmProcessing", conversationId, false);
   },
@@ -732,6 +790,7 @@ export const conversationStore = {
     setState("messages", {});
     setState("streamingContent", {});
     setState("streamingThinking", {});
+    setState("streamingSegments", {});
     setState("loading", {});
     setState("rlmProcessing", {});
     setState("activeConversationId", null);
