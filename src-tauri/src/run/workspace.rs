@@ -444,11 +444,11 @@ fn setup_command(script: &str) -> Command {
 
 #[cfg(unix)]
 fn kill_setup_process_group(pid: u32) {
-    let group_id = format!("-{pid}");
-    // Unix kill -9 with a negative PID targets the entire process group.
-    let _ = Command::new("kill")
-        .args(["-9", group_id.as_str()])
-        .status();
+    // SAFETY: the child was spawned with process_group(0), so its pid is the
+    // process-group id; killpg signals every process in that group.
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
 }
 
 #[cfg(windows)]
