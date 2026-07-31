@@ -539,6 +539,10 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     const id = conversationId();
     return id ? conversationStore.getStreamingThinkingFor(id) : "";
   };
+  const streamingSegments = () => {
+    const id = conversationId();
+    return id ? conversationStore.getStreamingSegmentsFor(id) : [];
+  };
   const streamingStalled = () => {
     const id = conversationId();
     return id ? conversationStore.getStreamingStalledFor(id) : false;
@@ -753,6 +757,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
     void conversationIsLoading();
     void streamingContent();
     void streamingThinking();
+    void streamingSegments();
     void Object.keys(htmlCache).length;
     requestAnimationFrame(scrollToBottom);
   });
@@ -1984,6 +1989,38 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
               </Show>
             </article>
           </Show>
+
+          <For each={streamingSegments()}>
+            {(segment) => (
+              <article class="chat-message-row px-5 py-4 border-b border-surface-2">
+                <Show when={segment.thinking}>
+                  <details open class="text-[0.8em] text-muted-foreground">
+                    <summary class="cursor-pointer select-none mb-1">
+                      Thinking…
+                    </summary>
+                    <div class="whitespace-pre-wrap opacity-70">
+                      {segment.thinking}
+                    </div>
+                  </details>
+                </Show>
+                <Show when={segment.content}>
+                  <div
+                    class="chat-message-content leading-[1.7] text-foreground break-words"
+                    innerHTML={renderMarkdown(segment.content)}
+                  />
+                  <Show when={conversationIsLoading()}>
+                    <span class="inline-block w-[6px] h-[14px] bg-primary ml-0.5 animate-pulse" />
+                  </Show>
+                  <Show when={streamingStalled()}>
+                    <div class="mt-2 text-[11.5px] text-muted-foreground italic">
+                      Still working - the runtime hasn't sent a token in a
+                      while.
+                    </div>
+                  </Show>
+                </Show>
+              </article>
+            )}
+          </For>
 
           <Show when={streamingThinking()}>
             <article class="chat-message-row px-5 py-4 border-b border-surface-2">

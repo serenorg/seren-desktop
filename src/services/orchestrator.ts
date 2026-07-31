@@ -514,10 +514,10 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
 
   switch (workerEvent.type) {
     case "content":
-      handleContent(event.conversation_id, workerEvent.text);
+      handleContent(event.conversation_id, workerEvent.text, event.subtask_id);
       break;
     case "thinking":
-      handleThinking(event.conversation_id, workerEvent.text);
+      handleThinking(event.conversation_id, workerEvent.text, event.subtask_id);
       break;
     case "tool_call":
       handleToolCall(event.conversation_id, workerEvent);
@@ -535,6 +535,7 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
         workerEvent.thinking,
         workerEvent.cost,
         workerEvent.rlm_steps ?? null,
+        event.subtask_id,
       );
       break;
     case "error":
@@ -552,12 +553,20 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
   }
 }
 
-function handleContent(conversationId: string, text: string): void {
-  conversationStore.appendStreamingContent(text, conversationId);
+function handleContent(
+  conversationId: string,
+  text: string,
+  subtaskId?: string,
+): void {
+  conversationStore.appendStreamingContent(text, conversationId, subtaskId);
 }
 
-function handleThinking(conversationId: string, text: string): void {
-  conversationStore.appendStreamingThinking(text, conversationId);
+function handleThinking(
+  conversationId: string,
+  text: string,
+  subtaskId?: string,
+): void {
+  conversationStore.appendStreamingThinking(text, conversationId, subtaskId);
 }
 
 function handleToolCall(
@@ -703,6 +712,7 @@ function handleComplete(
   thinking: string | null,
   cost?: number,
   rlmStepsJson?: string | null,
+  subtaskId?: string,
 ): void {
   const stream = activeStreams.get(conversationId);
   if (!stream) return;
@@ -715,9 +725,16 @@ function handleComplete(
     cost != null ? `$${cost}` : "none",
   );
 
-  // Use accumulated streaming content or fall back to final_content
-  const content =
-    conversationStore.getStreamingContentFor(conversationId) || finalContent;
+  const subtaskSegment = subtaskId
+    ? conversationStore
+        .getStreamingSegmentsFor(conversationId)
+        .find((segment) => segment.key === subtaskId)
+    : undefined;
+
+  // Use accumulated streaming content or fall back to final_content.
+  const content = subtaskId
+    ? subtaskSegment?.content || finalContent
+    : conversationStore.getStreamingContentFor(conversationId) || finalContent;
   const finalOutputValidation = validateFinalOutput({
     finalText: content,
     evidence: extractEvidenceFromUnifiedMessages(
@@ -725,10 +742,11 @@ function handleComplete(
     ),
   });
   const safeContent = finalOutputValidation.safeDisplayText;
-  const thinkingContent =
-    conversationStore.getStreamingThinkingFor(conversationId) ||
-    thinking ||
-    undefined;
+  const thinkingContent = subtaskId
+    ? subtaskSegment?.thinking || thinking || undefined
+    : conversationStore.getStreamingThinkingFor(conversationId) ||
+      thinking ||
+      undefined;
 
   // Parse RLM steps from JSON if present
   let rlmSteps: UnifiedMessage["rlmSteps"] | undefined;
@@ -741,7 +759,7 @@ function handleComplete(
   }
 
   const assistantMessage: UnifiedMessage = {
-    id: stream.messageId,
+    id: subtaskId ? `${stream.messageId}:${subtaskId}` : stream.messageId,
     type: "assistant",
     role: "assistant",
     content: safeContent,
@@ -759,7 +777,11 @@ function handleComplete(
   };
 
   conversationStore.setRLMProcessing(false, conversationId);
-  conversationStore.finalizeStreaming(conversationId);
+  if (subtaskId) {
+    conversationStore.clearStreamingSegment(conversationId, subtaskId);
+  } else {
+    conversationStore.finalizeStreaming(conversationId);
+  }
   conversationStore.addMessage(assistantMessage, conversationId);
   conversationStore.persistMessage(assistantMessage, conversationId);
 

@@ -379,6 +379,22 @@ fn finalize_plan_row(
     )
 }
 
+fn derive_plan_status(
+    total_subtasks: usize,
+    succeeded_subtasks: usize,
+    cancelled: bool,
+) -> &'static str {
+    if cancelled {
+        "cancelled"
+    } else if succeeded_subtasks == total_subtasks {
+        "completed"
+    } else if succeeded_subtasks > 0 {
+        "partial"
+    } else {
+        "failed"
+    }
+}
+
 /// Persist a plan's terminal status. Best-effort: a database failure is not
 /// allowed to mask the orchestration outcome being returned to the caller.
 async fn finalize_plan(app: &AppHandle, plan_id: &str, status: &str) {
@@ -1372,6 +1388,7 @@ async fn execute_multi_task(
     // Execute subtasks layer by layer
     let layers = decomposer::dependency_layers(&subtasks);
     let mut consecutive_failures: u32 = 0;
+    let mut succeeded_subtasks: usize = 0;
     const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
     // Index subtasks for dependency lookups during context injection.
@@ -1580,6 +1597,7 @@ async fn execute_multi_task(
                     match result {
                         Ok(Ok(Ok(()))) => {
                             layer_had_success = true;
+                            succeeded_subtasks += 1;
                         }
                         Ok(Ok(Err(e))) => {
                             log::error!("[Orchestrator] Worker error in layer {}: {}", layer_idx, e);
@@ -1651,13 +1669,18 @@ async fn execute_multi_task(
     drop(shared_tx);
     let _ = forward_handle.await;
 
-    // Mark plan as completed
-    finalize_plan(app, &plan_id, "completed").await;
+    let plan_status = derive_plan_status(
+        subtasks.len(),
+        succeeded_subtasks,
+        *cancel_watch_rx.borrow(),
+    );
+    finalize_plan(app, &plan_id, plan_status).await;
 
     log::info!(
-        "[Orchestrator] Completed multi-task orchestration for conversation {} (plan {})",
+        "[Orchestrator] Completed multi-task orchestration for conversation {} (plan {}, status {})",
         conversation_id,
-        plan_id
+        plan_id,
+        plan_status
     );
 
     Ok(())
@@ -2310,6 +2333,48 @@ mod tests {
 
         // Finalizing a plan that does not exist touches nothing.
         assert_eq!(finalize_plan_row(&conn, "missing", "failed", 3000).unwrap(), 0);
+
+        for (plan_id, status, completed_at) in
+            [("p2", "cancelled", 2100), ("p3", "partial", 2200)]
+        {
+            conn.execute(
+                "INSERT INTO orchestration_plans (id, conversation_id, original_prompt, status, created_at)
+                 VALUES (?1, 'c1', 'prompt', 'active', 1000)",
+                rusqlite::params![plan_id],
+            )
+            .unwrap();
+
+            assert_eq!(finalize_plan_row(&conn, plan_id, status, completed_at).unwrap(), 1);
+            let persisted: (String, i64) = conn
+                .query_row(
+                    "SELECT status, completed_at FROM orchestration_plans WHERE id = ?1",
+                    rusqlite::params![plan_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(persisted, (status.to_string(), completed_at));
+        }
+    }
+
+    #[test]
+    fn derive_plan_status_all_succeeded_is_completed() {
+        assert_eq!(derive_plan_status(3, 3, false), "completed");
+    }
+
+    #[test]
+    fn derive_plan_status_some_succeeded_is_partial() {
+        assert_eq!(derive_plan_status(3, 1, false), "partial");
+    }
+
+    #[test]
+    fn derive_plan_status_none_succeeded_is_failed() {
+        assert_eq!(derive_plan_status(3, 0, false), "failed");
+    }
+
+    #[test]
+    fn derive_plan_status_cancelled_overrides_counts() {
+        assert_eq!(derive_plan_status(3, 3, true), "cancelled");
+        assert_eq!(derive_plan_status(3, 0, true), "cancelled");
     }
 
     // =========================================================================
