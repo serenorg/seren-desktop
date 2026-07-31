@@ -1211,7 +1211,14 @@ fn upsert_agent_conversation_in_db(
                 ?9
             )
              ON CONFLICT(id) DO UPDATE SET
-                agent_type = excluded.agent_type,
+                -- Preserve the row's persisted agent identity on re-spawn. A
+                -- spawn resolves its agent type from the global selected-agent
+                -- when a caller omits one, so overwriting here let an action on
+                -- one thread flip a backgrounded thread's agent (#3502). Only an
+                -- explicit provider switch (switch_thread_provider) may change
+                -- agent_type; keep the existing value, taking the incoming one
+                -- only when the row has none.
+                agent_type = COALESCE(conversations.agent_type, excluded.agent_type),
                 agent_session_id = COALESCE(excluded.agent_session_id, conversations.agent_session_id),
                 agent_cwd = COALESCE(conversations.agent_cwd, excluded.agent_cwd),
                 agent_metadata = COALESCE(excluded.agent_metadata, conversations.agent_metadata),
@@ -4452,6 +4459,51 @@ mod tests {
             .unwrap(),
             (1, Some("late-provider-session".to_string())),
         );
+    }
+
+    #[test]
+    fn re_spawn_upsert_preserves_existing_agent_type() {
+        // A backgrounded thread that re-spawns must keep its persisted agent
+        // identity. A spawn resolves agent_type from the global selected agent
+        // when a caller omits one, so an overwriting upsert let switching one
+        // thread's provider flip a different, backgrounded thread (#3502). Only
+        // an explicit provider switch may change a conversation's agent_type.
+        let conn = open();
+
+        let codex = AgentConversation {
+            id: "victim".to_string(),
+            title: "Codex thread".to_string(),
+            created_at: 1000,
+            agent_type: "codex".to_string(),
+            agent_session_id: Some("codex-session".to_string()),
+            agent_cwd: Some("/project".to_string()),
+            agent_model_id: None,
+            agent_permission_mode: None,
+            agent_metadata: None,
+            project_id: Some("/project".to_string()),
+            project_root: Some("/project".to_string()),
+            is_archived: false,
+            privileged: false,
+        };
+        assert!(!upsert_agent_conversation_in_db(&conn, &codex).unwrap());
+
+        // A re-spawn of the same conversation arrives with claude-code (resolved
+        // from the just-flipped global selected agent). The persisted identity
+        // must NOT change.
+        let respawn_as_claude = AgentConversation {
+            agent_type: "claude-code".to_string(),
+            ..codex.clone()
+        };
+        assert!(!upsert_agent_conversation_in_db(&conn, &respawn_as_claude).unwrap());
+
+        let agent_type: String = conn
+            .query_row(
+                "SELECT agent_type FROM conversations WHERE id = ?1",
+                params![codex.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(agent_type, "codex");
     }
 
     /// Mirror of the production `list_conversations` SQL so tests can
