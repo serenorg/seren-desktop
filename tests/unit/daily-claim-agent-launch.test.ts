@@ -29,8 +29,10 @@ vi.mock("@/services/wallet", () => ({
 }));
 
 import {
+  claimDaily,
   dismissDailyClaim,
   resetWalletState,
+  startDailyClaimPolling,
   surfaceDailyClaimIfEligible,
   walletState,
 } from "@/stores/wallet.store";
@@ -49,12 +51,14 @@ function eligibility(canClaim: boolean) {
 describe("daily claim on agent launch", () => {
   beforeEach(() => {
     dailyClaimMocks.fetchDailyEligibility.mockReset();
+    dailyClaimMocks.claimDailyCredits.mockReset();
     mockAuthState.isAuthenticated = true;
     resetWalletState();
   });
 
   afterEach(() => {
     resetWalletState();
+    vi.useRealTimers();
   });
 
   it("re-surfaces a dismissed but still-claimable reward when an agent launches", async () => {
@@ -78,6 +82,40 @@ describe("daily claim on agent launch", () => {
     // can_claim is false, so the popup stays hidden regardless of the flag,
     // and we do not spuriously clear the dismiss flag.
     expect(walletState.dailyClaim?.can_claim).toBe(false);
+    expect(walletState.dailyClaimDismissed).toBe(true);
+  });
+
+  it("does not auto-surface the next reward during a background UTC-reset poll", async () => {
+    vi.useFakeTimers();
+    dailyClaimMocks.fetchDailyEligibility.mockResolvedValueOnce(
+      eligibility(true),
+    );
+    dailyClaimMocks.claimDailyCredits.mockResolvedValue({
+      success: true,
+      amount_atomic: 250_000,
+      amount_usd: "$0.25",
+      balance_atomic: 1_250_000,
+      balance_usd: "$1.25",
+      claims_remaining_this_month: 4,
+    });
+
+    // The user intentionally launches an agent and claims today's reward.
+    await surfaceDailyClaimIfEligible();
+    expect(walletState.dailyClaimDismissed).toBe(false);
+    await claimDaily();
+    expect(walletState.dailyClaim?.can_claim).toBe(false);
+    expect(walletState.dailyClaimDismissed).toBe(true);
+
+    // A later background poll discovers the next reward after the UTC reset.
+    dailyClaimMocks.fetchDailyEligibility.mockResolvedValueOnce(
+      eligibility(true),
+    );
+    startDailyClaimPolling();
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1_000);
+
+    // Eligibility stays current for Settings, but only an agent launch may
+    // clear suppression and satisfy the popup gate.
+    expect(walletState.dailyClaim?.can_claim).toBe(true);
     expect(walletState.dailyClaimDismissed).toBe(true);
   });
 
