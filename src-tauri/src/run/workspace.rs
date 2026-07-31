@@ -386,6 +386,7 @@ pub fn run_setup_script(
             }
             Ok(None) if Instant::now() >= deadline => {
                 timed_out = true;
+                kill_setup_process_group(child.id());
                 let _ = child.kill();
                 let _ = child.wait();
                 break;
@@ -431,10 +432,34 @@ fn setup_command(script: &str) -> Command {
     #[cfg(not(target_os = "windows"))]
     {
         let mut command = Command::new("/bin/sh");
-        command.args(["-lc", script]);
+        command.args(["-c", script]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
         command
     }
 }
+
+#[cfg(unix)]
+fn kill_setup_process_group(pid: u32) {
+    let group_id = format!("-{pid}");
+    // Unix kill -9 with a negative PID targets the entire process group.
+    let _ = Command::new("kill")
+        .args(["-9", group_id.as_str()])
+        .status();
+}
+
+#[cfg(windows)]
+fn kill_setup_process_group(pid: u32) {
+    let _ = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn kill_setup_process_group(_pid: u32) {}
 
 fn read_pipe(mut pipe: impl Read + Send + 'static) -> thread::JoinHandle<Vec<u8>> {
     thread::spawn(move || {
@@ -751,6 +776,26 @@ mod tests {
             store::get_lease(&conn, "lease-1").unwrap().unwrap().state,
             "setup_failed"
         );
+    }
+
+    #[test]
+    fn setup_timeout_kills_process_group() {
+        let root = tempfile::tempdir().unwrap();
+        let started = Instant::now();
+        let timed_out = run_setup_script(
+            root.path(),
+            "sleep 60 & wait",
+            None,
+            Duration::from_secs(2),
+        );
+
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "setup timeout took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(timed_out.exit_code, -1);
+        assert!(timed_out.output_tail.contains("timed out"));
     }
 
     #[test]
