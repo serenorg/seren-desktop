@@ -2,8 +2,13 @@
 // ABOUTME: Normalizes Seren's MCP settings into provider-specific Claude/Codex formats.
 
 import path from "node:path";
+import { SEREN_MCP_SERVER_NAME } from "./seren-mcp-contract.mjs";
 
-const SEREN_MCP_SERVER_NAME = "seren-mcp";
+export {
+  SEREN_MCP_SERVER_NAME,
+  SEREN_MCP_TOOL_PREFIX,
+  serenMcpToolName,
+} from "./seren-mcp-contract.mjs";
 // The child receives a loopback-broker capability, never a Seren API key. NOTE:
 // the desktop's provider-runtime log scrubber does NOT cover this value — it
 // scrubs SEREN_*_{KEY,TOKEN,SECRET} values found in the *desktop* process env,
@@ -259,14 +264,20 @@ export function buildProviderMcpConfig({
   mcpServers,
   serenMcpGatewayUrl,
 } = {}) {
+  const remoteSerenServer = createRemoteSerenServer(
+    serenCapability,
+    serenMcpGatewayUrl,
+  );
   const normalizedServers = dedupeServers([
-    createRemoteSerenServer(serenCapability, serenMcpGatewayUrl),
+    remoteSerenServer,
     ...((Array.isArray(mcpServers) ? mcpServers : [])
       .map((server) => normalizeLocalServer(server))
       .filter(Boolean)),
   ].filter(Boolean));
 
   return {
+    serenMcpConfigured:
+      remoteSerenServer != null && normalizedServers.includes(remoteSerenServer),
     childEnv:
       trimToNull(serenCapability) == null
         ? {}

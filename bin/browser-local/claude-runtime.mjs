@@ -12,6 +12,8 @@ import { fileURLToPath } from "node:url";
 import {
   buildProviderMcpConfig,
   resolveBrokeredSerenCredential,
+  SEREN_MCP_SERVER_NAME,
+  SEREN_MCP_TOOL_PREFIX,
 } from "./mcp-config.mjs";
 import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
 import {
@@ -1264,9 +1266,6 @@ const INITIALIZE_MAX_ATTEMPTS = 2;
 // earliest point that count is fully resolved. We audit it there and recover in
 // place with the `mcp_reconnect` control request (single-server reconnect +
 // tools re-fetch, no process restart) before surfacing a degraded state. #2802
-const SEREN_MCP_SERVER_NAME = "seren-mcp";
-const SEREN_MCP_TOOL_PREFIX = `mcp__${SEREN_MCP_SERVER_NAME}__`;
-
 function applySerenMcpOAuthRouting(routing, toolName, toolInput) {
   if (toolName !== `${SEREN_MCP_TOOL_PREFIX}call_publisher`) {
     return { input: toolInput, denyMessage: null };
@@ -2838,7 +2837,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     // present (see createRemoteSerenServer). Mirror that check so the
     // post-spawn tool audit only runs for sessions that actually expect
     // gateway tools. #2802
-    const serenMcpConfigured = serenCredential != null;
+    let serenMcpConfigured = false;
     const claudeBin = resolveClaudeBinary();
     const extendedPath = buildExtendedPath();
     const effectiveEffort =
@@ -2873,6 +2872,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         mcpServers,
         serenMcpGatewayUrl: serenMcpProxy?.url,
       });
+      serenMcpConfigured = mcpConfig.serenMcpConfigured;
       policySettingsJson = JSON.stringify(
         buildClaudePolicySettings({
           cwd,
@@ -3170,6 +3170,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         createdAt: session.createdAt,
         agentSessionId: session.agentSessionId,
         timeoutSecs: session.timeoutSecs,
+        serenMcpConfigured: session.serenMcpConfigured,
         // OS PID of the agent child, so Rust can force-kill this one session
         // when the cooperative cancel/terminate RPCs are unreachable. #2313
         pid: session.process?.pid ?? null,
@@ -3335,6 +3336,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      serenMcpConfigured: session.serenMcpConfigured,
       pid: session.process?.pid ?? null,
     }));
   }

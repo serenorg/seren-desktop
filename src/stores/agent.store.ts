@@ -101,6 +101,8 @@ import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { estimateTokens } from "@/lib/token-counter";
 import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
+// @ts-expect-error — shared provider-runtime ESM has no generated declaration.
+import { serenMcpToolName } from "../../bin/browser-local/seren-mcp-contract.mjs";
 
 // Bootstrap-context helpers live in @/lib/agent/bootstrap-context.
 // Re-exported so existing importers keep the unchanged public surface.
@@ -196,8 +198,8 @@ export const PREDICTIVE_STRUCTURAL_FAILURE_RE =
   /issue with the selected model|model.*not exist|ENOENT|schema_drift|Parent JSONL transcript not found/i;
 
 /**
- * Instruction prepended to every agent session telling Claude Code / Codex
- * that the Seren MCP gateway exists and MUST be queried live before refusing
+ * Instruction prepended to agent sessions whose provider runtime confirms the
+ * Seren MCP gateway was registered. It MUST be queried live before refusing
  * any third-party service. Intentionally does NOT embed a snapshot of
  * publisher slugs — snapshots go stale at cold-start when the gateway's
  * discovery is still in-flight, and the agent then confidently refuses real
@@ -205,19 +207,28 @@ export const PREDICTIVE_STRUCTURAL_FAILURE_RE =
  */
 export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
   "You have access to a Seren MCP gateway with callable publishers via " +
-  "your seren-mcp tools (list_agent_publishers, call_publisher). Before " +
+  `your registered tools (${serenMcpToolName("list_agent_publishers")}, ` +
+  `${serenMcpToolName("call_publisher")}). Before ` +
   "stating that any third-party service (Google Docs, Gmail, GitHub, " +
   "Slack, Notion, Linear, Figma, and many others) is unavailable, you " +
-  "MUST call list_agent_publishers with NO arguments to get the current " +
+  `MUST call ${serenMcpToolName("list_agent_publishers")} with NO arguments ` +
+  "to get the current " +
   "live publisher list — publishers are added frequently and any list " +
   "you may have seen is stale. After confirming a publisher exists, " +
   "filter that returned list client-side, then use the publisher's tool " +
-  "enumeration metadata and call_publisher to invoke it. A failed or empty " +
+  `enumeration metadata and ${serenMcpToolName("call_publisher")} to invoke ` +
+  "it. A failed or empty " +
   "parameterized discovery call is not evidence that a publisher is absent. " +
   "Authorization or allowlist rejection means the publisher exists but access " +
   "is blocked; report that actionable state instead of calling it unavailable. " +
   "This live-query rule " +
   "overrides any prior belief about what tools you have.";
+
+export function resolvePublisherLiveQueryInstruction(
+  serenMcpConfigured: boolean,
+): string | null {
+  return serenMcpConfigured ? PUBLISHER_LIVE_QUERY_INSTRUCTION : null;
+}
 
 /**
  * Defensive re-prime threshold. The primary re-prime trigger is a signature
@@ -4628,7 +4639,10 @@ export const agentStore = {
       );
     }
 
-    const currentSignature = `${PUBLISHER_LIVE_QUERY_INSTRUCTION}\n\n${skillsContent}`;
+    const publisherInstruction = resolvePublisherLiveQueryInstruction(
+      session.info.serenMcpConfigured === true,
+    );
+    const currentSignature = `${publisherInstruction ?? ""}\n\n${skillsContent}`;
     const messageCount = session.messages.length;
     const messagesSincePrimed =
       messageCount - (session.primedAtMessageCount ?? 0);
@@ -4674,7 +4688,7 @@ export const agentStore = {
         );
         const projectedFullPrimingTokens =
           estimatePromptContextTokens(promptForBudget, mergedContext) +
-          estimateTokens(PUBLISHER_LIVE_QUERY_INSTRUCTION) +
+          estimateTokens(publisherInstruction ?? "") +
           estimateTokens(skillsContent);
 
         if (projectedFullPrimingTokens > maxSafeInputTokens) {
@@ -4701,10 +4715,12 @@ export const agentStore = {
           ...mergedContext,
         ];
       }
-      mergedContext = [
-        { type: "text", text: PUBLISHER_LIVE_QUERY_INSTRUCTION },
-        ...mergedContext,
-      ];
+      if (publisherInstruction) {
+        mergedContext = [
+          { type: "text", text: publisherInstruction },
+          ...mergedContext,
+        ];
+      }
     }
 
     return {

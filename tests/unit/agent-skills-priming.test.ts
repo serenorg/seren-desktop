@@ -19,9 +19,18 @@ describe("agent skill context priming", () => {
     const body = methodBody("async buildPromptContext");
 
     expect(body).toContain("skillsStore.getThreadSkillsContent");
-    expect(body).toContain("PUBLISHER_LIVE_QUERY_INSTRUCTION");
+    expect(body).toContain("resolvePublisherLiveQueryInstruction");
+    expect(body).toContain("session.info.serenMcpConfigured === true");
+    expect(body).toContain("publisherInstruction");
     expect(body).toContain("const currentSignature");
     expect(body).toContain("primedContextSignature === currentSignature");
+  });
+
+  it("only injects publisher guidance for a session with registered Seren MCP", () => {
+    const body = methodBody("async buildPromptContext");
+
+    expect(body).toContain("if (publisherInstruction)");
+    expect(body).toContain('{ type: "text", text: publisherInstruction }');
   });
 
   it("re-primes after the defensive message threshold", () => {

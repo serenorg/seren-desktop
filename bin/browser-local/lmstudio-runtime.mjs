@@ -1627,6 +1627,8 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
           capability: serenCredential?.capability,
           url: serenMcpProxy?.url,
         }),
+        serenMcpConfigured:
+          serenCredential != null && serenMcpProxy != null,
         serenMcpProxy,
         availableModelRecords,
         currentModelId: initialModel.modelId,
@@ -1668,6 +1670,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       createdAt: session.createdAt,
       agentSessionId: session.agentSessionId,
       timeoutSecs: session.timeoutSecs,
+      serenMcpConfigured: session.serenMcpConfigured,
       pid: null,
     };
   }
@@ -1719,6 +1722,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
       currentModelId: session.currentModelId,
       currentModeId: session.currentModeId,
       pendingPermissions: listPendingPermissions(session),
+      serenMcpConfigured: session.serenMcpConfigured,
       pid: null,
     }));
   }

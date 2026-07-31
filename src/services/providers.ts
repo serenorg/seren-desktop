@@ -176,6 +176,8 @@ export interface AgentSessionInfo {
   currentModeId?: string | null;
   /** Pending approval dialogs that must be re-surfaced after UI re-attach. */
   pendingPermissions?: PermissionRequestEvent[];
+  /** True only when the Seren MCP server was registered for this live session. */
+  serenMcpConfigured?: boolean;
 }
 
 export interface AgentInfo {
