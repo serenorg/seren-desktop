@@ -4,7 +4,8 @@
 use crate::run::scheduler::RunEngineState;
 use crate::run::store;
 use crate::run::types::{
-    AgentAssignment, LeaseMode, Run, RunEvent, RunSnapshot, Task, WorkspaceLease,
+    AgentAssignment, CheckDeclaration, CheckResult, CoverageGap, Finding, LeaseMode, Run, RunCheck,
+    RunEvent, RunSnapshot, Task, WorkspaceLease,
 };
 use crate::run::workspace;
 use crate::services::database::init_db;
@@ -91,6 +92,72 @@ pub async fn run_list_events(
 #[tauri::command]
 pub async fn run_list(app: AppHandle) -> Result<Vec<Run>, String> {
     read_db(app, store::list_runs).await
+}
+
+#[tauri::command]
+pub async fn run_declare_checks(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    checks: Vec<CheckDeclaration>,
+) -> Result<Vec<RunCheck>, String> {
+    state.declare_checks(&app, run_id, checks).await
+}
+
+#[tauri::command]
+pub async fn run_approve_check(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    check_id: String,
+) -> Result<RunCheck, String> {
+    state.approve_check(&app, check_id).await
+}
+
+#[tauri::command]
+pub async fn run_baseline(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+) -> Result<Vec<CheckResult>, String> {
+    state.run_baseline(&app, run_id).await
+}
+
+#[tauri::command]
+pub async fn run_verify_task(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    task_id: String,
+) -> Result<Vec<CheckResult>, String> {
+    state.verify_task(&app, run_id, task_id).await
+}
+
+#[tauri::command]
+pub async fn run_complete_task(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    task_id: String,
+) -> Result<Vec<String>, String> {
+    state.complete_task(&app, run_id, task_id).await
+}
+
+#[tauri::command]
+pub async fn run_record_finding(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    finding: Finding,
+) -> Result<(), String> {
+    state.record_finding(&app, finding).await
+}
+
+#[tauri::command]
+pub async fn run_add_coverage_gap(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    gap: CoverageGap,
+) -> Result<(), String> {
+    state.record_coverage_gap(&app, gap).await
 }
 
 #[tauri::command]

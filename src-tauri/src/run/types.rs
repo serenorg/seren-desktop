@@ -304,6 +304,11 @@ pub enum RunEventType {
     RunCancelRequested,
     RunFinalized,
     LeaseStateChanged,
+    CheckDeclared,
+    CheckApproved,
+    CheckResultRecorded,
+    CoverageGapRecorded,
+    TaskCompletionRejected,
 }
 
 impl RunEventType {
@@ -322,6 +327,11 @@ impl RunEventType {
             Self::RunCancelRequested => "run_cancel_requested",
             Self::RunFinalized => "run_finalized",
             Self::LeaseStateChanged => "lease_state_changed",
+            Self::CheckDeclared => "check_declared",
+            Self::CheckApproved => "check_approved",
+            Self::CheckResultRecorded => "check_result_recorded",
+            Self::CoverageGapRecorded => "coverage_gap_recorded",
+            Self::TaskCompletionRejected => "task_completion_rejected",
         }
     }
 
@@ -340,6 +350,11 @@ impl RunEventType {
             "run_cancel_requested" => Self::RunCancelRequested,
             "run_finalized" => Self::RunFinalized,
             "lease_state_changed" => Self::LeaseStateChanged,
+            "check_declared" => Self::CheckDeclared,
+            "check_approved" => Self::CheckApproved,
+            "check_result_recorded" => Self::CheckResultRecorded,
+            "coverage_gap_recorded" => Self::CoverageGapRecorded,
+            "task_completion_rejected" => Self::TaskCompletionRejected,
             _ => return None,
         })
     }
@@ -448,6 +463,47 @@ pub struct Finding {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckDeclaration {
+    pub name: String,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunCheck {
+    pub id: String,
+    pub run_id: String,
+    pub name: String,
+    pub command: String,
+    pub approved: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckResult {
+    pub id: String,
+    pub check_id: String,
+    pub task_id: Option<String>,
+    pub attempt_id: Option<String>,
+    pub kind: String,
+    pub exit_code: Option<i32>,
+    pub duration_ms: i64,
+    pub output_tail: String,
+    pub pre_existing_failure: bool,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CoverageGap {
+    pub id: String,
+    pub run_id: String,
+    pub task_id: Option<String>,
+    pub kind: String,
+    pub subject: String,
+    pub detail: Option<String>,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NewRunEvent {
     pub id: String,
@@ -483,4 +539,7 @@ pub struct RunSnapshot {
     pub assignments: Vec<AgentAssignment>,
     pub attempts: Vec<Attempt>,
     pub findings: Vec<Finding>,
+    pub checks: Vec<RunCheck>,
+    pub check_results: Vec<CheckResult>,
+    pub coverage_gaps: Vec<CoverageGap>,
 }

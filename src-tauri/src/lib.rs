@@ -1403,6 +1403,13 @@ pub fn run() {
             commands::run::run_get_state,
             commands::run::run_list_events,
             commands::run::run_list,
+            commands::run::run_declare_checks,
+            commands::run::run_approve_check,
+            commands::run::run_baseline,
+            commands::run::run_verify_task,
+            commands::run::run_complete_task,
+            commands::run::run_record_finding,
+            commands::run::run_add_coverage_gap,
             commands::run::run_provision_workspace,
             commands::run::run_release_workspace,
             // Claude Code auto-memory interceptor commands

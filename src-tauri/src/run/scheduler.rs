@@ -1,16 +1,17 @@
 // ABOUTME: Serial run-engine scheduler and its lazily started Tauri state.
 // ABOUTME: Owns the only scheduler write connection and emits durable run events in order.
 
+use super::checks::{self, CheckGate};
 use super::status::derive_run_status;
 use super::store::{self, AppendOutcome};
 use super::types::{
-    AgentAssignment, LeaseMode, NewLease, NewRunEvent, Run, RunEvent, RunEventType, RunStatus,
-    Task, TaskState, WorkspaceLease,
+    AgentAssignment, CheckDeclaration, CheckResult, CoverageGap, Finding, LeaseMode, NewLease,
+    NewRunEvent, Run, RunCheck, RunEvent, RunEventType, RunStatus, Task, TaskState, WorkspaceLease,
 };
 use super::workspace::{self, ProvisionRequest, ProvisionedWorkspace};
 use crate::embedded_runtime;
 use crate::services::database::{init_db, now_ms};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -60,6 +61,48 @@ enum SchedulerCommand {
         run_id: String,
         task_id: String,
         outcome: Result<ProvisionedWorkspace, String>,
+    },
+    DeclareChecks {
+        run_id: String,
+        checks: Vec<CheckDeclaration>,
+        reply: oneshot::Sender<Result<Vec<RunCheck>, String>>,
+    },
+    ApproveCheck {
+        check_id: String,
+        reply: oneshot::Sender<Result<RunCheck, String>>,
+    },
+    RunBaseline {
+        run_id: String,
+        reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    },
+    FinishBaseline {
+        run_id: String,
+        results: Vec<CheckResult>,
+        reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    },
+    VerifyTask {
+        run_id: String,
+        task_id: String,
+        reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    },
+    FinishVerify {
+        run_id: String,
+        task_id: String,
+        results: Vec<CheckResult>,
+        reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    },
+    CompleteTask {
+        run_id: String,
+        task_id: String,
+        reply: oneshot::Sender<Result<Vec<String>, String>>,
+    },
+    RecordFinding {
+        finding: Finding,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    RecordCoverageGap {
+        gap: CoverageGap,
+        reply: oneshot::Sender<Result<(), String>>,
     },
     ReleaseLease {
         lease_id: String,
@@ -229,6 +272,133 @@ impl RunEngineState {
             .map_err(|_| "run scheduler dropped event response".to_string())?
     }
 
+    pub async fn declare_checks(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        checks: Vec<CheckDeclaration>,
+    ) -> Result<Vec<RunCheck>, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::DeclareChecks {
+                run_id,
+                checks,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped declare-checks response".to_string())?
+    }
+
+    pub async fn approve_check(
+        &self,
+        app: &AppHandle,
+        check_id: String,
+    ) -> Result<RunCheck, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::ApproveCheck { check_id, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped approve-check response".to_string())?
+    }
+
+    pub async fn run_baseline(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+    ) -> Result<Vec<CheckResult>, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::RunBaseline { run_id, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped baseline response".to_string())?
+    }
+
+    pub async fn verify_task(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        task_id: String,
+    ) -> Result<Vec<CheckResult>, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::VerifyTask {
+                run_id,
+                task_id,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped verify response".to_string())?
+    }
+
+    pub async fn complete_task(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        task_id: String,
+    ) -> Result<Vec<String>, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::CompleteTask {
+                run_id,
+                task_id,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped completion response".to_string())?
+    }
+
+    pub async fn record_finding(
+        &self,
+        app: &AppHandle,
+        finding: Finding,
+    ) -> Result<(), String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::RecordFinding { finding, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped finding response".to_string())?
+    }
+
+    pub async fn record_coverage_gap(
+        &self,
+        app: &AppHandle,
+        gap: CoverageGap,
+    ) -> Result<(), String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::RecordCoverageGap { gap, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped coverage-gap response".to_string())?
+    }
+
     pub async fn provision_workspace(
         &self,
         app: &AppHandle,
@@ -367,6 +537,58 @@ fn process_command(
             if let Err(error) = finish_provision(app, conn, lease_id, run_id, task_id, outcome) {
                 log::error!("[run-engine] workspace provision completion failed: {error}");
             }
+        }
+        SchedulerCommand::DeclareChecks {
+            run_id,
+            checks,
+            reply,
+        } => {
+            let _ = reply.send(declare_checks(app, conn, run_id, checks));
+        }
+        SchedulerCommand::ApproveCheck { check_id, reply } => {
+            let _ = reply.send(approve_check(app, conn, check_id));
+        }
+        SchedulerCommand::RunBaseline { run_id, reply } => {
+            if let Err(error) = start_baseline(app, conn, sender, run_id, reply) {
+                log::error!("[run-engine] baseline dispatch failed: {error}");
+            }
+        }
+        SchedulerCommand::FinishBaseline {
+            run_id,
+            results,
+            reply,
+        } => {
+            let _ = reply.send(finish_baseline(app, conn, run_id, results));
+        }
+        SchedulerCommand::VerifyTask {
+            run_id,
+            task_id,
+            reply,
+        } => {
+            if let Err(error) = start_verify(app, conn, sender, run_id, task_id, reply) {
+                log::error!("[run-engine] verify dispatch failed: {error}");
+            }
+        }
+        SchedulerCommand::FinishVerify {
+            run_id,
+            task_id,
+            results,
+            reply,
+        } => {
+            let _ = reply.send(finish_verify(app, conn, run_id, task_id, results));
+        }
+        SchedulerCommand::CompleteTask {
+            run_id,
+            task_id,
+            reply,
+        } => {
+            let _ = reply.send(complete_task(app, conn, run_id, task_id));
+        }
+        SchedulerCommand::RecordFinding { finding, reply } => {
+            let _ = reply.send(record_finding(app, conn, finding));
+        }
+        SchedulerCommand::RecordCoverageGap { gap, reply } => {
+            let _ = reply.send(record_coverage_gap(app, conn, gap));
         }
         SchedulerCommand::ReleaseLease { lease_id, reply } => {
             let _ = reply.send(release_lease(app, conn, lease_id));
@@ -564,6 +786,490 @@ fn finish_provision(
         }
     }
     Ok(())
+}
+
+fn declare_checks(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    declarations: Vec<CheckDeclaration>,
+) -> Result<Vec<RunCheck>, String> {
+    if store::load_run_snapshot(conn, &run_id)
+        .map_err(|error| error.to_string())?
+        .is_none()
+    {
+        return Err("run not found".to_string());
+    }
+    let mut checks = Vec::with_capacity(declarations.len());
+    for declaration in declarations {
+        if declaration.name.trim().is_empty() {
+            return Err("check name must not be empty".to_string());
+        }
+        if declaration.command.trim().is_empty() {
+            return Err(format!("check {} command must not be empty", declaration.name));
+        }
+        let check = RunCheck {
+            id: Uuid::new_v4().to_string(),
+            run_id: run_id.clone(),
+            name: declaration.name,
+            command: declaration.command,
+            approved: false,
+            created_at: now_ms(),
+        };
+        store::insert_check(conn, &check).map_err(|error| error.to_string())?;
+        append_and_emit(
+            app,
+            conn,
+            NewRunEvent {
+                id: Uuid::new_v4().to_string(),
+                run_id: run_id.clone(),
+                task_id: None,
+                attempt_id: None,
+                agent_id: None,
+                event_type: RunEventType::CheckDeclared,
+                payload: json!({
+                    "check_id": check.id,
+                    "name": check.name,
+                    "command": check.command,
+                    "approved": false,
+                }),
+                provider_event_id: None,
+                created_at: check.created_at,
+            },
+        )?;
+        checks.push(check);
+    }
+    Ok(checks)
+}
+
+fn approve_check(
+    app: &AppHandle,
+    conn: &Connection,
+    check_id: String,
+) -> Result<RunCheck, String> {
+    let check = store::approve_check(conn, &check_id).map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        NewRunEvent {
+            id: Uuid::new_v4().to_string(),
+            run_id: check.run_id.clone(),
+            task_id: None,
+            attempt_id: None,
+            agent_id: None,
+            event_type: RunEventType::CheckApproved,
+            payload: json!({"check_id": check.id, "name": check.name}),
+            provider_event_id: None,
+            created_at: now_ms(),
+        },
+    )?;
+    Ok(check)
+}
+
+fn approved_check_root(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT root_path FROM runs WHERE id = ?1",
+        params![run_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn check_env_path() -> Option<String> {
+    let embedded_path = embedded_runtime::get_embedded_path();
+    (!embedded_path.is_empty()).then(|| embedded_path.to_string())
+}
+
+fn run_check_commands(
+    root: &Path,
+    checks: &[RunCheck],
+    kind: &str,
+    task_id: Option<String>,
+) -> Vec<CheckResult> {
+    let env_path = check_env_path();
+    checks
+        .iter()
+        .map(|check| {
+            let setup = checks::execute_check(
+                root,
+                &check.command,
+                env_path.clone(),
+                Duration::from_secs(300),
+            );
+            checks::check_result_from_setup(check.id.clone(), task_id.clone(), kind, setup)
+        })
+        .collect()
+}
+
+fn start_baseline(
+    app: &AppHandle,
+    conn: &Connection,
+    sender: &mpsc::Sender<SchedulerCommand>,
+    run_id: String,
+    reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+) -> Result<(), String> {
+    let checks = store::list_checks(conn, &run_id).map_err(|error| error.to_string())?;
+    let root_path = approved_check_root(conn, &run_id)?;
+    let approved: Vec<RunCheck> = checks.iter().filter(|check| check.approved).cloned().collect();
+    for check in checks.iter().filter(|check| !check.approved) {
+        let gap = CoverageGap {
+            id: Uuid::new_v4().to_string(),
+            run_id: run_id.clone(),
+            task_id: None,
+            kind: "check_unapproved".to_string(),
+            subject: check.name.clone(),
+            detail: Some("check was declared but not approved for baseline execution".to_string()),
+            created_at: now_ms(),
+        };
+        record_coverage_gap(app, conn, gap)?;
+    }
+    if approved.is_empty() || root_path.is_none() {
+        if root_path.is_none() {
+            for check in &approved {
+                record_coverage_gap(
+                    app,
+                    conn,
+                    CoverageGap {
+                        id: Uuid::new_v4().to_string(),
+                        run_id: run_id.clone(),
+                        task_id: None,
+                        kind: "not_provisioned".to_string(),
+                        subject: check.name.clone(),
+                        detail: Some("run has no root path for check execution".to_string()),
+                        created_at: now_ms(),
+                    },
+                )?;
+            }
+        }
+        let result = finish_baseline(app, conn, run_id, Vec::new());
+        let _ = reply.send(result);
+        return Ok(());
+    }
+
+    let root_path = PathBuf::from(root_path.expect("checked above"));
+    let finish_sender = sender.clone();
+    tauri::async_runtime::spawn(async move {
+        let worker = tauri::async_runtime::spawn_blocking(move || {
+            run_check_commands(&root_path, &approved, "baseline", None)
+        })
+        .await
+        .map_err(|error| format!("baseline worker join failed: {error}"));
+        match worker {
+            Ok(results) => {
+                let _ = finish_sender
+                    .send(SchedulerCommand::FinishBaseline {
+                        run_id,
+                        results,
+                        reply,
+                    })
+                    .await;
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+    });
+    Ok(())
+}
+
+fn finish_baseline(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    results: Vec<CheckResult>,
+) -> Result<Vec<CheckResult>, String> {
+    for result in &results {
+        store::insert_check_result(conn, result).map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, check_result_event(&run_id, result, "baseline"))?;
+    }
+    recompute_ready_and_status(app, conn, &run_id)?;
+    Ok(results)
+}
+
+fn task_root_path(conn: &Connection, run_id: &str, task_id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT COALESCE(
+            (SELECT root_path FROM run_workspace_leases
+             WHERE run_id = ?1 AND task_id = ?2 AND state = 'active'
+             ORDER BY created_at DESC LIMIT 1),
+            (SELECT root_path FROM runs WHERE id = ?1)
+         )",
+        params![run_id, task_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn start_verify(
+    app: &AppHandle,
+    conn: &Connection,
+    sender: &mpsc::Sender<SchedulerCommand>,
+    run_id: String,
+    task_id: String,
+    reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+) -> Result<(), String> {
+    let state: String = conn
+        .query_row(
+            "SELECT state FROM run_tasks WHERE id = ?1 AND run_id = ?2",
+            params![task_id, run_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    let task_state = TaskState::parse(&state).ok_or_else(|| format!("invalid task state: {state}"))?;
+    if task_state == TaskState::Running {
+        store::transition_task(conn, &task_id, TaskState::Verifying, None)
+            .map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Verifying))?;
+    } else if task_state != TaskState::Verifying {
+        return Err(format!("task must be running or verifying; current state is {state}"));
+    }
+
+    let checks = store::list_checks(conn, &run_id).map_err(|error| error.to_string())?;
+    let approved: Vec<RunCheck> = checks.into_iter().filter(|check| check.approved).collect();
+    let root_path = task_root_path(conn, &run_id, &task_id)?;
+    if approved.is_empty() || root_path.is_none() {
+        if root_path.is_none() {
+            for check in &approved {
+                record_coverage_gap(
+                    app,
+                    conn,
+                    CoverageGap {
+                        id: Uuid::new_v4().to_string(),
+                        run_id: run_id.clone(),
+                        task_id: Some(task_id.clone()),
+                        kind: "not_provisioned".to_string(),
+                        subject: check.name.clone(),
+                        detail: Some("task has no active workspace or run root".to_string()),
+                        created_at: now_ms(),
+                    },
+                )?;
+            }
+        }
+        let result = finish_verify(app, conn, run_id, task_id, Vec::new());
+        let _ = reply.send(result);
+        return Ok(());
+    }
+
+    let root_path = PathBuf::from(root_path.expect("checked above"));
+    let finish_sender = sender.clone();
+    let finish_run_id = run_id.clone();
+    let finish_task_id = task_id.clone();
+    let worker_task_id = finish_task_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let worker = tauri::async_runtime::spawn_blocking(move || {
+            run_check_commands(
+                &root_path,
+                &approved,
+                "verify",
+                Some(worker_task_id),
+            )
+        })
+        .await
+        .map_err(|error| format!("verify worker join failed: {error}"));
+        match worker {
+            Ok(results) => {
+                let _ = finish_sender
+                    .send(SchedulerCommand::FinishVerify {
+                        run_id: finish_run_id,
+                        task_id: finish_task_id,
+                        results,
+                        reply,
+                    })
+                    .await;
+            }
+            Err(error) => {
+                let _ = reply.send(Err(error));
+            }
+        }
+    });
+    Ok(())
+}
+
+fn finish_verify(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    task_id: String,
+    results: Vec<CheckResult>,
+) -> Result<Vec<CheckResult>, String> {
+    for result in &results {
+        store::insert_check_result(conn, result).map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, check_result_event(&run_id, result, "verify"))?;
+    }
+    let current_state: String = conn
+        .query_row(
+            "SELECT state FROM run_tasks WHERE id = ?1",
+            params![task_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if TaskState::parse(&current_state) == Some(TaskState::Verifying) {
+        store::transition_task(conn, &task_id, TaskState::Review, None)
+            .map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Review))?;
+    }
+    recompute_ready_and_status(app, conn, &run_id)?;
+    Ok(results)
+}
+
+fn completion_gates(
+    conn: &Connection,
+    run_id: &str,
+    task_id: &str,
+) -> Result<Vec<CheckGate>, String> {
+    let checks = store::list_checks(conn, run_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|check| check.approved)
+        .collect::<Vec<_>>();
+    checks
+        .into_iter()
+        .map(|check| {
+            let baseline_failed: bool = conn
+                .query_row(
+                    "SELECT pre_existing_failure FROM run_check_results
+                     WHERE check_id = ?1 AND kind = 'baseline'
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    params![check.id],
+                    |row| Ok(row.get::<_, i64>(0)? != 0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .unwrap_or(false);
+            let verify_exit: Option<i32> = conn
+                .query_row(
+                    "SELECT exit_code FROM run_check_results
+                     WHERE check_id = ?1 AND task_id = ?2 AND kind = 'verify'
+                     ORDER BY created_at DESC, id DESC LIMIT 1",
+                    params![check.id, task_id],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .flatten();
+            Ok(CheckGate {
+                name: check.name,
+                baseline_failed,
+                verify_exit,
+            })
+        })
+        .collect()
+}
+
+fn complete_task(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    task_id: String,
+) -> Result<Vec<String>, String> {
+    let state: String = conn
+        .query_row(
+            "SELECT state FROM run_tasks WHERE id = ?1 AND run_id = ?2",
+            params![task_id, run_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if TaskState::parse(&state) != Some(TaskState::Review) {
+        return Err(format!("task must be in review; current state is {state}"));
+    }
+    let has_evidence = store::task_has_evidence(conn, &task_id).map_err(|error| error.to_string())?;
+    let blockers = checks::completion_blockers(
+        has_evidence,
+        &completion_gates(conn, &run_id, &task_id)?,
+    );
+    if !blockers.is_empty() {
+        append_and_emit(
+            app,
+            conn,
+            event_for_task_or_run(
+                &run_id,
+                Some(&task_id),
+                RunEventType::TaskCompletionRejected,
+                json!({"blockers": blockers.clone()}),
+            ),
+        )?;
+        return Ok(blockers);
+    }
+    store::transition_task(conn, &task_id, TaskState::Done, None)
+        .map_err(|error| error.to_string())?;
+    append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Done))?;
+    recompute_ready_and_status(app, conn, &run_id)?;
+    Ok(Vec::new())
+}
+
+fn record_finding(app: &AppHandle, conn: &Connection, finding: Finding) -> Result<(), String> {
+    store::insert_finding(conn, &finding).map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        event_for_task_or_run(
+            &finding.run_id,
+            finding.task_id.as_deref(),
+            RunEventType::FindingRecorded,
+            json!({"finding_id": finding.id, "claim": finding.claim}),
+        ),
+    )?;
+    Ok(())
+}
+
+fn record_coverage_gap(
+    app: &AppHandle,
+    conn: &Connection,
+    gap: CoverageGap,
+) -> Result<(), String> {
+    store::insert_coverage_gap(conn, &gap).map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        event_for_task_or_run(
+            &gap.run_id,
+            gap.task_id.as_deref(),
+            RunEventType::CoverageGapRecorded,
+            json!({
+                "gap_id": gap.id,
+                "kind": gap.kind,
+                "subject": gap.subject,
+                "detail": gap.detail,
+            }),
+        ),
+    )?;
+    Ok(())
+}
+
+fn event_for_task_or_run(
+    run_id: &str,
+    task_id: Option<&str>,
+    event_type: RunEventType,
+    payload: serde_json::Value,
+) -> NewRunEvent {
+    NewRunEvent {
+        id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        task_id: task_id.map(str::to_string),
+        attempt_id: None,
+        agent_id: None,
+        event_type,
+        payload,
+        provider_event_id: None,
+        created_at: now_ms(),
+    }
+}
+
+fn check_result_event(run_id: &str, result: &CheckResult, kind: &str) -> NewRunEvent {
+    event_for_task_or_run(
+        run_id,
+        result.task_id.as_deref(),
+        RunEventType::CheckResultRecorded,
+        json!({
+            "check_result_id": result.id,
+            "check_id": result.check_id,
+            "kind": kind,
+            "exit_code": result.exit_code,
+            "duration_ms": result.duration_ms,
+            "pre_existing_failure": result.pre_existing_failure,
+            "output_tail": result.output_tail,
+        }),
+    )
 }
 
 fn release_lease(
@@ -983,4 +1689,138 @@ fn load_run(conn: &Connection, run_id: &str) -> Result<Run, String> {
     snapshot
         .map(|snapshot| snapshot.run)
         .ok_or_else(|| "run not found".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::types::{
+        Evidence, EvidenceKind, FindingConfidence, FindingStatus, RunCheck, RunStatus,
+    };
+    use crate::services::database::{configure_connection, setup_schema};
+
+    fn connection() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+        setup_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn unapproved_check_does_not_block_completion() {
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-unapproved".to_string(),
+                objective: "completion gating".to_string(),
+                root_path: None,
+                status: RunStatus::Running,
+                cancel_requested: false,
+                created_at: 1,
+                updated_at: 1,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+        store::add_task(
+            &conn,
+            &Task {
+                id: "task-unapproved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                title: "Completion task".to_string(),
+                brief: "Verify completion gates".to_string(),
+                state: TaskState::Review,
+                blocked_reason: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        store::insert_check(
+            &conn,
+            &RunCheck {
+                id: "check-approved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                name: "approved check".to_string(),
+                command: "echo ok".to_string(),
+                approved: true,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        store::insert_check(
+            &conn,
+            &RunCheck {
+                id: "check-unapproved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                name: "unapproved check".to_string(),
+                command: "exit 9".to_string(),
+                approved: false,
+                created_at: 2,
+            },
+        )
+        .unwrap();
+        store::insert_check_result(
+            &conn,
+            &CheckResult {
+                id: "baseline-approved".to_string(),
+                check_id: "check-approved".to_string(),
+                task_id: None,
+                attempt_id: None,
+                kind: "baseline".to_string(),
+                exit_code: Some(0),
+                duration_ms: 1,
+                output_tail: "ok".to_string(),
+                pre_existing_failure: false,
+                created_at: 3,
+            },
+        )
+        .unwrap();
+        store::insert_check_result(
+            &conn,
+            &CheckResult {
+                id: "verify-approved".to_string(),
+                check_id: "check-approved".to_string(),
+                task_id: Some("task-unapproved".to_string()),
+                attempt_id: None,
+                kind: "verify".to_string(),
+                exit_code: Some(0),
+                duration_ms: 1,
+                output_tail: "ok".to_string(),
+                pre_existing_failure: false,
+                created_at: 4,
+            },
+        )
+        .unwrap();
+        store::insert_finding(
+            &conn,
+            &Finding {
+                id: "finding-completion".to_string(),
+                run_id: "run-unapproved".to_string(),
+                task_id: Some("task-unapproved".to_string()),
+                attempt_id: None,
+                claim: "The task has evidence".to_string(),
+                confidence: FindingConfidence::Asserted,
+                evidence: vec![Evidence {
+                    kind: EvidenceKind::CommandResult,
+                    reference: "echo ok".to_string(),
+                    excerpt: Some("ok".to_string()),
+                }],
+                proposed_artifact: None,
+                needs_approval: false,
+                status: FindingStatus::Open,
+                created_at: 5,
+                updated_at: 5,
+            },
+        )
+        .unwrap();
+
+        let gates = completion_gates(&conn, "run-unapproved", "task-unapproved").unwrap();
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].name, "approved check");
+        let has_evidence = store::task_has_evidence(&conn, "task-unapproved").unwrap();
+        assert!(checks::completion_blockers(has_evidence, &gates).is_empty());
+    }
 }
