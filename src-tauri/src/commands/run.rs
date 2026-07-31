@@ -3,9 +3,13 @@
 
 use crate::run::scheduler::RunEngineState;
 use crate::run::store;
-use crate::run::types::{AgentAssignment, Run, RunEvent, RunSnapshot, Task};
+use crate::run::types::{
+    AgentAssignment, LeaseMode, Run, RunEvent, RunSnapshot, Task, WorkspaceLease,
+};
+use crate::run::workspace;
 use crate::services::database::init_db;
 use rusqlite::Connection;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
 
 async fn read_db<T, F>(app: AppHandle, operation: F) -> Result<T, String>
@@ -87,4 +91,64 @@ pub async fn run_list_events(
 #[tauri::command]
 pub async fn run_list(app: AppHandle) -> Result<Vec<Run>, String> {
     read_db(app, store::list_runs).await
+}
+
+#[tauri::command]
+pub async fn run_provision_workspace(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    task_id: String,
+    mode: LeaseMode,
+    source_path: Option<String>,
+    setup_script: Option<String>,
+) -> Result<WorkspaceLease, String> {
+    state
+        .provision_workspace(
+            &app,
+            run_id,
+            task_id,
+            mode,
+            source_path,
+            setup_script,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn run_release_workspace(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    lease_id: String,
+) -> Result<WorkspaceLease, String> {
+    let read_lease_id = lease_id.clone();
+    let (lease, source_repo) = read_db(app.clone(), move |conn| {
+        let lease = store::get_lease(conn, &read_lease_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        let source_repo = store::load_run_snapshot(conn, &lease.run_id)?
+            .and_then(|snapshot| snapshot.run.root_path)
+            .map(PathBuf::from);
+        Ok((lease, source_repo))
+    })
+    .await?;
+
+    let mode = lease.mode;
+    let root_path = match lease.root_path.clone() {
+        Some(root_path) => root_path,
+        None if mode == LeaseMode::Worktree => {
+            return Err("worktree lease has no provisioned root path".to_string());
+        }
+        None => String::new(),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        workspace::release(
+            Path::new(&root_path),
+            source_repo.as_deref(),
+            mode,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    state.release_lease(&app, lease_id).await
 }

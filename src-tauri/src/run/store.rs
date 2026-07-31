@@ -4,8 +4,8 @@
 use super::status::is_legal_transition;
 use super::types::{
     AgentAssignment, Attempt, Evidence, Finding, FindingConfidence, FindingStatus, LeaseMode,
-    NewRunEvent, ProposedArtifact, Run, RunEvent, RunEventType, RunSnapshot, RunStatus, Task,
-    TaskDependency, TaskState, WorkspaceLease,
+    LeaseState, NewLease, NewRunEvent, ProposedArtifact, Run, RunEvent, RunEventType, RunSnapshot,
+    RunStatus, Task, TaskDependency, TaskState, WorkspaceLease,
 };
 use crate::services::database::now_ms;
 use rusqlite::{Connection, OptionalExtension, Result, params};
@@ -171,6 +171,97 @@ pub fn insert_workspace_lease(conn: &Connection, lease: &WorkspaceLease) -> Resu
         ],
     )?;
     Ok(())
+}
+
+impl From<&NewLease> for NewLease {
+    fn from(lease: &NewLease) -> Self {
+        lease.clone()
+    }
+}
+
+pub fn insert_lease<L>(conn: &Connection, lease: L) -> Result<()>
+where
+    L: Into<NewLease>,
+{
+    let lease = lease.into();
+    conn.execute(
+        "INSERT INTO run_workspace_leases
+            (id, run_id, task_id, mode, state, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'requested', ?5)",
+        params![
+            lease.id,
+            lease.run_id,
+            lease.task_id,
+            lease.mode.as_str(),
+            now_ms(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn lease_from_row(row: &rusqlite::Row<'_>) -> Result<WorkspaceLease> {
+    Ok(WorkspaceLease {
+        id: row.get(0)?,
+        run_id: row.get(1)?,
+        task_id: row.get(2)?,
+        mode: parse_lease_mode(row.get(3)?)?,
+        root_path: row.get(4)?,
+        base_revision: row.get(5)?,
+        state: row.get(6)?,
+        created_at: row.get(7)?,
+        released_at: row.get(8)?,
+    })
+}
+
+pub fn update_lease_state(
+    conn: &Connection,
+    lease_id: &str,
+    state: &str,
+    root_path: Option<&str>,
+    base_revision: Option<&str>,
+) -> Result<()> {
+    if LeaseState::parse(state).is_none() {
+        return Err(invalid_value("lease state", state));
+    }
+    let released_at = (state == LeaseState::Released.as_str()).then_some(now_ms());
+    let updated = conn.execute(
+        "UPDATE run_workspace_leases
+         SET state = ?1,
+             root_path = COALESCE(?2, root_path),
+             base_revision = COALESCE(?3, base_revision),
+             released_at = ?4
+         WHERE id = ?5",
+        params![state, root_path, base_revision, released_at, lease_id],
+    )?;
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    Ok(())
+}
+
+pub fn get_lease(conn: &Connection, lease_id: &str) -> Result<Option<WorkspaceLease>> {
+    conn.query_row(
+        "SELECT id, run_id, task_id, mode, root_path, base_revision, state,
+                created_at, released_at
+         FROM run_workspace_leases
+         WHERE id = ?1",
+        params![lease_id],
+        lease_from_row,
+    )
+    .optional()
+}
+
+pub fn list_leases(conn: &Connection, run_id: &str) -> Result<Vec<WorkspaceLease>> {
+    let mut statement = conn.prepare(
+        "SELECT id, run_id, task_id, mode, root_path, base_revision, state,
+                created_at, released_at
+         FROM run_workspace_leases
+         WHERE run_id = ?1
+         ORDER BY created_at ASC, id ASC",
+    )?;
+    statement
+        .query_map(params![run_id], lease_from_row)?
+        .collect()
 }
 
 pub fn insert_finding(conn: &Connection, finding: &Finding) -> Result<()> {
@@ -669,6 +760,45 @@ mod tests {
             append_event(&conn, &event("event-5", "run-2", Some("provider-4"))).unwrap(),
             AppendOutcome::Inserted(1)
         );
+    }
+
+    #[test]
+    fn lease_state_round_trips_and_lists() {
+        let conn = connection();
+        create_run(&conn, &run("run-1")).unwrap();
+        add_task(&conn, &task("task-1", "run-1"), &[]).unwrap();
+        insert_lease(
+            &conn,
+            NewLease {
+                id: "lease-1".to_string(),
+                run_id: "run-1".to_string(),
+                task_id: "task-1".to_string(),
+                mode: LeaseMode::Scratch,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            get_lease(&conn, "lease-1").unwrap().unwrap().state,
+            "requested"
+        );
+        update_lease_state(
+            &conn,
+            "lease-1",
+            "active",
+            Some("/tmp/run-workspace"),
+            Some("revision"),
+        )
+        .unwrap();
+        let leases = list_leases(&conn, "run-1").unwrap();
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].root_path.as_deref(), Some("/tmp/run-workspace"));
+        assert_eq!(leases[0].base_revision.as_deref(), Some("revision"));
+        update_lease_state(&conn, "lease-1", "released", None, None).unwrap();
+        assert!(get_lease(&conn, "lease-1")
+            .unwrap()
+            .unwrap()
+            .released_at
+            .is_some());
     }
 
     #[test]

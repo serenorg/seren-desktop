@@ -1403,6 +1403,8 @@ pub fn run() {
             commands::run::run_get_state,
             commands::run::run_list_events,
             commands::run::run_list,
+            commands::run::run_provision_workspace,
+            commands::run::run_release_workspace,
             // Claude Code auto-memory interceptor commands
             commands::claude_memory::claude_memory_start,
             commands::claude_memory::claude_memory_stop,
