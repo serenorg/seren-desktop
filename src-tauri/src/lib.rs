@@ -24,6 +24,7 @@ pub mod commands {
     pub mod orchestrator;
     pub mod provider_runtime;
     pub mod recording;
+    pub mod run;
     pub mod sandbox;
     pub mod session;
     pub mod tool_authorization;
@@ -69,6 +70,7 @@ mod path_util;
 mod pdf;
 mod polymarket;
 mod provider_runtime;
+mod run;
 mod secret_broker;
 mod shell;
 mod skills;
@@ -653,6 +655,7 @@ pub fn run() {
             .manage(mcp::McpState::new())
             .manage(mcp::HttpMcpState::new())
             .manage(orchestrator::service::OrchestratorState::new())
+            .manage(run::scheduler::RunEngineState::new())
             .manage(audio::pipeline::CaptureRegistry::default())
             .manage(std::sync::Mutex::new(
                 audio::lifecycle::LifecycleController::new(
@@ -1435,6 +1438,14 @@ pub fn run() {
             commands::orchestrator::cancel_orchestration,
             commands::orchestrator::submit_tool_result,
             commands::orchestrator::submit_eval_signal,
+            // Durable run-engine commands
+            commands::run::run_create,
+            commands::run::run_add_task,
+            commands::run::run_add_agent,
+            commands::run::run_cancel,
+            commands::run::run_get_state,
+            commands::run::run_list_events,
+            commands::run::run_list,
             // Claude Code auto-memory interceptor commands
             commands::claude_memory::claude_memory_start,
             commands::claude_memory::claude_memory_stop,

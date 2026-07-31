@@ -1228,6 +1228,138 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Durable run-engine tables. These are intentionally separate from the
+    // conversational orchestration tables so later execution phases can
+    // evolve without changing existing plan semantics.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS runs (
+            id TEXT PRIMARY KEY,
+            objective TEXT NOT NULL,
+            root_path TEXT,
+            status TEXT NOT NULL DEFAULT 'running',
+            cancel_requested INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            completed_at INTEGER
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_tasks (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            brief TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending',
+            blocked_reason TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_task_dependencies (
+            task_id TEXT NOT NULL,
+            depends_on_task_id TEXT NOT NULL,
+            PRIMARY KEY (task_id, depends_on_task_id),
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (depends_on_task_id) REFERENCES run_tasks(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_agent_assignments (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            agent_type TEXT NOT NULL,
+            model_id TEXT,
+            role_label TEXT,
+            created_at INTEGER NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_attempts (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            agent_assignment_id TEXT,
+            agent_session_id TEXT,
+            attempt_number INTEGER NOT NULL,
+            outcome TEXT,
+            started_at INTEGER NOT NULL,
+            ended_at INTEGER,
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (agent_assignment_id) REFERENCES run_agent_assignments(id) ON DELETE SET NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_workspace_leases (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            mode TEXT NOT NULL,
+            root_path TEXT,
+            base_revision TEXT,
+            state TEXT NOT NULL DEFAULT 'requested',
+            created_at INTEGER NOT NULL,
+            released_at INTEGER,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_findings (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            attempt_id TEXT,
+            claim TEXT NOT NULL,
+            confidence TEXT NOT NULL DEFAULT 'asserted',
+            evidence_json TEXT NOT NULL DEFAULT '[]',
+            proposed_artifact_json TEXT,
+            needs_approval INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+            FOREIGN KEY (task_id) REFERENCES run_tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (attempt_id) REFERENCES run_attempts(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS run_events (
+            id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            task_id TEXT,
+            attempt_id TEXT,
+            agent_id TEXT,
+            sequence INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            provider_event_id TEXT,
+            created_at INTEGER NOT NULL,
+            UNIQUE (run_id, sequence),
+            FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_run_events_idempotency
+         ON run_events(attempt_id, provider_event_id)
+         WHERE attempt_id IS NOT NULL AND provider_event_id IS NOT NULL",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_events_run_seq
+         ON run_events(run_id, sequence)",
+        [],
+    )?;
+
     // Runtime sessions table for computer-use sessions
     conn.execute(
         "CREATE TABLE IF NOT EXISTS runtime_sessions (
