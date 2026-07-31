@@ -1370,6 +1370,8 @@ export interface ActiveSession {
    * to the UI, not dispatch-eligible until promoted. #1631.
    */
   role: "serving" | "standby";
+  /** Run id that currently owns this session and fences it from idle reclaim. */
+  ownedByRunId?: string;
   /**
    * True once the standby session finished its compaction seed prompt and
    * is eligible for `promoteStandbyAndDispatch`. Always false for serving
@@ -2176,6 +2178,7 @@ function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
       // point of predictive compaction. Killing one mid-warm-up defeats
       // the invisibility budget for the next user submit. #1631.
       if (session.role === "standby") return false;
+      if (session.ownedByRunId) return false;
       if (
         excludeConversationId &&
         session.conversationId === excludeConversationId
@@ -2220,6 +2223,18 @@ export const agentStore = {
 
   get sessions() {
     return state.sessions;
+  },
+
+  /** Claim ownedByRunId for a live run. */
+  markSessionRunOwned(sessionId: string, runId: string): void {
+    if (!state.sessions[sessionId]) return;
+    setState("sessions", sessionId, "ownedByRunId", runId);
+  },
+
+  /** Clear ownedByRunId when the run no longer needs the session. */
+  releaseSessionRunOwnership(sessionId: string): void {
+    if (!state.sessions[sessionId]) return;
+    setState("sessions", sessionId, "ownedByRunId", undefined);
   },
 
   get activeSessionId() {
@@ -9084,3 +9099,5 @@ export type {
   DiffProposalEvent,
   SessionStatus,
 };
+
+export { getIdleClaudeSessionIds as _getIdleClaudeSessionIds };

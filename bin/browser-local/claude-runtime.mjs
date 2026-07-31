@@ -30,6 +30,7 @@ import {
   writeForkedTranscript,
 } from "./synthetic-transcript.mjs";
 import { providerLogPrefix } from "./logging.mjs";
+import { createAdmissionGate } from "./session-admission.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -727,6 +728,14 @@ function buildSessionStatus(session, status = session.status) {
     modes: buildModeState(session.currentModeId),
     configOptions: buildConfigOptions(session),
   };
+}
+
+function resolveClaudeSessionLimit() {
+  const configured = Number.parseInt(
+    process.env.SEREN_CLAUDE_SESSION_LIMIT ?? "",
+    10,
+  );
+  return Number.isFinite(configured) && configured > 0 ? configured : 3;
 }
 
 function normalizeModelRecords(result) {
@@ -2605,7 +2614,13 @@ function handleLine(emit, session, line) {
   }
 }
 
-function attachProcessListeners(emit, sessions, session, exitPromises) {
+function attachProcessListeners(
+  emit,
+  sessions,
+  session,
+  exitPromises,
+  admissionGate,
+) {
   const logPrefix = session.logPrefix ?? providerLogPrefix("claude");
   session.output.on("line", (line) => handleLine(emit, session, line));
 
@@ -2667,6 +2682,7 @@ function attachProcessListeners(emit, sessions, session, exitPromises) {
     // to reuse this session ID.
     const finish = () => {
       exitPromises.delete(session.id);
+      admissionGate.release(session.id);
       resolveExit();
     };
 
@@ -2736,6 +2752,36 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
   // the promise resolves. Before spawning with a reused ID, we await
   // this to prevent the old exit handler from deleting the new session.
   const exitPromises = new Map();
+  const admissionMetadata = new Map();
+  const admissionGate = createAdmissionGate({
+    limit: resolveClaudeSessionLimit(),
+    onQueued(sessionId, position) {
+      const metadata = admissionMetadata.get(sessionId);
+      if (!metadata) return;
+      console.log(
+        claudeLogPrefix +
+          " session queued sessionId=" +
+          sessionId +
+          " position=" +
+          position,
+      );
+      emit("provider://session-status", {
+        ...buildSessionStatus(
+          {
+            id: sessionId,
+            agentSessionId: metadata.agentSessionId,
+            claudeVersion: null,
+            availableModelRecords: [],
+            currentModelId: metadata.currentModelId,
+            currentModeId: "default",
+            reasoningEffort: metadata.reasoningEffort,
+          },
+          "queued",
+        ),
+        queuePosition: position,
+      });
+    },
+  });
 
   function createSessionRecord({
     sessionId,
@@ -2822,6 +2868,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     if (pendingExit) {
       await pendingExit;
     }
+    let admissionAcquired = false;
 
     const remoteSessionId = resumeAgentSessionId ?? randomUUID();
     const serenCredential = resolveBrokeredSerenCredential(params);
@@ -2848,6 +2895,14 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       typeof initialModelId === "string" && initialModelId.length > 0
         ? initialModelId
         : DEFAULT_PREFERRED_MODEL;
+    admissionMetadata.set(sessionId, {
+      agentSessionId: remoteSessionId,
+      currentModelId: preferredModel,
+      reasoningEffort: effectiveEffort,
+    });
+    await admissionGate.acquire(sessionId);
+    admissionAcquired = true;
+    admissionMetadata.delete(sessionId);
     let serenMcpProxy = null;
     let mcpConfig;
     let claudeArgs;
@@ -2974,6 +3029,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         }
         console.error(`${claudeLogPrefix} Spawn error: ${spawnError.message}`);
         sessions.delete(sessionId);
+        admissionGate.release(sessionId);
         void serenMcpProxy?.close();
         // A process that never started may never emit "exit", so this launch's
         // temp config files are cleared here or not at all. The orphan guard
@@ -3028,7 +3084,13 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       });
 
       sessions.set(sessionId, launchedSession);
-      attachProcessListeners(emit, sessions, launchedSession, exitPromises);
+      attachProcessListeners(
+        emit,
+        sessions,
+        launchedSession,
+        exitPromises,
+        admissionGate,
+      );
       return { processHandle, session: launchedSession };
     };
 
@@ -3170,6 +3232,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sessions.delete(sessionId);
+      admissionMetadata.delete(sessionId);
+      if (admissionAcquired) {
+        admissionGate.release(sessionId);
+      }
       if (processHandle) killChildTree(processHandle);
       await serenMcpProxy?.close();
       emit("provider://error", {
@@ -3314,6 +3380,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       status: "terminated",
       agentSessionId: session.agentSessionId,
     });
+    admissionGate.release(sessionId);
   }
 
   async function listSessions() {
