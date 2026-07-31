@@ -26,7 +26,7 @@ function directTerminationContext(sessionExpression: string): string {
   return agentStoreSource.slice(Math.max(0, index - 1_200), index + 400);
 }
 
-describe("agent session credential leases (#3194)", () => {
+describe("agent session credential leases (#3194, #3504)", () => {
   it("creates a per-session lease instead of reading the persistent desktop key", () => {
     const spawnBody = bodyAfter("async spawnSession(");
     expect(spawnBody).toContain("await createCredentialLease(localSessionId)");
@@ -44,6 +44,24 @@ describe("agent session credential leases (#3194)", () => {
     // raw key used to occupy.
     expect(bodyAfter("async spawnSession(", 30_000)).toMatch(
       /agentSandboxMode,\s*\n\s*serenCredential,/,
+    );
+  });
+
+  it("surfaces sign-in instead of silently omitting publisher tools", () => {
+    const spawnBody = bodyAfter("async spawnSession(", 30_000);
+    const authGate = spawnBody.slice(
+      spawnBody.indexOf("if (authStore.isAuthenticated)"),
+      spawnBody.indexOf("const enabledMcpServers"),
+    );
+    expect(authGate).toContain("await createCredentialLease(localSessionId)");
+    expect(authGate).toContain("else {");
+    expect(authGate).toContain("requestSignInModal()");
+
+    const degradedBody = bodyAfter('case "mcpDegraded":', 5_000);
+    expect(degradedBody).toContain("!authStore.isAuthenticated");
+    expect(degradedBody).toContain("requestSignInModal()");
+    expect(degradedBody).toContain(
+      "Seren publisher tools are off because your Seren session expired.",
     );
   });
 
