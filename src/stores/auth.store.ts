@@ -17,6 +17,7 @@ import {
   hasStoredToken,
   isLoggedIn,
 } from "@/services/auth";
+import { resumeCredentialLeases } from "@/services/credential-lease";
 import { initializeGateway, resetGateway } from "@/services/mcp-gateway";
 import {
   getDefaultOrganizationPrivateChatPolicy,
@@ -246,6 +247,19 @@ async function activateAuthenticatedSession(
     privateChatPolicy,
     signInModalRequested: false,
   });
+
+  if (isTauriRuntime()) {
+    try {
+      await resumeCredentialLeases();
+    } catch (error) {
+      // Authentication itself succeeded. Keep the signed-in shell and let the
+      // Rust maintenance worker retry any live route on its next interval.
+      console.warn(
+        "[Auth Store] Failed to resume one or more agent credential leases:",
+        error,
+      );
+    }
+  }
 
   // Initialize MCP Gateway in background (non-blocking)
   void initializeMcpInBackground();

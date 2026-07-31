@@ -52,6 +52,7 @@ interface ScenarioModule {
 export interface ScenarioContext {
   client: ControlClient;
   artifactsDir: string;
+  validationHome: string;
   writeArtifact(name: string, value: unknown): Promise<void>;
 }
 
@@ -126,6 +127,7 @@ async function main(): Promise<void> {
     await run({
       client,
       artifactsDir,
+      validationHome,
       writeArtifact: writeJson,
     });
 

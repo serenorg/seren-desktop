@@ -11,13 +11,15 @@ use tauri::AppHandle;
 use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex;
 
-use crate::credential_broker::PublisherCredentialBroker;
+use crate::credential_broker::{BrokerRecoveryRequest, PublisherCredentialBroker};
 
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 const DEFAULT_ORG_API_KEYS_PATH: &str = "/organizations/default/api-keys";
 const LEASE_STORE: &str = "credential-leases.json";
 const LEASE_LEDGER_KEY: &str = "orphaned_leases";
 const LEASE_EXPIRY_DAYS: u8 = 1;
+const LEASE_RENEWAL_INTERVAL: Duration = Duration::from_secs(15 * 60);
+const LEASE_RENEWAL_WINDOW_SECONDS: i64 = 6 * 60 * 60;
 // A general agent session cannot predict its publisher set at spawn because
 // the Seren MCP catalog is dynamic, so it retains the existing publisher
 // wildcard. Managed deployment mutations are a separate Core capability and
@@ -46,6 +48,7 @@ struct ActiveLease {
     revoke_id: String,
     expires_at: String,
     endpoints: crate::credential_broker::BrokeredEndpoints,
+    suspended: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,16 +96,22 @@ pub struct CredentialLeaseManager {
     operation_lock: Arc<Mutex<()>>,
     startup_reaper_pending: Arc<AtomicBool>,
     broker: Option<PublisherCredentialBroker>,
+    recovery_rx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<BrokerRecoveryRequest>>>>,
     client: reqwest::Client,
 }
 
 impl CredentialLeaseManager {
     pub fn new(broker: Option<PublisherCredentialBroker>) -> Self {
+        let (recovery_tx, recovery_rx) = tokio::sync::mpsc::unbounded_channel();
+        if let Some(broker) = broker.as_ref() {
+            broker.set_recovery_sender(recovery_tx);
+        }
         Self {
             active: Arc::new(Mutex::new(HashMap::new())),
             operation_lock: Arc::new(Mutex::new(())),
             startup_reaper_pending: Arc::new(AtomicBool::new(false)),
             broker,
+            recovery_rx: Arc::new(Mutex::new(Some(recovery_rx))),
             client: reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
                 .build()
@@ -147,14 +156,10 @@ impl CredentialLeaseManager {
         }
 
         if let Some(existing) = self.active.lock().await.get(&session_id).cloned() {
-            return Ok(CredentialLease {
-                session_id,
-                key_id: existing.key_id,
-                expires_at: existing.expires_at,
-                capability: existing.endpoints.capability,
-                mcp_url: existing.endpoints.mcp_url,
-                api_base_url: existing.endpoints.api_base_url,
-            });
+            if existing.suspended {
+                return self.renew_lease_locked(app, &session_id, None).await;
+            }
+            return Ok(credential_lease(&session_id, &existing));
         }
 
         let request_body = serde_json::json!({
@@ -189,7 +194,9 @@ impl CredentialLeaseManager {
         // treat its absence as a failed creation rather than issuing a lease
         // that only server-side expiry can end.
         if created.id.trim().is_empty() {
-            return Err("Credential lease creation response omitted its revocation id.".to_string());
+            return Err(
+                "Credential lease creation response omitted its revocation id.".to_string(),
+            );
         }
 
         let expires_at = created.expires_at.unwrap_or_default();
@@ -231,7 +238,9 @@ impl CredentialLeaseManager {
             Err(error) => {
                 let revoke_result = self.revoke_records_locked(app, vec![record]).await;
                 return Err(match revoke_result {
-                    Ok(()) => format!("Credential broker registration failed ({error}); key was revoked."),
+                    Ok(()) => {
+                        format!("Credential broker registration failed ({error}); key was revoked.")
+                    }
                     Err(revoke_error) => format!(
                         "Credential broker registration failed ({error}); key revocation was queued: {revoke_error}"
                     ),
@@ -246,6 +255,7 @@ impl CredentialLeaseManager {
                 revoke_id: created.id.clone(),
                 expires_at: expires_at.clone(),
                 endpoints: endpoints.clone(),
+                suspended: false,
             },
         );
 
@@ -257,6 +267,228 @@ impl CredentialLeaseManager {
             mcp_url: endpoints.mcp_url,
             api_base_url: endpoints.api_base_url,
         })
+    }
+
+    /// Keep live agent leases ahead of their server expiry and service broker
+    /// requests when a key is invalidated early. Both paths rotate the broker
+    /// route in place, so provider runtimes keep the same URL + capability.
+    pub async fn run_maintenance(&self, app: AppHandle) {
+        let Some(mut recovery_rx) = self.recovery_rx.lock().await.take() else {
+            log::warn!("[credential-lease] Maintenance worker already started");
+            return;
+        };
+        let mut interval = tokio::time::interval(LEASE_RENEWAL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    self.renew_due_leases(&app).await;
+                }
+                request = recovery_rx.recv() => {
+                    let Some(request) = request else {
+                        return;
+                    };
+                    let recovered = self
+                        .renew_lease(&app, &request.session_id, Some(request.generation))
+                        .await
+                        .is_ok();
+                    let _ = request.completed.send(recovered);
+                }
+            }
+        }
+    }
+
+    /// Rehydrate routes intentionally suspended by logout after authentication
+    /// succeeds again. Expired/due routes are included so a long sign-in flow
+    /// cannot leave an agent on yesterday's key. #3508
+    pub async fn resume_leases(&self, app: &AppHandle) -> Result<(), String> {
+        let now = jiff::Timestamp::now();
+        let session_ids: Vec<String> = self
+            .active
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, lease)| lease.suspended || lease_needs_renewal(&lease.expires_at, now))
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        let mut failures = Vec::new();
+        for session_id in session_ids {
+            if let Err(error) = self.renew_lease(app, &session_id, None).await {
+                log::warn!(
+                    "[credential-lease] Could not resume session lease {session_id}: {error}"
+                );
+                failures.push(session_id);
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{} credential lease(s) could not be resumed",
+                failures.len()
+            ))
+        }
+    }
+
+    #[cfg(feature = "validation")]
+    pub(crate) fn expire_active_routes_for_validation(&self) -> Result<usize, String> {
+        self.broker
+            .as_ref()
+            .ok_or_else(|| "Credential broker is unavailable".to_string())?
+            .expire_all_for_validation()
+    }
+
+    async fn renew_due_leases(&self, app: &AppHandle) {
+        if self.startup_reaper_pending.load(Ordering::Acquire) {
+            return;
+        }
+        let now = jiff::Timestamp::now();
+        let session_ids: Vec<String> = self
+            .active
+            .lock()
+            .await
+            .iter()
+            .filter(|(_, lease)| !lease.suspended && lease_needs_renewal(&lease.expires_at, now))
+            .map(|(session_id, _)| session_id.clone())
+            .collect();
+        for session_id in session_ids {
+            if let Err(error) = self.renew_lease(app, &session_id, None).await {
+                log::warn!("[credential-lease] Scheduled renewal failed for {session_id}: {error}");
+            }
+        }
+    }
+
+    async fn renew_lease(
+        &self,
+        app: &AppHandle,
+        session_id: &str,
+        failed_generation: Option<u64>,
+    ) -> Result<CredentialLease, String> {
+        let _operation = self.operation_lock.lock().await;
+        self.renew_lease_locked(app, session_id, failed_generation)
+            .await
+    }
+
+    async fn renew_lease_locked(
+        &self,
+        app: &AppHandle,
+        session_id: &str,
+        failed_generation: Option<u64>,
+    ) -> Result<CredentialLease, String> {
+        let Some(broker) = self.broker.as_ref() else {
+            return Err("The publisher credential broker is unavailable.".to_string());
+        };
+        let existing = self
+            .active
+            .lock()
+            .await
+            .get(session_id)
+            .cloned()
+            .ok_or_else(|| "Credential lease is no longer active.".to_string())?;
+
+        if let Some(failed_generation) = failed_generation {
+            match broker.session_generation(session_id) {
+                Some(current_generation) if current_generation > failed_generation => {
+                    return Ok(credential_lease(session_id, &existing));
+                }
+                Some(current_generation) if current_generation == failed_generation => {}
+                _ => return Err("Credential broker route is no longer recoverable.".to_string()),
+            }
+        }
+        let rotation_generation = broker
+            .session_generation(session_id)
+            .ok_or_else(|| "Credential broker route is no longer recoverable.".to_string())?;
+
+        let created = self.create_remote_key(app).await?;
+        let expires_at = created.expires_at.clone().unwrap_or_default();
+        let record = LeaseLedgerEntry {
+            session_id: session_id.to_string(),
+            key_id: created.key_id.clone(),
+            revoke_id: created.id.clone(),
+            expires_at: expires_at.clone(),
+            pending_revocation: false,
+        };
+        if let Err(error) = validate_created_key(&created) {
+            if !record.revoke_id.trim().is_empty() {
+                let _ = self.revoke_remote_key(app, &record.revoke_id).await;
+            }
+            return Err(error);
+        }
+        if let Err(error) = self.append_ledger_record(app, record.clone()) {
+            let revoke_result = self.revoke_remote_key(app, &record.revoke_id).await;
+            return Err(match revoke_result {
+                Ok(()) => format!("Could not persist renewed lease cleanup record: {error}"),
+                Err(revoke_error) => format!(
+                    "Could not persist renewed lease cleanup record ({error}); emergency revocation failed: {revoke_error}"
+                ),
+            });
+        }
+
+        match broker.rotate_session(
+            session_id,
+            &created.api_key,
+            &expires_at,
+            rotation_generation,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = self.revoke_records_locked(app, vec![record]).await;
+                return Err("Credential broker route disappeared during renewal.".to_string());
+            }
+            Err(error) => {
+                let _ = self.revoke_records_locked(app, vec![record]).await;
+                return Err(format!("Credential broker rotation failed: {error}"));
+            }
+        }
+
+        let renewed = ActiveLease {
+            key_id: created.key_id,
+            revoke_id: created.id,
+            expires_at,
+            endpoints: existing.endpoints.clone(),
+            suspended: false,
+        };
+        self.active
+            .lock()
+            .await
+            .insert(session_id.to_string(), renewed.clone());
+
+        if !existing.revoke_id.trim().is_empty() {
+            let old_record = lease_record(session_id, &existing);
+            if let Err(error) = self.revoke_records_locked(app, vec![old_record]).await {
+                log::warn!(
+                    "[credential-lease] Renewed {session_id}, but old-key revocation was queued: {error}"
+                );
+            }
+        }
+        Ok(credential_lease(session_id, &renewed))
+    }
+
+    async fn create_remote_key(&self, app: &AppHandle) -> Result<ApiKeyCreated, String> {
+        let request_body = serde_json::json!({
+            "name": "Seren Desktop session lease",
+            "scopes": VERIFIED_LEASE_SCOPES,
+            "expires_in_days": LEASE_EXPIRY_DAYS,
+        });
+        let response = crate::auth::authenticated_request(app, &self.client, |client, token| {
+            client
+                .post(format!("{GATEWAY_BASE_URL}{DEFAULT_ORG_API_KEYS_PATH}"))
+                .bearer_auth(token)
+                .json(&request_body)
+        })
+        .await?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "Credential lease creation failed with HTTP {}",
+                response.status()
+            ));
+        }
+        response
+            .json::<DataResponse<ApiKeyCreated>>()
+            .await
+            .map_err(|error| format!("Credential lease creation response was invalid: {error}"))
+            .map(|response| response.data)
     }
 
     /// Close the broker route before anything else, so the session is denied
@@ -285,6 +517,33 @@ impl CredentialLeaseManager {
                 });
             }
         }
+        self.revoke_records_locked(app, records).await
+    }
+
+    /// Logout must remove every usable secret immediately, but a live provider
+    /// process may remain attached to its conversation. Preserve only its
+    /// opaque loopback route so a later authenticated session can rotate in a
+    /// fresh key without asking the user to abandon the thread. #3508
+    pub async fn suspend_all(&self, app: &AppHandle) -> Result<(), String> {
+        let _operation = self.operation_lock.lock().await;
+        if let Some(broker) = self.broker.as_ref() {
+            broker.suspend_all();
+        }
+        let mut active = self.active.lock().await;
+        for lease in active.values_mut() {
+            lease.suspended = true;
+        }
+        let mut records = read_ledger(app)?.leases;
+        for (session_id, lease) in active.iter() {
+            if !lease.revoke_id.trim().is_empty()
+                && !records
+                    .iter()
+                    .any(|record| record.revoke_id == lease.revoke_id)
+            {
+                records.push(lease_record(session_id, lease));
+            }
+        }
+        drop(active);
         self.revoke_records_locked(app, records).await
     }
 
@@ -334,7 +593,9 @@ impl CredentialLeaseManager {
         record: LeaseLedgerEntry,
     ) -> Result<(), String> {
         let mut ledger = read_ledger(app)?;
-        ledger.leases.retain(|entry| entry.revoke_id != record.revoke_id);
+        ledger
+            .leases
+            .retain(|entry| entry.revoke_id != record.revoke_id);
         ledger.leases.push(record);
         write_ledger(app, &ledger)
     }
@@ -453,6 +714,51 @@ impl CredentialLeaseManager {
     }
 }
 
+fn credential_lease(session_id: &str, lease: &ActiveLease) -> CredentialLease {
+    CredentialLease {
+        session_id: session_id.to_string(),
+        key_id: lease.key_id.clone(),
+        expires_at: lease.expires_at.clone(),
+        capability: lease.endpoints.capability.clone(),
+        mcp_url: lease.endpoints.mcp_url.clone(),
+        api_base_url: lease.endpoints.api_base_url.clone(),
+    }
+}
+
+fn lease_record(session_id: &str, lease: &ActiveLease) -> LeaseLedgerEntry {
+    LeaseLedgerEntry {
+        session_id: session_id.to_string(),
+        key_id: lease.key_id.clone(),
+        revoke_id: lease.revoke_id.clone(),
+        expires_at: lease.expires_at.clone(),
+        pending_revocation: false,
+    }
+}
+
+fn validate_created_key(created: &ApiKeyCreated) -> Result<(), String> {
+    if created.api_key.trim().is_empty() {
+        return Err("Credential lease creation response omitted key material.".to_string());
+    }
+    if created.id.trim().is_empty() {
+        return Err("Credential lease creation response omitted its revocation id.".to_string());
+    }
+    let expires_at = created.expires_at.as_deref().unwrap_or_default().trim();
+    if expires_at.is_empty() {
+        return Err("Credential lease creation response omitted expiry.".to_string());
+    }
+    expires_at.parse::<jiff::Timestamp>().map_err(|error| {
+        format!("Credential lease creation response had invalid expiry: {error}")
+    })?;
+    Ok(())
+}
+
+fn lease_needs_renewal(expires_at: &str, now: jiff::Timestamp) -> bool {
+    expires_at
+        .parse::<jiff::Timestamp>()
+        .map(|expiry| expiry <= now + jiff::SignedDuration::from_secs(LEASE_RENEWAL_WINDOW_SECONDS))
+        .unwrap_or(true)
+}
+
 fn validate_session_id(session_id: String) -> Result<String, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() {
@@ -494,7 +800,7 @@ fn select_startup_reaper_records(records: &[LeaseLedgerEntry]) -> Vec<LeaseLedge
 mod tests {
     use super::{
         ApiKeyCreated, CredentialLease, CredentialLeaseLedger, LeaseLedgerEntry,
-        VERIFIED_LEASE_SCOPES, select_startup_reaper_records,
+        VERIFIED_LEASE_SCOPES, lease_needs_renewal, select_startup_reaper_records,
     };
 
     #[test]
@@ -614,5 +920,14 @@ mod tests {
         let encoded = serde_json::to_string(&ledger).expect("ledger serializes");
         assert!(encoded.contains("pending_revocation"));
         assert!(!encoded.contains("api_key"));
+    }
+
+    #[test]
+    fn credential_lease_renews_inside_the_six_hour_safety_window() {
+        let now: jiff::Timestamp = "2026-07-31T12:00:00Z".parse().expect("now parses");
+        assert!(!lease_needs_renewal("2026-07-31T19:00:00Z", now));
+        assert!(lease_needs_renewal("2026-07-31T18:00:00Z", now));
+        assert!(lease_needs_renewal("2026-07-31T11:59:59Z", now));
+        assert!(lease_needs_renewal("not-a-timestamp", now));
     }
 }

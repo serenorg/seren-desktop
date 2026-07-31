@@ -20,6 +20,7 @@ const {
   storedKeyRef,
   listenMock,
   eventListeners,
+  resumeCredentialLeasesMock,
 } = vi.hoisted(() => {
   const storedKey: { value: string | null } = { value: null };
   const listeners = new Map<string, (event?: unknown) => unknown>();
@@ -55,6 +56,7 @@ const {
       listeners.set(event, handler);
       return vi.fn();
     }),
+    resumeCredentialLeasesMock: vi.fn(async () => {}),
   };
 });
 
@@ -79,6 +81,10 @@ vi.mock("@/api", () => ({
 vi.mock("@/services/mcp-gateway", () => ({
   initializeGateway: initializeGatewayMock,
   resetGateway: resetGatewayMock,
+}));
+
+vi.mock("@/services/credential-lease", () => ({
+  resumeCredentialLeases: resumeCredentialLeasesMock,
 }));
 
 vi.mock("@/lib/runtime", () => ({
@@ -240,6 +246,7 @@ describe("auth.store #1613 — API key before isAuthenticated flips", () => {
     expect(authAtStoreTime).toBe(false);
     expect(authStore.isAuthenticated).toBe(true);
     expect(authStore.signInModalRequested).toBe(false);
+    expect(resumeCredentialLeasesMock).toHaveBeenCalledTimes(1);
   });
 });
 
