@@ -1411,7 +1411,7 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <div class="flex items-start justify-between gap-4">
                 <div class="flex flex-col gap-0.5">
                   <span class="text-[0.95rem] font-medium text-foreground">
-                    Verified effective sandbox
+                    Effective agent sandbox
                   </span>
                   <span class="text-[0.8rem] text-muted-foreground">
                     Whether the OS sandbox can actually protect agent sessions
@@ -1532,11 +1532,11 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
             >
               <p class="m-0 py-3 border-b border-border text-[0.8rem] text-muted-foreground leading-normal">
                 <span class="font-medium text-foreground">
-                  On native Windows, shell commands are disabled unless Full
-                  Access is explicitly selected.
+                  Bounded Claude Code sessions are blocked on native Windows.
                 </span>{" "}
-                File, search, and web tools remain bounded by the selected
-                workspace.
+                The current Windows backend cannot prevent reads outside the
+                selected project. Full Access remains available only as an
+                explicit, unconfined choice.
               </p>
             </Show>
 

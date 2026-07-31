@@ -28,6 +28,12 @@ const GITHUB_PAT = requiredEnv("SEREN_E2E_GITHUB_PAT");
 // The paired workflow ships as one agent type backed by two CLIs. Declared
 // locally because the e2e payload only bundles this script — never bin/.
 const PAIRED_AGENT_TYPE = "claude-codex";
+const WINDOWS_BOUNDED_BLOCKED_AGENT_TYPES = new Set([
+  "claude-code",
+  PAIRED_AGENT_TYPE,
+]);
+const WINDOWS_BOUNDED_BLOCK_REASON =
+  "cannot prevent reads outside the selected project";
 // npm-backed CLIs are installed and version-checked by the disposable Windows
 // test-user setup before the app starts. Exercise the production resolver for
 // every corresponding provider here without requiring credentials or turning
@@ -1058,6 +1064,90 @@ async function runSingleAgentJourney(ws, buffer, agentType) {
   }
 }
 
+async function verifyWindowsBoundedSandboxStatus(page) {
+  for (const mode of ["read-only", "workspace-write"]) {
+    for (const networkEnabled of [true, false]) {
+      const status = await tauriInvoke(page, "agent_sandbox_status", {
+        mode,
+        projectRoot: AGENT_CWD,
+        networkEnabled,
+      });
+      assert(
+        status?.backend === "windows-bounded-blocked",
+        `${mode} returned unexpected Windows sandbox backend: ${status?.backend}`,
+      );
+      assert(status.spec_available === false, `${mode} unexpectedly exposed a launch spec`);
+      assert(
+        status.enforced_at_launch === false,
+        `${mode} was incorrectly reported as enforced at launch`,
+      );
+      assert(status.fail_closed === true, `${mode} did not report fail-closed behavior`);
+      assert(
+        String(status.detail ?? "").includes(WINDOWS_BOUNDED_BLOCK_REASON),
+        `${mode} did not report the audited Windows containment reason`,
+      );
+    }
+  }
+  console.log(
+    "[windows-e2e] bounded Windows sandbox status verified unavailable for both modes and network settings",
+  );
+}
+
+async function runBlockedWindowsBoundedJourney(ws, agentType) {
+  const localSessionId = randomUUID();
+  let spawnError;
+  try {
+    await rpcWithTimeout(
+      ws,
+      "provider_spawn",
+      {
+        agentType,
+        cwd: AGENT_CWD,
+        localSessionId,
+        resumeAgentSessionId: null,
+        sandboxMode: "workspace-write",
+        apiKey: null,
+        approvalPolicy: "never",
+        searchEnabled: false,
+        networkEnabled: true,
+        timeoutSecs: 120,
+        initialModelId: AGENT_MODEL ?? undefined,
+      },
+      PROVIDER_SPAWN_TIMEOUT_MS,
+      `${agentType} bounded containment spawn`,
+    );
+  } catch (error) {
+    spawnError = error;
+  }
+
+  assert(spawnError, `${agentType} bounded Windows spawn unexpectedly succeeded`);
+  const message = spawnError instanceof Error ? spawnError.message : String(spawnError);
+  assert(
+    message.includes("Agent launch blocked: the trusted sandbox launch spec failed"),
+    `${agentType} bounded spawn did not fail at the trusted launch-spec boundary: ${message}`,
+  );
+  assert(
+    message.includes(WINDOWS_BOUNDED_BLOCK_REASON),
+    `${agentType} bounded spawn omitted the audited containment reason: ${message}`,
+  );
+
+  const sessions = await rpcWithTimeout(
+    ws,
+    "provider_list_sessions",
+    {},
+    PROVIDER_RPC_TIMEOUT_MS,
+    `${agentType} post-containment session list`,
+  );
+  assert(Array.isArray(sessions), "provider_list_sessions did not return an array");
+  assert(
+    !sessions.some((session) => session?.id === localSessionId),
+    `${agentType} left a live session behind after the bounded spawn was blocked`,
+  );
+  console.log(
+    `[windows-e2e] ${agentType} bounded spawn failed closed before session creation`,
+  );
+}
+
 async function runPairedJourney(ws, buffer) {
   const localSessionId = randomUUID();
   const marker = buffer.mark();
@@ -1230,6 +1320,7 @@ async function runPairedJourney(ws, buffer) {
 }
 
 async function exerciseAgentRuntime(page) {
+  await verifyWindowsBoundedSandboxStatus(page);
   logStage("Resolving provider runtime config");
   const config = await resolveProviderRuntimeConfig(page);
   logStage(
@@ -1240,7 +1331,9 @@ async function exerciseAgentRuntime(page) {
   try {
     await verifyAgentCliCompatibility(ws);
     for (const journey of AGENT_JOURNEYS) {
-      if (journey === PAIRED_AGENT_TYPE) {
+      if (WINDOWS_BOUNDED_BLOCKED_AGENT_TYPES.has(journey)) {
+        await runBlockedWindowsBoundedJourney(ws, journey);
+      } else if (journey === PAIRED_AGENT_TYPE) {
         await runPairedJourney(ws, buffer);
       } else {
         await runSingleAgentJourney(ws, buffer, journey);

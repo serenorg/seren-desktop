@@ -12,6 +12,7 @@ fn spec_command(args: &[&str]) -> Output {
         .expect("run the sandbox spec subcommand")
 }
 
+#[cfg(not(target_os = "windows"))]
 #[test]
 fn spec_dispatch_emits_a_launch_spec_for_a_bounded_session() {
     let workspace = tempdir().expect("workspace tempdir");
@@ -28,7 +29,7 @@ fn spec_dispatch_emits_a_launch_spec_for_a_bounded_session() {
         serde_json::from_slice(&output.stdout).expect("spec is a single JSON document");
     let kind = spec["kind"].as_str().expect("spec carries a kind");
     assert!(
-        matches!(kind, "seatbelt" | "linux-launcher" | "windows-launcher"),
+        matches!(kind, "seatbelt" | "linux-launcher"),
         "unexpected launch spec kind: {kind}"
     );
 }

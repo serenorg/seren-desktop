@@ -157,7 +157,7 @@ describe("Claude promptless containment (#3091)", () => {
   });
 });
 
-describe("Windows shell boundary requires the verified launcher (#3149, #3192)", () => {
+describe("Windows bounded-session containment (#3514)", () => {
   const settingsPanel = readFileSync(
     resolve("src/components/settings/SettingsPanel.tsx"),
     "utf8",
@@ -177,10 +177,10 @@ describe("Windows shell boundary requires the verified launcher (#3149, #3192)",
       networkEnabled: false,
     });
     expect(settings.hooks.PreToolUse[0].matcher).not.toContain("Bash");
-    expect(claudeRuntime).toContain("#3192");
+    expect(claudeRuntime).toContain("#3514");
   });
 
-  it("keeps Bash denied without a launcher and permits it only with one", () => {
+  it("keeps Bash denied even when a launcher-shaped object is supplied", () => {
     const originalPlatform = process.platform;
     Object.defineProperty(process, "platform", {
       value: "win32",
@@ -206,7 +206,7 @@ describe("Windows shell boundary requires the verified launcher (#3149, #3192)",
             policyBase64: "encoded-policy",
           },
         });
-        expect(containedSettings.permissions).toBeUndefined();
+        expect(containedSettings.permissions.deny).toContain("Bash");
         expect(containedSettings.sandbox).toBeUndefined();
       }
 
@@ -225,9 +225,11 @@ describe("Windows shell boundary requires the verified launcher (#3149, #3192)",
     }
   });
 
-  it("tells Windows users shell commands are disabled unless Full Access", () => {
+  it("tells Windows users bounded Claude Code sessions are blocked", () => {
     expect(settingsPanel).toContain("isWindowsPlatform");
-    const noteAt = settingsPanel.indexOf("shell commands are disabled unless Full");
+    const noteAt = settingsPanel.indexOf(
+      "Bounded Claude Code sessions are blocked on native Windows",
+    );
     expect(noteAt).toBeGreaterThan(-1);
     const gateAt = settingsPanel.lastIndexOf("isWindowsPlatform()", noteAt);
     expect(gateAt).toBeGreaterThan(-1);
