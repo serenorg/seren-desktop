@@ -55,7 +55,7 @@ pub(crate) fn check_result_from_setup(
         exit_code: Some(setup.exit_code),
         duration_ms: setup.duration_ms as i64,
         output_tail: setup.output_tail,
-        pre_existing_failure: setup.exit_code != 0,
+        pre_existing_failure: kind == "baseline" && setup.exit_code != 0,
         created_at: crate::services::database::now_ms(),
     }
 }

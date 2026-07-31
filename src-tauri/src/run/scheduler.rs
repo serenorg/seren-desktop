@@ -1117,7 +1117,11 @@ fn completion_gates(
     run_id: &str,
     task_id: &str,
 ) -> Result<Vec<CheckGate>, String> {
-    let checks = store::list_checks(conn, run_id).map_err(|error| error.to_string())?;
+    let checks = store::list_checks(conn, run_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter(|check| check.approved)
+        .collect::<Vec<_>>();
     checks
         .into_iter()
         .map(|check| {
@@ -1685,4 +1689,138 @@ fn load_run(conn: &Connection, run_id: &str) -> Result<Run, String> {
     snapshot
         .map(|snapshot| snapshot.run)
         .ok_or_else(|| "run not found".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::types::{
+        Evidence, EvidenceKind, FindingConfidence, FindingStatus, RunCheck, RunStatus,
+    };
+    use crate::services::database::{configure_connection, setup_schema};
+
+    fn connection() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        configure_connection(&conn).unwrap();
+        setup_schema(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn unapproved_check_does_not_block_completion() {
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-unapproved".to_string(),
+                objective: "completion gating".to_string(),
+                root_path: None,
+                status: RunStatus::Running,
+                cancel_requested: false,
+                created_at: 1,
+                updated_at: 1,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+        store::add_task(
+            &conn,
+            &Task {
+                id: "task-unapproved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                title: "Completion task".to_string(),
+                brief: "Verify completion gates".to_string(),
+                state: TaskState::Review,
+                blocked_reason: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        store::insert_check(
+            &conn,
+            &RunCheck {
+                id: "check-approved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                name: "approved check".to_string(),
+                command: "echo ok".to_string(),
+                approved: true,
+                created_at: 1,
+            },
+        )
+        .unwrap();
+        store::insert_check(
+            &conn,
+            &RunCheck {
+                id: "check-unapproved".to_string(),
+                run_id: "run-unapproved".to_string(),
+                name: "unapproved check".to_string(),
+                command: "exit 9".to_string(),
+                approved: false,
+                created_at: 2,
+            },
+        )
+        .unwrap();
+        store::insert_check_result(
+            &conn,
+            &CheckResult {
+                id: "baseline-approved".to_string(),
+                check_id: "check-approved".to_string(),
+                task_id: None,
+                attempt_id: None,
+                kind: "baseline".to_string(),
+                exit_code: Some(0),
+                duration_ms: 1,
+                output_tail: "ok".to_string(),
+                pre_existing_failure: false,
+                created_at: 3,
+            },
+        )
+        .unwrap();
+        store::insert_check_result(
+            &conn,
+            &CheckResult {
+                id: "verify-approved".to_string(),
+                check_id: "check-approved".to_string(),
+                task_id: Some("task-unapproved".to_string()),
+                attempt_id: None,
+                kind: "verify".to_string(),
+                exit_code: Some(0),
+                duration_ms: 1,
+                output_tail: "ok".to_string(),
+                pre_existing_failure: false,
+                created_at: 4,
+            },
+        )
+        .unwrap();
+        store::insert_finding(
+            &conn,
+            &Finding {
+                id: "finding-completion".to_string(),
+                run_id: "run-unapproved".to_string(),
+                task_id: Some("task-unapproved".to_string()),
+                attempt_id: None,
+                claim: "The task has evidence".to_string(),
+                confidence: FindingConfidence::Asserted,
+                evidence: vec![Evidence {
+                    kind: EvidenceKind::CommandResult,
+                    reference: "echo ok".to_string(),
+                    excerpt: Some("ok".to_string()),
+                }],
+                proposed_artifact: None,
+                needs_approval: false,
+                status: FindingStatus::Open,
+                created_at: 5,
+                updated_at: 5,
+            },
+        )
+        .unwrap();
+
+        let gates = completion_gates(&conn, "run-unapproved", "task-unapproved").unwrap();
+        assert_eq!(gates.len(), 1);
+        assert_eq!(gates[0].name, "approved check");
+        let has_evidence = store::task_has_evidence(&conn, "task-unapproved").unwrap();
+        assert!(checks::completion_blockers(has_evidence, &gates).is_empty());
+    }
 }
