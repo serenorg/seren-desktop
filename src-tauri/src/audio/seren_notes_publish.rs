@@ -207,7 +207,7 @@ pub async fn publish_meeting_notes(
     title: &str,
     content: &str,
 ) -> Result<String, PublishError> {
-    if !has_stored_credentials(app) {
+    if !has_stored_credentials(app).map_err(PublishError::Other)? {
         return Err(PublishError::NotAuthenticated);
     }
     let client = Client::new();
@@ -230,7 +230,7 @@ pub async fn update_meeting_note_title(
     note_id: &str,
     title: &str,
 ) -> Result<(), PublishError> {
-    if !has_stored_credentials(app) {
+    if !has_stored_credentials(app).map_err(PublishError::Other)? {
         return Err(PublishError::NotAuthenticated);
     }
     if !is_uuid(note_id) {
@@ -379,7 +379,7 @@ fn parse_update_response_body(text: &str) -> Result<(), PublishError> {
 /// live against the real service: `DELETE /notes/{id}` returns 204 and a
 /// subsequent GET returns 404.
 pub async fn delete_meeting_note(app: &AppHandle, note_id: &str) -> Result<(), PublishError> {
-    if !has_stored_credentials(app) {
+    if !has_stored_credentials(app).map_err(PublishError::Other)? {
         return Err(PublishError::NotAuthenticated);
     }
     if !is_uuid(note_id) {

@@ -25,7 +25,7 @@ All contributions must follow these rules:
 // WRONG - never do this
 const API_KEY = "sk_live_abc123";
 
-// CORRECT - use Tauri secure storage
+// CORRECT - use the native OS credential-store command
 const apiKey = await invoke("get_api_key");
 ```
 
@@ -72,12 +72,11 @@ if (url.protocol !== "https:" && url.protocol !== "http:") {
 // WRONG - plaintext storage
 std::fs::write("token.txt", token);
 
-// CORRECT - use Tauri secure storage
-use tauri_plugin_store::StoreExt;
-let store = app.store("auth.json")?;
-store.set("token", serde_json::json!(token));
-store.save()?;
+// CORRECT - use Seren's native OS credential-store boundary
+crate::credential_store::store_access_token(&app, &token)?;
 ```
+
+`tauri-plugin-store` is for non-secret preferences and credential metadata only. Desktop authentication tokens, API keys, and OAuth credentials must use the native OS credential store (macOS Keychain, Windows Credential Manager, or Linux Secret Service). Other secret classes must use their approved secret boundary. Production code must fail closed when that boundary is unavailable; it must not fall back to app-data JSON or browser storage.
 
 ### 6. Scrub PII from Error Reports
 

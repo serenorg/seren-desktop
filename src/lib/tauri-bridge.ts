@@ -12,9 +12,9 @@ const API_KEY_STORAGE_KEY = "seren_api_key";
 const DEFAULT_ORG_ID_STORAGE_KEY = "seren_default_org_id";
 
 /**
- * Development-only localStorage wrapper.
- * In production builds, all operations are no-ops to prevent
- * credentials from being stored insecurely outside Tauri.
+ * Development-only browser fallback for tests and non-packaged Vite sessions.
+ * Packaged Tauri builds always use native commands backed by the OS credential
+ * store; production browser builds make these operations no-ops.
  */
 const devStorage = {
   getItem: (key: string): string | null =>
@@ -141,7 +141,7 @@ export async function clearRefreshToken(): Promise<void> {
 // ============================================================================
 
 /**
- * Store Seren API key securely.
+ * Store the Seren API key in the native OS credential store.
  * This key is used to authenticate with seren-mcp.
  */
 export async function storeSerenApiKey(apiKey: string): Promise<void> {
@@ -485,7 +485,7 @@ export async function openPathWithDefaultApp(path: string): Promise<void> {
 // ============================================================================
 
 /**
- * Store an API key for a provider securely.
+ * Store an API key for a provider in the native OS credential store.
  */
 export async function storeProviderKey(
   provider: string,
@@ -550,7 +550,7 @@ export async function getConfiguredProviders(): Promise<string[]> {
 // ============================================================================
 
 /**
- * Store OAuth credentials for a provider securely.
+ * Store OAuth credentials for a provider in the native OS credential store.
  * @param provider - Provider ID (e.g., "openai")
  * @param credentials - JSON string of OAuthCredentials
  */

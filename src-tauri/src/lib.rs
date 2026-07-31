@@ -52,6 +52,7 @@ pub mod authorization_audit;
 pub mod capability_lease;
 pub mod credential_broker;
 pub mod credential_lease;
+mod credential_store;
 // Public so the headless `claude_memory_sync` example can drive the
 // AppHandle-free sync core (#2639) without launching the app.
 pub mod claude_memory;
@@ -80,12 +81,6 @@ pub mod tool_authorization;
 mod tray;
 mod validation;
 mod wallet;
-
-const AUTH_STORE: &str = "auth.json";
-const TOKEN_KEY: &str = "token";
-const REFRESH_TOKEN_KEY: &str = "refresh_token";
-const PROVIDERS_STORE: &str = "providers.json";
-const OAUTH_STORE: &str = "oauth.json";
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -145,52 +140,32 @@ async fn get_oauth_redirect_url(url: String, bearer_token: String) -> Result<Str
 
 #[tauri::command]
 fn store_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.set(TOKEN_KEY, serde_json::json!(token));
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::store_access_token(&app, &token)
 }
 
 #[tauri::command]
 fn get_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    let token = store
-        .get(TOKEN_KEY)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    Ok(token)
+    credential_store::get_access_token(&app)
 }
 
 #[tauri::command]
 fn clear_token(app: tauri::AppHandle) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.delete(TOKEN_KEY);
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::clear_access_token(&app)
 }
 
 #[tauri::command]
 fn store_refresh_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.set(REFRESH_TOKEN_KEY, serde_json::json!(token));
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::store_refresh_token(&app, &token)
 }
 
 #[tauri::command]
 fn get_refresh_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    let token = store
-        .get(REFRESH_TOKEN_KEY)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    Ok(token)
+    credential_store::get_refresh_token(&app)
 }
 
 #[tauri::command]
 fn clear_refresh_token(app: tauri::AppHandle) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.delete(REFRESH_TOKEN_KEY);
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::clear_refresh_token(&app)
 }
 
 #[tauri::command]
@@ -212,6 +187,9 @@ fn get_setting(
     store: String,
     key: String,
 ) -> Result<Option<String>, String> {
+    if let Some(setting) = credential_store::protected_setting(&store, &key) {
+        return credential_store::get_protected_setting(&app, setting);
+    }
     let store_handle = app.store(&store).map_err(|e| e.to_string())?;
     let value = store_handle
         .get(&key)
@@ -226,6 +204,9 @@ fn set_setting(
     key: String,
     value: String,
 ) -> Result<(), String> {
+    if let Some(setting) = credential_store::protected_setting(&store, &key) {
+        return credential_store::set_protected_setting(&app, setting, &value);
+    }
     let store_handle = app.store(&store).map_err(|e| e.to_string())?;
     store_handle.set(&key, serde_json::json!(value));
     store_handle.save().map_err(|e| e.to_string())?;
@@ -238,38 +219,22 @@ fn store_provider_key(
     provider: String,
     api_key: String,
 ) -> Result<(), String> {
-    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
-    store.set(&provider, serde_json::json!(api_key));
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::store_provider_api_key(&app, &provider, &api_key)
 }
 
 #[tauri::command]
 fn get_provider_key(app: tauri::AppHandle, provider: String) -> Result<Option<String>, String> {
-    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
-    let key = store
-        .get(&provider)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    Ok(key)
+    credential_store::get_provider_api_key(&app, &provider)
 }
 
 #[tauri::command]
 fn clear_provider_key(app: tauri::AppHandle, provider: String) -> Result<(), String> {
-    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
-    store.delete(&provider);
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::clear_provider_api_key(&app, &provider)
 }
 
 #[tauri::command]
 fn get_configured_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let store = app.store(PROVIDERS_STORE).map_err(|e| e.to_string())?;
-    let providers: Vec<String> = store
-        .keys()
-        .into_iter()
-        .filter(|k| store.get(k).map(|v| v.as_str().is_some()).unwrap_or(false))
-        .collect();
-    Ok(providers)
+    credential_store::configured_api_key_providers(&app)
 }
 
 // OAuth credential storage commands
@@ -279,10 +244,7 @@ fn store_oauth_credentials(
     provider: String,
     credentials: String,
 ) -> Result<(), String> {
-    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
-    store.set(&provider, serde_json::json!(credentials));
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::store_provider_oauth(&app, &provider, &credentials)
 }
 
 #[tauri::command]
@@ -290,30 +252,17 @@ fn get_oauth_credentials(
     app: tauri::AppHandle,
     provider: String,
 ) -> Result<Option<String>, String> {
-    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
-    let creds = store
-        .get(&provider)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
-    Ok(creds)
+    credential_store::get_provider_oauth(&app, &provider)
 }
 
 #[tauri::command]
 fn clear_oauth_credentials(app: tauri::AppHandle, provider: String) -> Result<(), String> {
-    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
-    store.delete(&provider);
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    credential_store::clear_provider_oauth(&app, &provider)
 }
 
 #[tauri::command]
 fn get_oauth_providers(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    let store = app.store(OAUTH_STORE).map_err(|e| e.to_string())?;
-    let providers: Vec<String> = store
-        .keys()
-        .into_iter()
-        .filter(|k| store.get(k).map(|v| v.as_str().is_some()).unwrap_or(false))
-        .collect();
-    Ok(providers)
+    credential_store::configured_oauth_providers(&app)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -674,6 +623,7 @@ pub fn run() {
                     }
                 },
             ))
+            .manage(credential_store::CredentialStoreState::new_os())
             .manage(happy_bridge::HappyBridgeManager::new())
             .manage(std::sync::Arc::new(
                 commands::updater::ShutdownGuard::default(),
@@ -833,6 +783,13 @@ pub fn run() {
                 return Err(
                     "validation bundle identity requires a build with --features validation".into(),
                 );
+            }
+
+            if let Err(error) = credential_store::migrate_legacy_credentials(app.handle()) {
+                // Credential reads retry the fail-safe migration and surface
+                // the same actionable error. Keep the shell available so the
+                // user can unlock/configure the OS credential store and retry.
+                log::error!("[credential-store] Legacy migration deferred: {error}");
             }
 
             // Inject the Seren Desktop host marker into the process environment.

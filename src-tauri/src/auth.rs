@@ -3,12 +3,8 @@
 
 use std::sync::OnceLock;
 use tauri::Emitter;
-use tauri_plugin_store::StoreExt;
 use tokio::sync::Mutex as TokioMutex;
 
-const AUTH_STORE: &str = "auth.json";
-const TOKEN_KEY: &str = "token";
-const REFRESH_TOKEN_KEY: &str = "refresh_token";
 const GATEWAY_BASE_URL: &str = "https://api.serendb.com";
 
 /// Global mutex to prevent concurrent refresh attempts from multiple workers.
@@ -59,21 +55,15 @@ pub(crate) fn decide_after_refresh_unauthorized(
     RefreshUnauthorizedDecision::ExpireSession
 }
 
-/// Read the current access token from the encrypted store.
+/// Read the current access token from the native OS credential store.
 pub fn get_access_token(app: &tauri::AppHandle) -> Result<String, String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store
-        .get(TOKEN_KEY)
-        .and_then(|v| v.as_str().map(String::from))
-        .ok_or_else(|| "No access token in store".to_string())
+    crate::credential_store::get_access_token(app)?
+        .ok_or_else(|| "No access token in OS credential store".to_string())
 }
 
-/// Read the refresh token from the encrypted store.
+/// Read the refresh token from the native OS credential store.
 fn get_refresh_token(app: &tauri::AppHandle) -> Result<Option<String>, String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    Ok(store
-        .get(REFRESH_TOKEN_KEY)
-        .and_then(|v| v.as_str().map(String::from)))
+    crate::credential_store::get_refresh_token(app)
 }
 
 /// True when either an access token or a refresh token is present.
@@ -82,8 +72,11 @@ fn get_refresh_token(app: &tauri::AppHandle) -> Result<Option<String>, String> {
 /// stored auth at all. A signed-out cold start has neither token, so public
 /// endpoints (catalog, provider list) must go through unauthenticated rather
 /// than failing through the refresh path. See #1860.
-pub fn has_stored_credentials(app: &tauri::AppHandle) -> bool {
-    get_access_token(app).is_ok() || matches!(get_refresh_token(app), Ok(Some(_)))
+pub fn has_stored_credentials(app: &tauri::AppHandle) -> Result<bool, String> {
+    if crate::credential_store::get_access_token(app)?.is_some() {
+        return Ok(true);
+    }
+    Ok(get_refresh_token(app)?.is_some())
 }
 
 /// Store new tokens after a successful refresh.
@@ -92,22 +85,18 @@ fn store_tokens(
     access_token: &str,
     refresh_token: Option<&str>,
 ) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.set(TOKEN_KEY, serde_json::json!(access_token));
     if let Some(rt) = refresh_token {
-        store.set(REFRESH_TOKEN_KEY, serde_json::json!(rt));
+        crate::credential_store::store_refresh_token(app, rt)?;
     }
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    crate::credential_store::store_access_token(app, access_token)
 }
 
 /// Clear both tokens (session expired, user must re-login).
 fn clear_tokens(app: &tauri::AppHandle) -> Result<(), String> {
-    let store = app.store(AUTH_STORE).map_err(|e| e.to_string())?;
-    store.delete(TOKEN_KEY);
-    store.delete(REFRESH_TOKEN_KEY);
-    store.save().map_err(|e| e.to_string())?;
-    Ok(())
+    // Clear refresh first so a partial failure never leaves a refresh token
+    // capable of resurrecting a session after its access token was removed.
+    crate::credential_store::clear_refresh_token(app)?;
+    crate::credential_store::clear_access_token(app)
 }
 
 /// Attempt to refresh the access token using the stored refresh token.

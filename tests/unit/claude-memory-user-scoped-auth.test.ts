@@ -9,6 +9,10 @@ const rustWatcher = readFileSync(
   resolve("src-tauri/src/claude_memory.rs"),
   "utf-8",
 );
+const credentialStore = readFileSync(
+  resolve("src-tauri/src/credential_store.rs"),
+  "utf-8",
+);
 const databasesService = readFileSync(
   resolve("src/services/databases.ts"),
   "utf-8",
@@ -17,13 +21,17 @@ const tauriBridge = readFileSync(resolve("src/lib/tauri-bridge.ts"), "utf-8");
 const setupAuth = readFileSync(resolve("src/api/setup-auth.ts"), "utf-8");
 
 describe("seren-db memory path uses the user-scoped credential (#2497 Defect 2)", () => {
-  it("the Rust watcher bears the SerenDB API key read from the user's store entry", () => {
+  it("the Rust watcher bears the SerenDB API key read from the user's native credential entry", () => {
     // The /publishers/seren-db/query call must bearer the API key field…
     expect(rustWatcher).toMatch(/\.bearer_auth\(&self\.api_key\)/);
-    // …and that key is read from the same store entry the desktop key lands in.
-    expect(rustWatcher).toMatch(/const SEREN_API_KEY_KEY: &str = "seren_api_key"/);
+    // …and that key is read through the same OS-backed boundary the desktop
+    // key lands in, never directly from auth.json.
     expect(rustWatcher).toMatch(/fn read_seren_api_key/);
-    expect(rustWatcher).toMatch(/\.get\(SEREN_API_KEY_KEY\)/);
+    expect(rustWatcher).toMatch(/credential_store::get_seren_api_key\(app\)/);
+    expect(credentialStore).toMatch(
+      /const SEREN_API_KEY_ACCOUNT: &str = "seren\.api-key\.v1"/,
+    );
+    expect(rustWatcher).not.toMatch(/\.store\("auth\.json"\)/);
   });
 
   it("the desktop stores the minted user key under that same `seren_api_key` entry", () => {
