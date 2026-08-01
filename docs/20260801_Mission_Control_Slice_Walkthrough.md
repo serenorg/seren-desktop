@@ -56,6 +56,53 @@ The corresponding earlier issue evidence is recorded in [the #3529 validation-hi
 
 The earlier same-slot prompt was caused by rebuilding an unsigned development binary. The dialog asked for the scratch keychain's generated `login` password, not Taariq's macOS password. The `--no-build` mode records the per-rebuild bound: a rebuild may require a fresh operator authorization, while relaunching the same already-authorized binary does not. The local-only screenshot and the generated slot password are not committed.
 
+## Final no-build evidence pass — 2026-08-01
+
+The first phase-27 no-build launcher attempt exited 143 before creating a fresh control discovery file. The repository's full Cargo gate from the preceding phase had overwritten `src-tauri/target/debug/Seren` with the default-feature binary: its fingerprint recorded `features=["default"]`, while the existing `src-tauri/target/debug/deps/Seren-7ab2b1a71896a2bd` executable recorded `features=["validation"]` and contained the validation control server. I restored that existing validation-feature executable to the launcher path with a recoverable copy of the default binary outside the worktree. No source file was changed and no validation rebuild was run. This derived-artifact repair is the phase deviation from the strict no-rebuild assumption.
+
+The repaired no-build launch at 12:24:08 used control server `http://127.0.0.1:59105`. Its health response was `{"ok":true,"frontendReady":true}` and `dumpText` showed `Employees`, `Approval inbox`, `Bounties`, `$1.67`, and `Mission control`; the process log showed slot-keychain reads and `Token refreshed successfully`. No Keychain prompt appeared.
+
+For the required restart attempt, the process was stopped at 12:24:12 while `cf306239-d710-4301-aff6-335b4a3ebe02` still had non-terminal tasks. The same binary relaunched at 12:25:26 on control server `http://127.0.0.1:59231`. Its health response was again `{"ok":true,"frontendReady":true}` and `dumpText` again showed `Employees`, `Approval inbox`, `Bounties`, and `Mission control`, with no Keychain prompt. The fresh frontend showed the launch box rather than an interrupted banner: `runStore` starts with no active run and does not hydrate an existing database run on mount. Read-only SQL confirmed that the `cf306239…` row remained `running`, with no new `run_interrupted` or `run_relaunched` event and no attempt 2. I therefore did not click a nonexistent `run-relaunch` control and did not create a duplicate run.
+
+The final read-only excerpts from the validation slot database were:
+
+```text
+runs:
+  a9c83443-d70a-4f5d-a9aa-a05d41caa5d6  interrupted  interrupted_at=1785584239863
+  cf306239-d710-4301-aff6-335b4a3ebe02  running       interrupted_at=NULL
+
+cf306239-d710-4301-aff6-335b4a3ebe02 events:
+  sequence 1 run_created
+  sequence 10 attempt_started
+  sequence 12 attempt_started
+  sequence 16 attempt_started
+  sequence 17 coverage_gap_recorded
+  sequence 18 attempt_finished
+
+cf306239-d710-4301-aff6-335b4a3ebe02 attempts:
+  cc7a2696-6d4a-4891-86e8-11e1595c20c7  attempt=1  session=47fee3e1-8efc-45fc-9c27-78ec6fa8b1ab
+  2d772e75-c087-4b63-872e-3c5f35e52f21  attempt=1  session=05b7bd2a-a757-4040-961b-811d6f1db7c4  outcome=parse_failed
+  999911d2-b397-4a82-8f6d-221c1c945376  attempt=1  session=ceb0b07d-d0f4-4ab5-8b49-3cd0aded3316
+
+coverage gap:
+  d0447d07-880f-4aad-bc0b-987aab166b8a  unparseable  Summarize non-git release documents
+```
+
+## Proven / not proven
+
+| Area | Result | Evidence and bound |
+| --- | --- | --- |
+| Slot keychain store/read across relaunch | Proven | One repaired no-build launch plus the following same-binary restart restored the authenticated shell with no Keychain dialog; process logs show keyring reads and token refresh. |
+| Three-way dispatcher start / concurrency observation | Partially proven | `cf306239…` has three real agent sessions and three attempt-1 rows; the run did not produce complete parseable output. |
+| Run-owned sessions | Not proven | Session IDs are present in readonly SQL, but the restart pass did not expose a durable UI state from which ownership could be independently verified. |
+| Startup interruption | Proven for prior run | `a9c83443…` has `run_interrupted` at sequence 27 and `interrupted_at=1785584239863`; the fresh process-kill pass did not add an interruption event for `cf306239…`. |
+| Relaunch and attempt numbering across restart | Not proven | No `run_relaunched` row or attempt number 2 exists; no interrupted banner was rendered after restart because the frontend did not hydrate the existing run. |
+| Coverage-gap honesty | Proven | The parse failure created the `unparseable` coverage-gap row and left the task in `review`; no finding was synthesized. |
+| Evidence findings and email approval | Not proven | `run_findings` is empty, so there is no `evidence_json`, email artifact, `open → accepted` transition, or `finding_status_changed` event. |
+| Leases and worktree provisioning | Not proven | Outside the dispatcher exercised by this walkthrough. |
+
+The final bounds are: validation used the existing signed-in slot and the no-build binary-reuse path; rebuilding may require fresh operator keychain authorization; the current run was not duplicated; no live email was sent; screenshots were local-only; MCP/provider availability and model output were not treated as evidence; and no credential or generated slot password is part of this artifact.
+
 ## Partial real run evidence
 
 The current no-build session created one fresh real run after the keychain proof. The scheduler also reconciled the previous in-flight run when this command path started. Read-only SQL from the slot database confirmed:
