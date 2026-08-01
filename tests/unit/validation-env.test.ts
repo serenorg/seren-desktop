@@ -8,6 +8,7 @@ import {
   validationChildEnv,
   validationHomeForSlot,
 } from "../../scripts/validation-env";
+import { shouldSkipValidationBuild } from "../../scripts/validation-dev-args";
 
 const mocks = vi.hoisted(() => ({
   execFile: vi.fn(),
@@ -41,6 +42,14 @@ beforeEach(() => {
 });
 
 describe("validation environment", () => {
+  it("selects no-build mode from the flag or environment", () => {
+    expect(shouldSkipValidationBuild(["--no-build"], {})).toBe(true);
+    expect(
+      shouldSkipValidationBuild([], { SEREN_VALIDATION_SKIP_BUILD: "1" }),
+    ).toBe(true);
+    expect(shouldSkipValidationBuild([], {})).toBe(false);
+  });
+
   it("roots HOME in the repo-local slot directory", () => {
     const repoRoot = "/repo";
     const env = validationChildEnv({
