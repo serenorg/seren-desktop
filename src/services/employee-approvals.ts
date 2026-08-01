@@ -18,6 +18,13 @@ export type OrgPendingApprovalRun = {
   pendingCount: number;
 };
 
+/** Count operator decisions, rather than the runs that contain them. */
+export function countPendingDecisions(
+  rows: readonly Pick<OrgPendingApprovalRun, "pendingCount">[],
+): number {
+  return rows.reduce((total, row) => total + row.pendingCount, 0);
+}
+
 function fromCloud(row: CloudPendingApprovalRun): OrgPendingApprovalRun {
   return {
     runId: row.run_id,

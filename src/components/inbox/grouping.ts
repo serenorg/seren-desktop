@@ -38,3 +38,11 @@ export function groupInboxEntries(
 export function entryAllowsDecision(entry: ApprovalInboxEntry): boolean {
   return entry.decision_state === "pending";
 }
+
+/** The all-clear state is valid only when neither inbox source has work. */
+export function inboxIsEmpty(
+  cloudEntries: readonly ApprovalInboxEntry[],
+  localPendingCount: number,
+): boolean {
+  return cloudEntries.length === 0 && localPendingCount === 0;
+}

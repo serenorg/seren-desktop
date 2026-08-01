@@ -13,7 +13,7 @@ import {
 } from "solid-js";
 import { LocalApprovalsSection } from "@/components/approvals/LocalApprovalsSection";
 import { ConfirmDialog } from "@/components/catalog/ConfirmDialog";
-import { groupInboxEntries } from "@/components/inbox/grouping";
+import { groupInboxEntries, inboxIsEmpty } from "@/components/inbox/grouping";
 import { getDefaultOrganizationId } from "@/lib/tauri-bridge";
 import {
   type ApprovalDecisionState,
@@ -24,6 +24,7 @@ import {
   type ApprovalInboxToolCallEntry,
   approvalInbox,
 } from "@/services/approval-inbox";
+import { pendingApprovalCount } from "@/stores/approvals.store";
 
 function intendedTerminalState(
   decision: ApprovalDecisionVerb,
@@ -415,7 +416,7 @@ export const InboxList: Component = () => {
               : String(initialPage.error)}
           </div>
         </Match>
-        <Match when={allEntries().length === 0}>
+        <Match when={inboxIsEmpty(allEntries(), pendingApprovalCount())}>
           <EmptyState />
         </Match>
         <Match when={allEntries().length > 0}>
