@@ -2,6 +2,7 @@
 // ABOUTME: It turns agent replies into durable findings, coverage gaps, and attempt results.
 
 import { createEffect, createRoot } from "solid-js";
+import { reportError } from "@/lib/support/hook";
 import {
   continueToolIteration,
   getActiveModel,
@@ -510,8 +511,9 @@ async function dispatchTask(
         task.title,
         "agent response did not contain a valid seren-findings block",
       );
+      // Nothing was produced, so there is nothing to verify. Ending the attempt
+      // here settles the task instead of parking it in the review lane.
       await runFinishAttempt(runId, attemptId, "parse_failed");
-      await runVerifyTask(runId, task.id);
       return;
     }
     for (const finding of parsed.findings) {
@@ -520,19 +522,38 @@ async function dispatchTask(
     for (const gap of parsed.coverage_gaps) {
       await runAddCoverageGap(toCoverageGap(runId, task.id, gap));
     }
-    await runFinishAttempt(runId, attemptId, "completed");
     await runVerifyTask(runId, task.id);
-    await runCompleteTask(runId, task.id);
-  } catch (error) {
-    if (attemptId) {
-      const detail = error instanceof Error ? error.message : String(error);
-      try {
-        await recordGap(runId, task.id, "other", task.title, detail);
-        await runFinishAttempt(runId, attemptId, "failed");
-      } catch {
-        // Preserve the original dispatch failure; the durable event loop may be stopping.
-      }
+    // The completion gate decides the attempt's outcome. Recording "completed"
+    // before asking would leave a rejected task sitting in review with its
+    // reasons discarded and its run unable to finish.
+    const blockers = await runCompleteTask(runId, task.id);
+    if (blockers.length > 0) {
+      await recordGap(
+        runId,
+        task.id,
+        "incomplete_evidence",
+        task.title,
+        `task did not meet the completion gate: ${blockers.join("; ")}`,
+      );
+      await runFinishAttempt(runId, attemptId, "failed");
+      return;
     }
+    await runFinishAttempt(runId, attemptId, "completed");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    try {
+      await recordGap(runId, task.id, "other", task.title, detail);
+      if (attemptId) {
+        await runFinishAttempt(runId, attemptId, "failed");
+      }
+    } catch {
+      // Preserve the original dispatch failure; the durable event loop may be stopping.
+    }
+    // A failure before the attempt exists used to disappear entirely, leaving
+    // the task ready and the effect retrying it on every snapshot change.
+    reportError("run.task_dispatch_failed", `task ${task.id}: ${detail}`, {
+      cause: error,
+    });
   } finally {
     // A task owns its agent session for the length of the task. Holding it
     // open afterwards would keep an admission slot and a live CLI process for

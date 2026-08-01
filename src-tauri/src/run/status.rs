@@ -34,9 +34,16 @@ pub fn is_legal_transition(from: TaskState, to: TaskState) -> bool {
                 | TaskState::Failed
                 | TaskState::Cancelled
         ),
+        // Failed is reachable from review: an attempt can satisfy verification
+        // and still miss the completion gate (no evidence-bearing finding), and
+        // that task has to be able to end rather than rest in review forever.
         TaskState::Review => matches!(
             to,
-            TaskState::Done | TaskState::Running | TaskState::Ready | TaskState::Cancelled
+            TaskState::Done
+                | TaskState::Running
+                | TaskState::Ready
+                | TaskState::Failed
+                | TaskState::Cancelled
         ),
         TaskState::Done | TaskState::Failed | TaskState::Cancelled => false,
     }

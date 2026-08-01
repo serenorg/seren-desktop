@@ -1548,7 +1548,11 @@ fn finish_attempt(
             json!({"outcome": outcome}),
         ),
     )?;
-    if outcome == "failed" && TaskState::parse(&task_state) == Some(TaskState::Running) {
+    // An attempt that did not complete leaves its task failed from whatever
+    // stage it reached. Without this a task whose agent produced nothing usable
+    // rests in review forever and its run never reaches a terminal state.
+    let task_settled = TaskState::parse(&task_state).is_some_and(TaskState::is_terminal);
+    if outcome != "completed" && !task_settled {
         store::transition_task(conn, &task_id, TaskState::Failed, None)
             .map_err(|error| error.to_string())?;
         append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Failed))?;
