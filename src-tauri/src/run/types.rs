@@ -60,6 +60,7 @@ impl TaskState {
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
     Running,
+    Interrupted,
     Completed,
     Partial,
     Failed,
@@ -70,6 +71,7 @@ impl RunStatus {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Running => "running",
+            Self::Interrupted => "interrupted",
             Self::Completed => "completed",
             Self::Partial => "partial",
             Self::Failed => "failed",
@@ -80,6 +82,7 @@ impl RunStatus {
     pub fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "running" => Self::Running,
+            "interrupted" => Self::Interrupted,
             "completed" => Self::Completed,
             "partial" => Self::Partial,
             "failed" => Self::Failed,
@@ -89,7 +92,7 @@ impl RunStatus {
     }
 
     pub fn is_terminal(self) -> bool {
-        !matches!(self, Self::Running)
+        !matches!(self, Self::Running | Self::Interrupted)
     }
 }
 
@@ -302,6 +305,8 @@ pub enum RunEventType {
     EvidenceAttached,
     ApprovalRequested,
     RunCancelRequested,
+    RunInterrupted,
+    RunRelaunched,
     RunFinalized,
     LeaseStateChanged,
     CheckDeclared,
@@ -326,6 +331,8 @@ impl RunEventType {
             Self::EvidenceAttached => "evidence_attached",
             Self::ApprovalRequested => "approval_requested",
             Self::RunCancelRequested => "run_cancel_requested",
+            Self::RunInterrupted => "run_interrupted",
+            Self::RunRelaunched => "run_relaunched",
             Self::RunFinalized => "run_finalized",
             Self::LeaseStateChanged => "lease_state_changed",
             Self::CheckDeclared => "check_declared",
@@ -350,6 +357,8 @@ impl RunEventType {
             "evidence_attached" => Self::EvidenceAttached,
             "approval_requested" => Self::ApprovalRequested,
             "run_cancel_requested" => Self::RunCancelRequested,
+            "run_interrupted" => Self::RunInterrupted,
+            "run_relaunched" => Self::RunRelaunched,
             "run_finalized" => Self::RunFinalized,
             "lease_state_changed" => Self::LeaseStateChanged,
             "check_declared" => Self::CheckDeclared,
@@ -370,6 +379,7 @@ pub struct Run {
     pub root_path: Option<String>,
     pub status: RunStatus,
     pub cancel_requested: bool,
+    pub interrupted_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
     pub completed_at: Option<i64>,

@@ -15,6 +15,10 @@ import { RunLaunchBox } from "@/components/run/RunLaunchBox";
 import { RunOverview } from "@/components/run/RunOverview";
 import { RunTaskDrawer } from "@/components/run/RunTaskDrawer";
 import { type Finding, subscribeRunEvents, type Task } from "@/services/run";
+import {
+  startRunDispatcher,
+  stopRunDispatcher,
+} from "@/services/run-dispatcher";
 import { runStore } from "@/stores/run.store";
 
 export const MissionControlPanel: Component = () => {
@@ -25,6 +29,7 @@ export const MissionControlPanel: Component = () => {
   let disposed = false;
 
   onMount(() => {
+    startRunDispatcher();
     const subscription = subscribeRunEvents((event) => {
       void runStore.applyEvent(event);
     });
@@ -37,6 +42,7 @@ export const MissionControlPanel: Component = () => {
   onCleanup(() => {
     disposed = true;
     unlisten?.();
+    stopRunDispatcher();
   });
 
   const statusLabel = () => runStore.snapshot?.run.status ?? "ready";
@@ -57,6 +63,21 @@ export const MissionControlPanel: Component = () => {
                 <h1 class="mt-2 truncate text-xl font-semibold tracking-[-0.03em] text-foreground">
                   {runStore.snapshot?.run.objective}
                 </h1>
+                <Show when={statusLabel() === "interrupted"}>
+                  <div class="mt-3 flex items-center gap-3 rounded-lg border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs text-amber-100">
+                    <span>
+                      This run was interrupted by an app restart — completed
+                      work is kept.
+                    </span>
+                    <button
+                      type="button"
+                      class="shrink-0 rounded-md border border-amber-200/40 px-2 py-1 font-medium hover:bg-amber-200/10"
+                      onClick={() => void runStore.relaunch()}
+                    >
+                      Relaunch
+                    </button>
+                  </div>
+                </Show>
               </div>
               <div class="flex shrink-0 items-center gap-4">
                 <div class="hidden text-right sm:block">

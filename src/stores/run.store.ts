@@ -9,6 +9,7 @@ import {
   runCancel,
   runCreate,
   runGetState,
+  runRelaunch,
   runUpdateFindingStatus,
   type Task,
 } from "@/services/run";
@@ -114,6 +115,13 @@ async function applyEvent(event: RunEvent): Promise<void> {
     event.event_type === "assignment_added"
   ) {
     await hydrate(event.run_id);
+  } else if (
+    event.event_type === "run_interrupted" ||
+    event.event_type === "run_relaunched" ||
+    event.event_type === "attempt_started" ||
+    event.event_type === "attempt_finished"
+  ) {
+    await hydrate(event.run_id);
   }
   setState("lastSequence", event.sequence);
 }
@@ -143,6 +151,16 @@ async function cancel(): Promise<void> {
   if (!state.activeRunId) return;
   try {
     const run = await runCancel(state.activeRunId);
+    setState("snapshot", "run", run);
+  } catch (error) {
+    setState("error", errorMessage(error));
+  }
+}
+
+async function relaunch(): Promise<void> {
+  if (!state.activeRunId) return;
+  try {
+    const run = await runRelaunch(state.activeRunId);
     setState("snapshot", "run", run);
   } catch (error) {
     setState("error", errorMessage(error));
@@ -212,6 +230,7 @@ export const runStore = {
   applyEvent,
   launch,
   cancel,
+  relaunch,
   approveFinding: (findingId: string) =>
     setFindingStatus(findingId, "accepted"),
   rejectFinding: (findingId: string) => setFindingStatus(findingId, "rejected"),
@@ -219,6 +238,7 @@ export const runStore = {
   lanes,
   findingsCount: () => state.snapshot?.findings.length ?? 0,
   coverageGaps: () => state.snapshot?.coverage_gaps ?? [],
+  isInterrupted: () => state.snapshot?.run.status === "interrupted",
 };
 
 export async function launchMission(objective: string): Promise<void> {

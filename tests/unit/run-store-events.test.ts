@@ -32,6 +32,7 @@ function snapshot(): RunSnapshot {
       root_path: null,
       status: "running",
       cancel_requested: false,
+      interrupted_at: null,
       created_at: 1,
       updated_at: 1,
       completed_at: null,

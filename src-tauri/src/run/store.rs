@@ -64,14 +64,16 @@ fn deserialize_json<T: DeserializeOwned>(value: String) -> Result<T> {
 pub fn create_run(conn: &Connection, run: &Run) -> Result<()> {
     conn.execute(
         "INSERT INTO runs
-            (id, objective, root_path, status, cancel_requested, created_at, updated_at, completed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (id, objective, root_path, status, cancel_requested, interrupted_at,
+             created_at, updated_at, completed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             run.id,
             run.objective,
             run.root_path,
             run.status.as_str(),
             i64::from(run.cancel_requested),
+            run.interrupted_at,
             run.created_at,
             run.updated_at,
             run.completed_at,
@@ -151,6 +153,33 @@ pub fn insert_attempt(conn: &Connection, attempt: &Attempt) -> Result<()> {
             attempt.ended_at,
         ],
     )?;
+    Ok(())
+}
+
+pub fn max_attempt_number(conn: &Connection, task_id: &str) -> Result<i64> {
+    conn.query_row(
+        "SELECT COALESCE(MAX(attempt_number), 0) FROM run_attempts WHERE task_id = ?1",
+        params![task_id],
+        |row| row.get(0),
+    )
+}
+
+pub fn finish_attempt(
+    conn: &Connection,
+    attempt_id: &str,
+    outcome: &str,
+    ended_at: i64,
+) -> Result<()> {
+    if !matches!(outcome, "completed" | "failed" | "parse_failed") {
+        return Err(invalid_value("attempt outcome", outcome));
+    }
+    let updated = conn.execute(
+        "UPDATE run_attempts SET outcome = ?1, ended_at = ?2 WHERE id = ?3",
+        params![outcome, ended_at, attempt_id],
+    )?;
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
     Ok(())
 }
 
@@ -530,7 +559,7 @@ pub fn ready_task_ids(conn: &Connection, run_id: &str) -> Result<Vec<String>> {
 
 pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
     let mut statement = conn.prepare(
-        "SELECT id, objective, root_path, status, cancel_requested,
+        "SELECT id, objective, root_path, status, cancel_requested, interrupted_at,
                 created_at, updated_at, completed_at
          FROM runs
          ORDER BY created_at ASC, id ASC",
@@ -543,9 +572,10 @@ pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
                 root_path: row.get(2)?,
                 status: parse_run_status(row.get(3)?)?,
                 cancel_requested: row.get::<_, i64>(4)? != 0,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                completed_at: row.get(7)?,
+                interrupted_at: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                completed_at: row.get(8)?,
             })
         })?
         .collect()
@@ -554,7 +584,7 @@ pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
 pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSnapshot>> {
     let run = conn
         .query_row(
-            "SELECT id, objective, root_path, status, cancel_requested,
+            "SELECT id, objective, root_path, status, cancel_requested, interrupted_at,
                     created_at, updated_at, completed_at
              FROM runs WHERE id = ?1",
             params![run_id],
@@ -565,9 +595,10 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
                     root_path: row.get(2)?,
                     status: parse_run_status(row.get(3)?)?,
                     cancel_requested: row.get::<_, i64>(4)? != 0,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
-                    completed_at: row.get(7)?,
+                    interrupted_at: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
+                    completed_at: row.get(8)?,
                 })
             },
         )
@@ -796,6 +827,7 @@ mod tests {
             root_path: Some("/tmp/run-engine".to_string()),
             status: RunStatus::Running,
             cancel_requested: false,
+            interrupted_at: None,
             created_at: 1,
             updated_at: 1,
             completed_at: None,
@@ -998,6 +1030,50 @@ mod tests {
             append_event(&conn, &event("event-5", "run-2", Some("provider-4"))).unwrap(),
             AppendOutcome::Inserted(1)
         );
+    }
+
+    #[test]
+    fn attempt_numbers_increment_and_finished_outcomes_persist() {
+        let conn = connection();
+        create_run(&conn, &run("run-1")).unwrap();
+        add_task(&conn, &task("task-1", "run-1"), &[]).unwrap();
+        assert_eq!(max_attempt_number(&conn, "task-1").unwrap(), 0);
+
+        for (id, attempt_number) in [("attempt-1", 1), ("attempt-2", 2)] {
+            insert_attempt(
+                &conn,
+                &Attempt {
+                    id: id.to_string(),
+                    task_id: "task-1".to_string(),
+                    agent_assignment_id: None,
+                    agent_session_id: Some(format!("session-{attempt_number}")),
+                    attempt_number,
+                    outcome: None,
+                    started_at: attempt_number,
+                    ended_at: None,
+                },
+            )
+            .unwrap();
+            assert_eq!(max_attempt_number(&conn, "task-1").unwrap(), attempt_number);
+        }
+
+        finish_attempt(&conn, "attempt-1", "failed", 10).unwrap();
+        finish_attempt(&conn, "attempt-2", "parse_failed", 20).unwrap();
+        let outcomes = conn
+            .prepare("SELECT outcome, ended_at FROM run_attempts ORDER BY attempt_number")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            outcomes,
+            vec![
+                ("failed".to_string(), Some(10)),
+                ("parse_failed".to_string(), Some(20))
+            ]
+        );
+        assert!(finish_attempt(&conn, "attempt-2", "unknown", 30).is_err());
     }
 
     #[test]

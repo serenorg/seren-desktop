@@ -594,6 +594,7 @@ mod tests {
             root_path: None,
             status: RunStatus::Running,
             cancel_requested: false,
+            interrupted_at: None,
             created_at: 1,
             updated_at: 1,
             completed_at: None,

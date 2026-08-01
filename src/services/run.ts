@@ -18,6 +18,7 @@ export type TaskState =
 
 export type RunStatus =
   | "running"
+  | "interrupted"
   | "completed"
   | "partial"
   | "failed"
@@ -51,6 +52,8 @@ export type RunEventType =
   | "evidence_attached"
   | "approval_requested"
   | "run_cancel_requested"
+  | "run_interrupted"
+  | "run_relaunched"
   | "run_finalized"
   | "lease_state_changed"
   | "check_declared"
@@ -66,6 +69,7 @@ export interface Run {
   root_path: string | null;
   status: RunStatus;
   cancel_requested: boolean;
+  interrupted_at: number | null;
   created_at: number;
   updated_at: number;
   completed_at: number | null;
@@ -329,6 +333,38 @@ export async function runUpdateFindingStatus(
     finding_id: findingId,
     status,
   }) as Promise<void>;
+}
+
+export type AttemptOutcome = "completed" | "failed" | "parse_failed";
+
+export async function runStartAttempt(
+  runId: string,
+  taskId: string,
+  agentAssignmentId?: string | null,
+  agentSessionId?: string | null,
+): Promise<string> {
+  return invoke("run_start_attempt", {
+    run_id: runId,
+    task_id: taskId,
+    agent_assignment_id: agentAssignmentId ?? null,
+    agent_session_id: agentSessionId ?? null,
+  }) as Promise<string>;
+}
+
+export async function runFinishAttempt(
+  runId: string,
+  attemptId: string,
+  outcome: AttemptOutcome,
+): Promise<void> {
+  return invoke("run_finish_attempt", {
+    run_id: runId,
+    attempt_id: attemptId,
+    outcome,
+  }) as Promise<void>;
+}
+
+export async function runRelaunch(runId: string): Promise<Run> {
+  return invoke("run_relaunch", { run_id: runId }) as Promise<Run>;
 }
 
 export function subscribeRunEvents(

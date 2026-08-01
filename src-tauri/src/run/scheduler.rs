@@ -110,6 +110,23 @@ enum SchedulerCommand {
         status: String,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    StartAttempt {
+        run_id: String,
+        task_id: String,
+        agent_assignment_id: Option<String>,
+        agent_session_id: Option<String>,
+        reply: oneshot::Sender<Result<String, String>>,
+    },
+    FinishAttempt {
+        run_id: String,
+        attempt_id: String,
+        outcome: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    Relaunch {
+        run_id: String,
+        reply: oneshot::Sender<Result<Run, String>>,
+    },
     ReleaseLease {
         lease_id: String,
         reply: oneshot::Sender<Result<WorkspaceLease, String>>,
@@ -428,6 +445,66 @@ impl RunEngineState {
             .map_err(|_| "run scheduler dropped finding-status response".to_string())?
     }
 
+    pub async fn start_attempt(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        task_id: String,
+        agent_assignment_id: Option<String>,
+        agent_session_id: Option<String>,
+    ) -> Result<String, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::StartAttempt {
+                run_id,
+                task_id,
+                agent_assignment_id,
+                agent_session_id,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped start-attempt response".to_string())?
+    }
+
+    pub async fn finish_attempt(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        attempt_id: String,
+        outcome: String,
+    ) -> Result<(), String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::FinishAttempt {
+                run_id,
+                attempt_id,
+                outcome,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped finish-attempt response".to_string())?
+    }
+
+    pub async fn relaunch(&self, app: &AppHandle, run_id: String) -> Result<Run, String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::Relaunch { run_id, reply })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped relaunch response".to_string())?
+    }
+
     pub async fn provision_workspace(
         &self,
         app: &AppHandle,
@@ -485,6 +562,16 @@ async fn scheduler_loop(
     sender: mpsc::Sender<SchedulerCommand>,
     workspaces_root: PathBuf,
 ) {
+    match reconcile_interrupted(&connection) {
+        Ok(events) => {
+            for event in events {
+                if let Err(error) = append_and_emit(&app, &connection, event) {
+                    log::error!("[run-engine] startup reconciliation event failed: {error}");
+                }
+            }
+        }
+        Err(error) => log::error!("[run-engine] startup reconciliation failed: {error}"),
+    }
     while let Some(command) = receiver.recv().await {
         process_command(&app, &connection, &sender, &workspaces_root, command);
     }
@@ -632,6 +719,33 @@ fn process_command(
                 finding_id,
                 status,
             ));
+        }
+        SchedulerCommand::StartAttempt {
+            run_id,
+            task_id,
+            agent_assignment_id,
+            agent_session_id,
+            reply,
+        } => {
+            let _ = reply.send(start_attempt(
+                app,
+                conn,
+                run_id,
+                task_id,
+                agent_assignment_id,
+                agent_session_id,
+            ));
+        }
+        SchedulerCommand::FinishAttempt {
+            run_id,
+            attempt_id,
+            outcome,
+            reply,
+        } => {
+            let _ = reply.send(finish_attempt(app, conn, run_id, attempt_id, outcome));
+        }
+        SchedulerCommand::Relaunch { run_id, reply } => {
+            let _ = reply.send(relaunch(app, conn, run_id));
         }
         SchedulerCommand::ReleaseLease { lease_id, reply } => {
             let _ = reply.send(release_lease(app, conn, lease_id));
@@ -1311,6 +1425,222 @@ fn update_finding_status(
     Ok(())
 }
 
+fn start_attempt(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    task_id: String,
+    agent_assignment_id: Option<String>,
+    agent_session_id: Option<String>,
+) -> Result<String, String> {
+    let state: String = conn
+        .query_row(
+            "SELECT state FROM run_tasks WHERE id = ?1 AND run_id = ?2",
+            params![task_id, run_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if TaskState::parse(&state) != Some(TaskState::Ready) {
+        return Err(format!("task must be ready before starting an attempt; current state is {state}"));
+    }
+    let has_active_lease: bool = conn
+        .query_row(
+            "SELECT EXISTS(
+                 SELECT 1 FROM run_workspace_leases
+                 WHERE run_id = ?1 AND task_id = ?2 AND state = 'active'
+             )",
+            params![run_id, task_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|error| error.to_string())?
+        != 0;
+
+    if has_active_lease {
+        store::transition_task(conn, &task_id, TaskState::Provisioning, None)
+            .map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Provisioning))?;
+    }
+    store::transition_task(conn, &task_id, TaskState::Running, None)
+        .map_err(|error| error.to_string())?;
+    append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Running))?;
+
+    let attempt = super::types::Attempt {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.clone(),
+        agent_assignment_id,
+        agent_session_id,
+        attempt_number: store::max_attempt_number(conn, &task_id)
+            .map_err(|error| error.to_string())?
+            + 1,
+        outcome: None,
+        started_at: now_ms(),
+        ended_at: None,
+    };
+    store::insert_attempt(conn, &attempt).map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        attempt_event(
+            &run_id,
+            &task_id,
+            &attempt.id,
+            RunEventType::AttemptStarted,
+            json!({"attempt_number": attempt.attempt_number, "agent_session_id": attempt.agent_session_id}),
+        ),
+    )?;
+    recompute_ready_and_status(app, conn, &run_id)?;
+    Ok(attempt.id)
+}
+
+fn finish_attempt(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    attempt_id: String,
+    outcome: String,
+) -> Result<(), String> {
+    let (task_id, task_state): (String, String) = conn
+        .query_row(
+            "SELECT a.task_id, t.state
+             FROM run_attempts a
+             JOIN run_tasks t ON t.id = a.task_id
+             WHERE a.id = ?1 AND t.run_id = ?2",
+            params![attempt_id, run_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|error| error.to_string())?;
+    store::finish_attempt(conn, &attempt_id, &outcome, now_ms())
+        .map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        attempt_event(
+            &run_id,
+            &task_id,
+            &attempt_id,
+            RunEventType::AttemptFinished,
+            json!({"outcome": outcome}),
+        ),
+    )?;
+    if outcome == "failed" && TaskState::parse(&task_state) == Some(TaskState::Running) {
+        store::transition_task(conn, &task_id, TaskState::Failed, None)
+            .map_err(|error| error.to_string())?;
+        append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Failed))?;
+    }
+    recompute_ready_and_status(app, conn, &run_id)
+}
+
+fn reconcile_interrupted(conn: &Connection) -> Result<Vec<NewRunEvent>, String> {
+    let run_ids = {
+        let mut statement = conn
+            .prepare("SELECT id FROM runs WHERE status = 'running' ORDER BY created_at, id")
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?
+    };
+    let mut events = Vec::with_capacity(run_ids.len());
+    for run_id in run_ids {
+        let interrupted_at = now_ms();
+        conn.execute(
+            "UPDATE runs
+             SET status = 'interrupted', interrupted_at = ?1, updated_at = ?1,
+                 completed_at = NULL
+             WHERE id = ?2 AND status = 'running'",
+            params![interrupted_at, run_id],
+        )
+        .map_err(|error| error.to_string())?;
+        events.push(event_for_task_or_run(
+            &run_id,
+            None,
+            RunEventType::RunInterrupted,
+            json!({"interrupted_at": interrupted_at}),
+        ));
+    }
+    Ok(events)
+}
+
+fn prepare_relaunch(conn: &Connection, run_id: &str) -> Result<Vec<NewRunEvent>, String> {
+    let status: String = conn
+        .query_row(
+            "SELECT status FROM runs WHERE id = ?1",
+            params![run_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if RunStatus::parse(&status) != Some(RunStatus::Interrupted) {
+        return Err(format!("run must be interrupted before relaunch; current status is {status}"));
+    }
+    let timestamp = now_ms();
+    conn.execute(
+        "UPDATE runs
+         SET status = 'running', interrupted_at = NULL, completed_at = NULL, updated_at = ?1
+         WHERE id = ?2",
+        params![timestamp, run_id],
+    )
+    .map_err(|error| error.to_string())?;
+
+    let tasks = {
+        let mut statement = conn
+            .prepare("SELECT id, state FROM run_tasks WHERE run_id = ?1 ORDER BY created_at, id")
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map(params![run_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?
+    };
+    let mut events = Vec::new();
+    for (task_id, state) in tasks {
+        let state = TaskState::parse(&state).ok_or_else(|| format!("invalid task state: {state}"))?;
+        if state.is_terminal() || state == TaskState::Ready {
+            continue;
+        }
+        store::transition_task(conn, &task_id, TaskState::Ready, None)
+            .map_err(|error| error.to_string())?;
+        events.push(task_state_event(run_id, &task_id, TaskState::Ready));
+    }
+    events.push(event_for_task_or_run(
+        run_id,
+        None,
+        RunEventType::RunRelaunched,
+        json!({"relaunched_at": timestamp}),
+    ));
+    Ok(events)
+}
+
+fn relaunch(app: &AppHandle, conn: &Connection, run_id: String) -> Result<Run, String> {
+    for event in prepare_relaunch(conn, &run_id)? {
+        append_and_emit(app, conn, event)?;
+    }
+    recompute_ready_and_status(app, conn, &run_id)?;
+    load_run(conn, &run_id)
+}
+
+fn attempt_event(
+    run_id: &str,
+    task_id: &str,
+    attempt_id: &str,
+    event_type: RunEventType,
+    payload: serde_json::Value,
+) -> NewRunEvent {
+    NewRunEvent {
+        id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        task_id: Some(task_id.to_string()),
+        attempt_id: Some(attempt_id.to_string()),
+        agent_id: None,
+        event_type,
+        payload,
+        provider_event_id: None,
+        created_at: now_ms(),
+    }
+}
+
 fn event_for_task_or_run(
     run_id: &str,
     task_id: Option<&str>,
@@ -1447,6 +1777,7 @@ fn create_run(
         root_path,
         status: RunStatus::Running,
         cancel_requested: false,
+        interrupted_at: None,
         created_at: timestamp,
         updated_at: timestamp,
         completed_at: None,
@@ -1720,8 +2051,8 @@ fn recompute_ready_and_status(
         )?;
     }
 
-    let (cancel_requested, task_states) = load_status_inputs(conn, run_id)?;
-    let status = derive_run_status(&task_states, cancel_requested);
+    let (cancel_requested, interrupted, task_states) = load_status_inputs(conn, run_id)?;
+    let status = derive_run_status(&task_states, cancel_requested, interrupted);
     let completed_at = status.is_terminal().then_some(now_ms());
     let updated = conn
         .execute(
@@ -1737,12 +2068,15 @@ fn recompute_ready_and_status(
     Ok(())
 }
 
-fn load_status_inputs(conn: &Connection, run_id: &str) -> Result<(bool, Vec<TaskState>), String> {
-    let cancel_requested: i64 = conn
+fn load_status_inputs(
+    conn: &Connection,
+    run_id: &str,
+) -> Result<(bool, bool, Vec<TaskState>), String> {
+    let (cancel_requested, interrupted): (i64, bool) = conn
         .query_row(
-            "SELECT cancel_requested FROM runs WHERE id = ?1",
+            "SELECT cancel_requested, interrupted_at IS NOT NULL FROM runs WHERE id = ?1",
             params![run_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|error| error.to_string())?;
     let mut statement = conn
@@ -1756,7 +2090,7 @@ fn load_status_inputs(conn: &Connection, run_id: &str) -> Result<(bool, Vec<Task
             TaskState::parse(&value).ok_or_else(|| format!("invalid task state in database: {value}"))
         })
         .collect::<Result<Vec<_>, String>>()?;
-    Ok((cancel_requested != 0, states))
+    Ok((cancel_requested != 0, interrupted, states))
 }
 
 fn load_run(conn: &Connection, run_id: &str) -> Result<Run, String> {
@@ -1782,6 +2116,101 @@ mod tests {
     }
 
     #[test]
+    fn startup_reconcile_marks_running_runs_interrupted() {
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-reconcile".to_string(),
+                objective: "recover after restart".to_string(),
+                root_path: None,
+                status: RunStatus::Running,
+                cancel_requested: false,
+                interrupted_at: None,
+                created_at: 1,
+                updated_at: 1,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+
+        let events = reconcile_interrupted(&conn).unwrap();
+        assert_eq!(events.len(), 1);
+        for event in events {
+            store::append_event(&conn, &event).unwrap();
+        }
+        let snapshot = store::load_run_snapshot(&conn, "run-reconcile")
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.run.status, RunStatus::Interrupted);
+        assert!(snapshot.run.interrupted_at.is_some());
+        assert_eq!(
+            store::list_events(&conn, "run-reconcile", 0).unwrap()[0].event_type,
+            RunEventType::RunInterrupted
+        );
+    }
+
+    #[test]
+    fn relaunch_resets_non_terminal_tasks_and_clears_interrupted() {
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-relaunch".to_string(),
+                objective: "relaunch after restart".to_string(),
+                root_path: None,
+                status: RunStatus::Interrupted,
+                cancel_requested: false,
+                interrupted_at: Some(10),
+                created_at: 1,
+                updated_at: 10,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+        for (task_id, state) in [
+            ("task-running", "running"),
+            ("task-blocked", "blocked"),
+            ("task-review", "review"),
+        ] {
+            store::add_task(
+                &conn,
+                &Task {
+                    id: task_id.to_string(),
+                    run_id: "run-relaunch".to_string(),
+                    title: task_id.to_string(),
+                    brief: "restart me".to_string(),
+                    state: TaskState::Ready,
+                    blocked_reason: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE run_tasks SET state = ?1 WHERE id = ?2",
+                params![state, task_id],
+            )
+            .unwrap();
+        }
+
+        for event in prepare_relaunch(&conn, "run-relaunch").unwrap() {
+            store::append_event(&conn, &event).unwrap();
+        }
+        let snapshot = store::load_run_snapshot(&conn, "run-relaunch")
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.run.status, RunStatus::Running);
+        assert_eq!(snapshot.run.interrupted_at, None);
+        assert!(snapshot.tasks.iter().all(|task| task.state == TaskState::Ready));
+        assert!(store::list_events(&conn, "run-relaunch", 0)
+            .unwrap()
+            .iter()
+            .any(|event| event.event_type == RunEventType::RunRelaunched));
+    }
+
+    #[test]
     fn unapproved_check_does_not_block_completion() {
         let conn = connection();
         store::create_run(
@@ -1792,6 +2221,7 @@ mod tests {
                 root_path: None,
                 status: RunStatus::Running,
                 cancel_requested: false,
+                interrupted_at: None,
                 created_at: 1,
                 updated_at: 1,
                 completed_at: None,
