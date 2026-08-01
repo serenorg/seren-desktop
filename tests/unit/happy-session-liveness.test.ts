@@ -350,7 +350,7 @@ function createLayerHarness({
 }
 
 describe("Happy session liveness", () => {
-  it("publishes Gemini in Happy's legacy picker metadata from live Seren capabilities", async () => {
+  it("publishes Agy and legacy Gemini picker metadata from live Seren capabilities", async () => {
     const harness = createLayerHarness();
     const agents = [
       { type: "claude-code", available: true },
@@ -371,6 +371,7 @@ describe("Happy session liveness", () => {
       cliAvailability: {
         claude: true,
         codex: true,
+        agy: true,
         gemini: true,
         openclaw: false,
         detectedAt: expect.any(Number),
@@ -3011,6 +3012,7 @@ describe("Happy session liveness", () => {
   });
 
   it.each([
+    ["agy", "gemini"],
     ["claude-codex", "claude-codex"],
     ["lmstudio", "lmstudio"],
   ])("forwards the advertised %s agent to the provider runtime", async (mobileAgent, providerAgent) => {
