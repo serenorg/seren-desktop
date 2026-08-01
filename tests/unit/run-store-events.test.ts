@@ -158,6 +158,34 @@ describe("run store event handling", () => {
     expect(runState.lastSequence).toBe(3);
   });
 
+  it("applies concurrent events in order without regressing the sequence", async () => {
+    const first = snapshot();
+    first.tasks[0].state = "verifying";
+    const second = snapshot();
+    second.tasks[0].state = "review";
+    // The earlier event's hydrate resolves last, mimicking two interleaved
+    // in-flight hydrates.
+    getStateMock
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => setTimeout(() => resolve(first), 20)),
+      )
+      .mockResolvedValueOnce(second);
+    setRunState({
+      activeRunId: "run-1",
+      snapshot: snapshot(),
+      lastSequence: 1,
+    });
+
+    await Promise.all([
+      runStore.applyEvent(event(3, "task_state_changed")),
+      runStore.applyEvent(event(5, "task_state_changed")),
+    ]);
+
+    expect(runState.lastSequence).toBe(5);
+    expect(runState.snapshot?.tasks[0].state).toBe("review");
+  });
+
   it("groups lanes and exposes findings that need operator review", () => {
     setRunState({
       activeRunId: "run-1",

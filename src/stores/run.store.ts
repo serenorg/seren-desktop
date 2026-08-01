@@ -127,6 +127,16 @@ async function hydrateLatest(): Promise<void> {
   }
 }
 
+// Events are applied one at a time. Each handler may await a hydrate, and two
+// interleaved hydrates can finish out of order — writing back a lower sequence
+// and an older snapshot over a newer one.
+let applyQueue: Promise<void> = Promise.resolve();
+
+function enqueueEvent(event: RunEvent): Promise<void> {
+  applyQueue = applyQueue.then(() => applyEvent(event)).catch(() => {});
+  return applyQueue;
+}
+
 async function applyEvent(event: RunEvent): Promise<void> {
   if (state.activeRunId && event.run_id !== state.activeRunId) return;
   if (event.sequence <= state.lastSequence) return;
@@ -167,6 +177,16 @@ async function applyEvent(event: RunEvent): Promise<void> {
   setState("lastSequence", event.sequence);
 }
 
+const OBJECTIVE_TASK_TITLE_MAX = 80;
+
+export function objectiveTaskTitle(objective: string): string {
+  const collapsed = objective.trim().replace(/\s+/g, " ");
+  if (collapsed.length <= OBJECTIVE_TASK_TITLE_MAX) return collapsed;
+  const head = collapsed.slice(0, OBJECTIVE_TASK_TITLE_MAX);
+  const lastSpace = head.lastIndexOf(" ");
+  return `${lastSpace > 20 ? head.slice(0, lastSpace) : head}…`;
+}
+
 async function launch(options: LaunchOptions): Promise<void> {
   const trimmedObjective = options.objective.trim();
   if (!trimmedObjective) {
@@ -179,10 +199,19 @@ async function launch(options: LaunchOptions): Promise<void> {
     for (const agentType of options.agents) {
       await runAddAgent(run.id, agentType);
     }
+    let taskCount = 0;
     for (const task of options.tasks) {
       const title = task.title.trim();
       if (!title) continue;
       await runAddTask(run.id, title, task.brief.trim());
+      taskCount += 1;
+    }
+    // Task slots live behind Advanced controls, so the primary flow is an
+    // objective on its own. Without a task there is nothing to dispatch and the
+    // run sits at "running" with empty lanes forever, so the objective itself
+    // becomes the work.
+    if (taskCount === 0) {
+      await runAddTask(run.id, objectiveTaskTitle(trimmedObjective), trimmedObjective);
     }
     setState("activeRunId", run.id);
     await hydrate(run.id);
@@ -274,7 +303,7 @@ export const runStore = {
   },
   hydrate,
   hydrateLatest,
-  applyEvent,
+  applyEvent: enqueueEvent,
   launch,
   cancel,
   relaunch,
