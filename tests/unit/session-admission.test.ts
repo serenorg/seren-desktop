@@ -75,6 +75,55 @@ describe("session admission gate", () => {
     expect(gate.activeCount()).toBe(0);
   });
 
+  it("gives up on a queued session once its acquire deadline passes", async () => {
+    const gate = createAdmissionGate({ limit: 1, acquireTimeoutMs: 20 });
+    await gate.acquire("a");
+    const queued = gate.acquire("b");
+
+    await expect(queued).rejects.toThrow(
+      /Timed out after 20ms waiting for a local Claude session slot/,
+    );
+    expect(gate.pendingCount()).toBe(0);
+
+    // Capacity freeing afterwards must not admit the abandoned session.
+    gate.release("a");
+    expect(gate.activeCount()).toBe(0);
+  });
+
+  it("cancels a queued session when its caller releases it", async () => {
+    const gate = createAdmissionGate({ limit: 1 });
+    await gate.acquire("a");
+    const queued = gate.acquire("b");
+
+    expect(gate.release("b")).toBe(true);
+    await expect(queued).rejects.toThrow(
+      /Admission request cancelled for session b/,
+    );
+    expect(gate.pendingCount()).toBe(0);
+
+    gate.release("a");
+    expect(gate.activeCount()).toBe(0);
+  });
+
+  it("keeps serving later waiters after one is cancelled", async () => {
+    const gate = createAdmissionGate({ limit: 1 });
+    await gate.acquire("a");
+    const b = gate.acquire("b");
+    let cResolved = false;
+    const c = gate.acquire("c").then(() => {
+      cResolved = true;
+    });
+
+    expect(gate.release("b")).toBe(true);
+    await expect(b).rejects.toThrow(/cancelled/);
+    expect(gate.pendingCount()).toBe(1);
+
+    gate.release("a");
+    await c;
+    expect(cResolved).toBe(true);
+    expect(gate.activeCount()).toBe(1);
+  });
+
   it("reports queued positions", async () => {
     const queued: Array<[string, number]> = [];
     const gate = createAdmissionGate({
