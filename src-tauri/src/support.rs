@@ -6,7 +6,7 @@ use std::fs;
 use std::panic::PanicHookInfo;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use hmac::{Hmac, Mac};
 use regex::Regex;
@@ -29,6 +29,11 @@ const MAX_BUNDLE_BYTES: usize = 5 * 1024 * 1024;
 const MAX_SWEEP_PER_LAUNCH: usize = 5;
 // Retry-After ceiling so a misconfigured server cannot hang us indefinitely.
 const MAX_RETRY_AFTER_SECONDS: u64 = 60;
+// Sidecars arrive faster than the per-launch replay budget drains them, so the
+// directory is pruned to a bounded, recent window. Beyond these limits a report
+// is stale enough that keeping it costs disk without buying diagnostics.
+const MAX_RETAINED_SIDECARS: usize = 60;
+const MAX_SIDECAR_AGE_SECONDS: u64 = 14 * 24 * 60 * 60;
 // Bound the native runtime-error dedup set so a long-running session with many
 // distinct native failures cannot grow it unbounded. Native reports are rare
 // (catastrophic events), so clearing on overflow is acceptable.
@@ -170,14 +175,9 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
     let client = build_http_client();
     let mut processed = 0usize;
 
-    for entry in entries {
+    for path in prune_sidecars(entries)? {
         if processed >= MAX_SWEEP_PER_LAUNCH {
             break;
-        }
-        let entry = entry.map_err(|err| format!("failed to read crash entry: {err}"))?;
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
         }
 
         let is_pending = path
@@ -229,6 +229,69 @@ pub async fn sweep_support_crash_reports(app: AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// Returns the sidecars worth replaying, oldest first, after deleting the ones
+/// that are too old or too far beyond the retention window. Reports arrive
+/// faster than the per-launch replay budget drains them, so without pruning the
+/// directory grows without bound and the oldest reports are never reached.
+fn prune_sidecars(entries: fs::ReadDir) -> Result<Vec<PathBuf>, String> {
+    let now = SystemTime::now();
+    let mut sidecars: Vec<(SystemTime, PathBuf)> = Vec::new();
+
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("failed to read crash entry: {err}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(now);
+        sidecars.push((modified, path));
+    }
+
+    let (keep, discard) = partition_sidecars(sidecars, now);
+    for path in discard {
+        if let Err(err) = fs::remove_file(&path) {
+            log::warn!(
+                "[support-report] failed to delete stale sidecar {}: {err}",
+                path.display()
+            );
+        }
+    }
+    Ok(keep)
+}
+
+/// Splits sidecars into the ones worth replaying (oldest first, so the sweep
+/// drains the longest-waiting reports) and the ones to delete for being too old
+/// or beyond the retention window.
+fn partition_sidecars(
+    mut sidecars: Vec<(SystemTime, PathBuf)>,
+    now: SystemTime,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut discard = Vec::new();
+    sidecars.retain(|(modified, path)| {
+        let expired = now
+            .duration_since(*modified)
+            .is_ok_and(|age| age.as_secs() > MAX_SIDECAR_AGE_SECONDS);
+        if expired {
+            discard.push(path.clone());
+        }
+        !expired
+    });
+
+    sidecars.sort_by(|left, right| left.0.cmp(&right.0));
+    while sidecars.len() > MAX_RETAINED_SIDECARS {
+        let (_, path) = sidecars.remove(0);
+        discard.push(path);
+    }
+
+    (
+        sidecars.into_iter().map(|(_, path)| path).collect(),
+        discard,
+    )
 }
 
 fn install_panic_hook(app: AppHandle) {
@@ -625,6 +688,50 @@ fn windows_home_pattern() -> &'static Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pruning_discards_expired_sidecars() {
+        let now = SystemTime::now();
+        let fresh = PathBuf::from("pending-fresh.json");
+        let expired = PathBuf::from("pending-expired.json");
+
+        let (keep, discard) = partition_sidecars(
+            vec![
+                (now - Duration::from_secs(60), fresh.clone()),
+                (
+                    now - Duration::from_secs(MAX_SIDECAR_AGE_SECONDS + 60),
+                    expired.clone(),
+                ),
+            ],
+            now,
+        );
+
+        assert_eq!(keep, vec![fresh]);
+        assert_eq!(discard, vec![expired]);
+    }
+
+    #[test]
+    fn pruning_keeps_the_newest_sidecars_within_the_retention_limit() {
+        let now = SystemTime::now();
+        let total = MAX_RETAINED_SIDECARS + 5;
+        // Highest index is the most recent.
+        let sidecars: Vec<(SystemTime, PathBuf)> = (0..total)
+            .map(|index| {
+                (
+                    now - Duration::from_secs((total - index) as u64 * 60),
+                    PathBuf::from(format!("pending-{index}.json")),
+                )
+            })
+            .collect();
+
+        let (keep, discard) = partition_sidecars(sidecars, now);
+
+        assert_eq!(keep.len(), MAX_RETAINED_SIDECARS);
+        assert_eq!(discard.len(), 5);
+        // Oldest survivor first, so the sweep drains the longest-waiting report.
+        assert_eq!(keep[0], PathBuf::from("pending-5.json"));
+        assert_eq!(discard[0], PathBuf::from("pending-0.json"));
+    }
 
     #[test]
     fn redacts_tokens_and_home_paths() {

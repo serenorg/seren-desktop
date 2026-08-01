@@ -669,7 +669,9 @@ fn process_command(
             let _ = reply.send(approve_check(app, conn, check_id));
         }
         SchedulerCommand::RunBaseline { run_id, reply } => {
-            if let Err(error) = start_baseline(app, conn, sender, run_id, reply) {
+            let mut reply = Some(reply);
+            if let Err(error) = start_baseline(app, conn, sender, run_id, &mut reply) {
+                send_check_reply(&mut reply, Err(error.clone()));
                 log::error!("[run-engine] baseline dispatch failed: {error}");
             }
         }
@@ -685,7 +687,9 @@ fn process_command(
             task_id,
             reply,
         } => {
-            if let Err(error) = start_verify(app, conn, sender, run_id, task_id, reply) {
+            let mut reply = Some(reply);
+            if let Err(error) = start_verify(app, conn, sender, run_id, task_id, &mut reply) {
+                send_check_reply(&mut reply, Err(error.clone()));
                 log::error!("[run-engine] verify dispatch failed: {error}");
             }
         }
@@ -1062,12 +1066,24 @@ fn run_check_commands(
         .collect()
 }
 
+/// Answers a check request exactly once. Dropping the sender instead would
+/// reach the caller as a bare channel-closed message, hiding the real reason
+/// the request failed.
+fn send_check_reply(
+    reply: &mut Option<oneshot::Sender<Result<Vec<CheckResult>, String>>>,
+    result: Result<Vec<CheckResult>, String>,
+) {
+    if let Some(sender) = reply.take() {
+        let _ = sender.send(result);
+    }
+}
+
 fn start_baseline(
     app: &AppHandle,
     conn: &Connection,
     sender: &mpsc::Sender<SchedulerCommand>,
     run_id: String,
-    reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    reply: &mut Option<oneshot::Sender<Result<Vec<CheckResult>, String>>>,
 ) -> Result<(), String> {
     let checks = store::list_checks(conn, &run_id).map_err(|error| error.to_string())?;
     let root_path = approved_check_root(conn, &run_id)?;
@@ -1103,12 +1119,15 @@ fn start_baseline(
             }
         }
         let result = finish_baseline(app, conn, run_id, Vec::new());
-        let _ = reply.send(result);
+        send_check_reply(reply, result);
         return Ok(());
     }
 
     let root_path = PathBuf::from(root_path.expect("checked above"));
     let finish_sender = sender.clone();
+    let Some(reply) = reply.take() else {
+        return Err("baseline reply channel already used".to_string());
+    };
     tauri::async_runtime::spawn(async move {
         let worker = tauri::async_runtime::spawn_blocking(move || {
             run_check_commands(&root_path, &approved, "baseline", None)
@@ -1167,7 +1186,7 @@ fn start_verify(
     sender: &mpsc::Sender<SchedulerCommand>,
     run_id: String,
     task_id: String,
-    reply: oneshot::Sender<Result<Vec<CheckResult>, String>>,
+    reply: &mut Option<oneshot::Sender<Result<Vec<CheckResult>, String>>>,
 ) -> Result<(), String> {
     let state: String = conn
         .query_row(
@@ -1207,7 +1226,7 @@ fn start_verify(
             }
         }
         let result = finish_verify(app, conn, run_id, task_id, Vec::new());
-        let _ = reply.send(result);
+        send_check_reply(reply, result);
         return Ok(());
     }
 
@@ -1216,6 +1235,9 @@ fn start_verify(
     let finish_run_id = run_id.clone();
     let finish_task_id = task_id.clone();
     let worker_task_id = finish_task_id.clone();
+    let Some(reply) = reply.take() else {
+        return Err("verify reply channel already used".to_string());
+    };
     tauri::async_runtime::spawn(async move {
         let worker = tauri::async_runtime::spawn_blocking(move || {
             run_check_commands(
@@ -1601,7 +1623,10 @@ fn prepare_relaunch(conn: &Connection, run_id: &str) -> Result<Vec<NewRunEvent>,
     let mut events = Vec::new();
     for (task_id, state) in tasks {
         let state = TaskState::parse(&state).ok_or_else(|| format!("invalid task state: {state}"))?;
-        if state.is_terminal() || state == TaskState::Ready {
+        // Pending tasks are waiting on a prerequisite, so they are already in
+        // the right state; promoting them here would run them ahead of the work
+        // they depend on. Promotion happens once their dependencies are done.
+        if state.is_terminal() || state == TaskState::Ready || state == TaskState::Pending {
             continue;
         }
         store::transition_task(conn, &task_id, TaskState::Ready, None)
@@ -1902,6 +1927,12 @@ fn add_assignment(
 }
 
 fn request_cancel(app: &AppHandle, conn: &Connection, run_id: String) -> Result<Run, String> {
+    // Cancelling a run that already settled would rewrite its outcome —
+    // a completed run would be recorded as cancelled and lose its
+    // completion timestamp. Report the settled run as-is instead.
+    if load_run_status(conn, &run_id)?.is_terminal() {
+        return load_run(conn, &run_id);
+    }
     let updated = conn
         .execute(
             "UPDATE runs SET cancel_requested = 1, updated_at = ?1 WHERE id = ?2",
@@ -1961,22 +1992,9 @@ fn request_cancel(app: &AppHandle, conn: &Connection, run_id: String) -> Result<
             },
         )?;
     }
+    // recompute_ready_and_status emits RunFinalized for the terminal
+    // transition this cancel just caused.
     recompute_ready_and_status(app, conn, &run_id)?;
-    append_and_emit(
-        app,
-        conn,
-        NewRunEvent {
-            id: Uuid::new_v4().to_string(),
-            run_id: run_id.clone(),
-            task_id: None,
-            attempt_id: None,
-            agent_id: None,
-            event_type: RunEventType::RunFinalized,
-            payload: json!({"status": RunStatus::Cancelled}),
-            provider_event_id: None,
-            created_at: now_ms(),
-        },
-    )?;
     load_run(conn, &run_id)
 }
 
@@ -2035,26 +2053,45 @@ fn recompute_ready_and_status(
     conn: &Connection,
     run_id: &str,
 ) -> Result<(), String> {
+    for event in promote_ready_tasks(conn, run_id)? {
+        append_and_emit(app, conn, event)?;
+    }
+
+    if let Some(event) = settle_run_status(conn, run_id)? {
+        append_and_emit(app, conn, event)?;
+    }
+    Ok(())
+}
+
+/// Promotes pending tasks whose dependencies are all done. This is the only
+/// place a task becomes ready, so dependency order holds no matter what put
+/// the task back into pending.
+fn promote_ready_tasks(conn: &Connection, run_id: &str) -> Result<Vec<NewRunEvent>, String> {
+    let mut events = Vec::new();
     for task_id in store::ready_task_ids(conn, run_id).map_err(|error| error.to_string())? {
         store::transition_task(conn, &task_id, TaskState::Ready, None)
             .map_err(|error| error.to_string())?;
-        append_and_emit(
-            app,
-            conn,
-            NewRunEvent {
-                id: Uuid::new_v4().to_string(),
-                run_id: run_id.to_string(),
-                task_id: Some(task_id),
-                attempt_id: None,
-                agent_id: None,
-                event_type: RunEventType::TaskStateChanged,
-                payload: json!({"state": TaskState::Ready}),
-                provider_event_id: None,
-                created_at: now_ms(),
-            },
-        )?;
+        events.push(NewRunEvent {
+            id: Uuid::new_v4().to_string(),
+            run_id: run_id.to_string(),
+            task_id: Some(task_id),
+            attempt_id: None,
+            agent_id: None,
+            event_type: RunEventType::TaskStateChanged,
+            payload: json!({"state": TaskState::Ready}),
+            provider_event_id: None,
+            created_at: now_ms(),
+        });
     }
+    Ok(events)
+}
 
+/// Persists the run's derived status. Returns the event announcing a terminal
+/// outcome when this call is what settled the run — that transition is the one
+/// status change nothing else announces, so without it the UI keeps showing a
+/// finished run as working with its Stop control still live.
+fn settle_run_status(conn: &Connection, run_id: &str) -> Result<Option<NewRunEvent>, String> {
+    let previous_status = load_run_status(conn, run_id)?;
     let (cancel_requested, interrupted, task_states) = load_status_inputs(conn, run_id)?;
     let status = derive_run_status(&task_states, cancel_requested, interrupted);
     let completed_at = status.is_terminal().then_some(now_ms());
@@ -2069,7 +2106,31 @@ fn recompute_ready_and_status(
     if updated == 0 {
         return Err("run not found".to_string());
     }
-    Ok(())
+    if !status.is_terminal() || previous_status.is_terminal() {
+        return Ok(None);
+    }
+    Ok(Some(NewRunEvent {
+        id: Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        task_id: None,
+        attempt_id: None,
+        agent_id: None,
+        event_type: RunEventType::RunFinalized,
+        payload: json!({"status": status}),
+        provider_event_id: None,
+        created_at: now_ms(),
+    }))
+}
+
+fn load_run_status(conn: &Connection, run_id: &str) -> Result<RunStatus, String> {
+    let raw: String = conn
+        .query_row(
+            "SELECT status FROM runs WHERE id = ?1",
+            params![run_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    RunStatus::parse(&raw).ok_or_else(|| format!("invalid run status in database: {raw}"))
 }
 
 fn load_status_inputs(
@@ -2202,6 +2263,9 @@ mod tests {
         for event in prepare_relaunch(&conn, "run-relaunch").unwrap() {
             store::append_event(&conn, &event).unwrap();
         }
+        for event in promote_ready_tasks(&conn, "run-relaunch").unwrap() {
+            store::append_event(&conn, &event).unwrap();
+        }
         let snapshot = store::load_run_snapshot(&conn, "run-relaunch")
             .unwrap()
             .unwrap();
@@ -2212,6 +2276,171 @@ mod tests {
             .unwrap()
             .iter()
             .any(|event| event.event_type == RunEventType::RunRelaunched));
+    }
+
+    #[test]
+    fn relaunch_keeps_a_task_waiting_on_its_unfinished_prerequisite() {
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-deps".to_string(),
+                objective: "respect dependencies on relaunch".to_string(),
+                root_path: None,
+                status: RunStatus::Interrupted,
+                cancel_requested: false,
+                interrupted_at: Some(5),
+                created_at: 1,
+                updated_at: 1,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+        // task-first was interrupted mid-run; task-second has never been
+        // promoted because task-first has not finished.
+        for (task_id, state, dependencies) in [
+            ("task-first", "running", Vec::new()),
+            ("task-second", "pending", vec!["task-first".to_string()]),
+        ] {
+            store::add_task(
+                &conn,
+                &Task {
+                    id: task_id.to_string(),
+                    run_id: "run-deps".to_string(),
+                    title: task_id.to_string(),
+                    brief: "ordered work".to_string(),
+                    state: TaskState::Ready,
+                    blocked_reason: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &dependencies,
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE run_tasks SET state = ?1 WHERE id = ?2",
+                params![state, task_id],
+            )
+            .unwrap();
+        }
+
+        for event in prepare_relaunch(&conn, "run-deps").unwrap() {
+            store::append_event(&conn, &event).unwrap();
+        }
+        for event in promote_ready_tasks(&conn, "run-deps").unwrap() {
+            store::append_event(&conn, &event).unwrap();
+        }
+
+        let snapshot = store::load_run_snapshot(&conn, "run-deps").unwrap().unwrap();
+        let state_of = |id: &str| {
+            snapshot
+                .tasks
+                .iter()
+                .find(|task| task.id == id)
+                .expect("task present")
+                .state
+        };
+        assert_eq!(state_of("task-first"), TaskState::Ready);
+        assert_eq!(state_of("task-second"), TaskState::Pending);
+    }
+
+    fn seed_run(conn: &Connection, run_id: &str) {
+        store::create_run(
+            conn,
+            &Run {
+                id: run_id.to_string(),
+                objective: "settle status".to_string(),
+                root_path: None,
+                status: RunStatus::Running,
+                cancel_requested: false,
+                interrupted_at: None,
+                created_at: 1,
+                updated_at: 1,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn seed_done_task(conn: &Connection, run_id: &str, task_id: &str) {
+        store::add_task(
+            conn,
+            &Task {
+                id: task_id.to_string(),
+                run_id: run_id.to_string(),
+                title: task_id.to_string(),
+                brief: "finished work".to_string(),
+                state: TaskState::Ready,
+                blocked_reason: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_tasks SET state = 'done' WHERE id = ?1",
+            params![task_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn settling_a_run_announces_its_terminal_outcome_once() {
+        let conn = connection();
+        seed_run(&conn, "run-settle");
+        seed_done_task(&conn, "run-settle", "task-done");
+
+        let event = settle_run_status(&conn, "run-settle")
+            .unwrap()
+            .expect("completing the last task settles the run");
+        assert_eq!(event.event_type, RunEventType::RunFinalized);
+        assert_eq!(event.payload["status"], json!("completed"));
+        assert_eq!(load_run_status(&conn, "run-settle").unwrap(), RunStatus::Completed);
+
+        // Later recomputes must not re-announce an outcome already reported.
+        assert!(settle_run_status(&conn, "run-settle").unwrap().is_none());
+    }
+
+    #[test]
+    fn settling_a_working_run_announces_nothing() {
+        let conn = connection();
+        seed_run(&conn, "run-working");
+        store::add_task(
+            &conn,
+            &Task {
+                id: "task-open".to_string(),
+                run_id: "run-working".to_string(),
+                title: "task-open".to_string(),
+                brief: "still going".to_string(),
+                state: TaskState::Ready,
+                blocked_reason: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            &[],
+        )
+        .unwrap();
+
+        assert!(settle_run_status(&conn, "run-working").unwrap().is_none());
+        assert_eq!(load_run_status(&conn, "run-working").unwrap(), RunStatus::Running);
+    }
+
+    #[test]
+    fn a_settled_run_reads_as_terminal_so_cancel_leaves_it_alone() {
+        let conn = connection();
+        seed_run(&conn, "run-settled");
+        seed_done_task(&conn, "run-settled", "task-done");
+        settle_run_status(&conn, "run-settled").unwrap();
+
+        // request_cancel consults exactly this before touching the record; a
+        // completed run must never be rewritten as cancelled.
+        assert!(load_run_status(&conn, "run-settled").unwrap().is_terminal());
+        let snapshot = store::load_run_snapshot(&conn, "run-settled")
+            .unwrap()
+            .unwrap();
+        assert_eq!(snapshot.run.status, RunStatus::Completed);
+        assert!(snapshot.run.completed_at.is_some());
     }
 
     #[test]

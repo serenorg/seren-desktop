@@ -12,6 +12,20 @@ use std::time::{Duration, Instant};
 
 const SETUP_OUTPUT_LIMIT: usize = 2_000;
 
+/// Every child this module spawns is background work for a run. Without this
+/// flag Windows opens a console window for each one — setup scripts, evidence
+/// checks, and every git call during provisioning.
+fn hidden_command(program: &str) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
+}
+
 #[derive(Debug, Clone)]
 pub struct ProvisionRequest {
     pub run_id: String,
@@ -186,7 +200,7 @@ fn provision_worktree(request: &ProvisionRequest) -> Result<ProvisionedWorkspace
             continue;
         }
 
-        let output = Command::new("git")
+        let output = hidden_command("git")
             .current_dir(source_path)
             .args(["worktree", "add"])
             .arg(&root_path)
@@ -203,9 +217,11 @@ fn provision_worktree(request: &ProvisionRequest) -> Result<ProvisionedWorkspace
             });
         }
 
-        // A concurrent provisioner may have claimed the branch between the
-        // existence check and git worktree add; retry with the next suffix.
-        if root_path.exists() {
+        // A concurrent provisioner may have claimed the path or branch between
+        // the existence check and git worktree add. A live worktree there is
+        // theirs and holds real work, so only clear a leftover that is not one
+        // before retrying with the next suffix.
+        if root_path.exists() && !root_path.join(".git").exists() {
             let _ = fs::remove_dir_all(&root_path);
         }
         if !git_branch_exists(source_path, &branch_name)? {
@@ -231,7 +247,7 @@ fn provision_worktree(request: &ProvisionRequest) -> Result<ProvisionedWorkspace
 }
 
 fn ensure_git_repository(source_path: &Path) -> Result<(), ProvisionError> {
-    let output = Command::new("git")
+    let output = hidden_command("git")
         .args(["-C"])
         .arg(source_path)
         .args(["rev-parse", "--git-dir"])
@@ -245,7 +261,7 @@ fn ensure_git_repository(source_path: &Path) -> Result<(), ProvisionError> {
 }
 
 fn git_stdout(source_path: &Path, arguments: &[&str]) -> Result<String, ProvisionError> {
-    let output = Command::new("git")
+    let output = hidden_command("git")
         .current_dir(source_path)
         .args(arguments)
         .output()
@@ -260,7 +276,7 @@ fn git_stdout(source_path: &Path, arguments: &[&str]) -> Result<String, Provisio
 }
 
 fn git_branch_exists(source_path: &Path, branch_name: &str) -> Result<bool, ProvisionError> {
-    let status = Command::new("git")
+    let status = hidden_command("git")
         .current_dir(source_path)
         .args(["show-ref", "--verify", "--quiet"])
         .arg(format!("refs/heads/{branch_name}"))
@@ -425,13 +441,13 @@ pub fn run_setup_script(
 fn setup_command(script: &str) -> Command {
     #[cfg(target_os = "windows")]
     {
-        let mut command = Command::new("cmd");
+        let mut command = hidden_command("cmd");
         command.args(["/C", script]);
         command
     }
     #[cfg(not(target_os = "windows"))]
     {
-        let mut command = Command::new("/bin/sh");
+        let mut command = hidden_command("/bin/sh");
         command.args(["-c", script]);
         #[cfg(unix)]
         {
@@ -453,7 +469,7 @@ fn kill_setup_process_group(pid: u32) {
 
 #[cfg(windows)]
 fn kill_setup_process_group(pid: u32) {
-    let _ = Command::new("taskkill")
+    let _ = hidden_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status();
 }
@@ -500,7 +516,7 @@ pub fn release(
             }
             let source_repo = source_repo
                 .ok_or_else(|| "worktree release requires source repository".to_string())?;
-            let output = Command::new("git")
+            let output = hidden_command("git")
                 .current_dir(source_repo)
                 .args(["worktree", "remove", "--force"])
                 .arg(root)
@@ -548,7 +564,7 @@ mod tests {
     }
 
     fn git_command(cwd: &Path, arguments: &[&str]) {
-        let output = Command::new("git")
+        let output = hidden_command("git")
             .current_dir(cwd)
             .args(arguments)
             .output()
@@ -562,7 +578,7 @@ mod tests {
     }
 
     fn git_output(cwd: &Path, arguments: &[&str]) -> String {
-        let output = Command::new("git")
+        let output = hidden_command("git")
             .current_dir(cwd)
             .args(arguments)
             .output()
