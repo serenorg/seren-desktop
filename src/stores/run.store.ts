@@ -158,6 +158,7 @@ async function applyEvent(event: RunEvent): Promise<void> {
   } else if (
     event.event_type === "run_interrupted" ||
     event.event_type === "run_relaunched" ||
+    event.event_type === "run_finalized" ||
     event.event_type === "attempt_started" ||
     event.event_type === "attempt_finished"
   ) {

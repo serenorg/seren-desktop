@@ -173,12 +173,21 @@ pub fn finish_attempt(
     if !matches!(outcome, "completed" | "failed" | "parse_failed") {
         return Err(invalid_value("attempt outcome", outcome));
     }
+    // An attempt records its outcome once. A late failure on the way out of a
+    // finished attempt must not rewrite a completed one as failed.
     let updated = conn.execute(
-        "UPDATE run_attempts SET outcome = ?1, ended_at = ?2 WHERE id = ?3",
+        "UPDATE run_attempts SET outcome = ?1, ended_at = ?2 WHERE id = ?3 AND outcome IS NULL",
         params![outcome, ended_at, attempt_id],
     )?;
     if updated == 0 {
-        return Err(rusqlite::Error::QueryReturnedNoRows);
+        let exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM run_attempts WHERE id = ?1)",
+            params![attempt_id],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            return Err(rusqlite::Error::QueryReturnedNoRows);
+        }
     }
     Ok(())
 }
