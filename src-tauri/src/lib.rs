@@ -1411,6 +1411,9 @@ pub fn run() {
             commands::run::run_record_finding,
             commands::run::run_add_coverage_gap,
             commands::run::run_update_finding_status,
+            commands::run::run_start_attempt,
+            commands::run::run_finish_attempt,
+            commands::run::run_relaunch,
             commands::run::run_provision_workspace,
             commands::run::run_release_workspace,
             // Claude Code auto-memory interceptor commands

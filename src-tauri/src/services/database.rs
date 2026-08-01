@@ -1238,12 +1238,14 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             root_path TEXT,
             status TEXT NOT NULL DEFAULT 'running',
             cancel_requested INTEGER NOT NULL DEFAULT 0,
+            interrupted_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL,
             completed_at INTEGER
         )",
         [],
     )?;
+    add_column_if_missing(conn, "runs", "interrupted_at", "INTEGER")?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS run_tasks (
             id TEXT PRIMARY KEY,

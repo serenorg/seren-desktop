@@ -174,6 +174,48 @@ pub async fn run_update_finding_status(
 }
 
 #[tauri::command]
+pub async fn run_start_attempt(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    task_id: String,
+    agent_assignment_id: Option<String>,
+    agent_session_id: Option<String>,
+) -> Result<String, String> {
+    state
+        .start_attempt(
+            &app,
+            run_id,
+            task_id,
+            agent_assignment_id,
+            agent_session_id,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn run_finish_attempt(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+    attempt_id: String,
+    outcome: String,
+) -> Result<(), String> {
+    state
+        .finish_attempt(&app, run_id, attempt_id, outcome)
+        .await
+}
+
+#[tauri::command]
+pub async fn run_relaunch(
+    app: AppHandle,
+    state: State<'_, RunEngineState>,
+    run_id: String,
+) -> Result<Run, String> {
+    state.relaunch(&app, run_id).await
+}
+
+#[tauri::command]
 pub async fn run_provision_workspace(
     app: AppHandle,
     state: State<'_, RunEngineState>,

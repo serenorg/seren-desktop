@@ -6,7 +6,10 @@ use super::types::{RunStatus, TaskState};
 pub fn is_legal_transition(from: TaskState, to: TaskState) -> bool {
     match from {
         TaskState::Pending => matches!(to, TaskState::Ready | TaskState::Cancelled),
-        TaskState::Ready => matches!(to, TaskState::Provisioning | TaskState::Cancelled),
+        TaskState::Ready => matches!(
+            to,
+            TaskState::Provisioning | TaskState::Running | TaskState::Cancelled
+        ),
         TaskState::Provisioning => matches!(
             to,
             TaskState::Running | TaskState::Ready | TaskState::Failed | TaskState::Cancelled
@@ -15,20 +18,35 @@ pub fn is_legal_transition(from: TaskState, to: TaskState) -> bool {
             to,
             TaskState::Blocked
                 | TaskState::Verifying
+                | TaskState::Ready
                 | TaskState::Failed
                 | TaskState::Cancelled
         ),
-        TaskState::Blocked => matches!(to, TaskState::Running | TaskState::Failed | TaskState::Cancelled),
+        TaskState::Blocked => matches!(
+            to,
+            TaskState::Running | TaskState::Ready | TaskState::Failed | TaskState::Cancelled
+        ),
         TaskState::Verifying => matches!(
             to,
-            TaskState::Review | TaskState::Running | TaskState::Failed | TaskState::Cancelled
+            TaskState::Review
+                | TaskState::Running
+                | TaskState::Ready
+                | TaskState::Failed
+                | TaskState::Cancelled
         ),
-        TaskState::Review => matches!(to, TaskState::Done | TaskState::Running | TaskState::Cancelled),
+        TaskState::Review => matches!(
+            to,
+            TaskState::Done | TaskState::Running | TaskState::Ready | TaskState::Cancelled
+        ),
         TaskState::Done | TaskState::Failed | TaskState::Cancelled => false,
     }
 }
 
-pub fn derive_run_status(task_states: &[TaskState], cancel_requested: bool) -> RunStatus {
+pub fn derive_run_status(
+    task_states: &[TaskState],
+    cancel_requested: bool,
+    interrupted: bool,
+) -> RunStatus {
     if cancel_requested {
         return RunStatus::Cancelled;
     }
@@ -36,7 +54,11 @@ pub fn derive_run_status(task_states: &[TaskState], cancel_requested: bool) -> R
         return RunStatus::Running;
     }
     if task_states.iter().any(|state| !state.is_terminal()) {
-        return RunStatus::Running;
+        return if interrupted {
+            RunStatus::Interrupted
+        } else {
+            RunStatus::Running
+        };
     }
     if task_states.iter().all(|state| *state == TaskState::Done) {
         RunStatus::Completed
@@ -57,6 +79,7 @@ mod tests {
             (TaskState::Pending, TaskState::Ready),
             (TaskState::Pending, TaskState::Cancelled),
             (TaskState::Ready, TaskState::Provisioning),
+            (TaskState::Ready, TaskState::Running),
             (TaskState::Ready, TaskState::Cancelled),
             (TaskState::Provisioning, TaskState::Running),
             (TaskState::Provisioning, TaskState::Ready),
@@ -64,17 +87,21 @@ mod tests {
             (TaskState::Provisioning, TaskState::Cancelled),
             (TaskState::Running, TaskState::Blocked),
             (TaskState::Running, TaskState::Verifying),
+            (TaskState::Running, TaskState::Ready),
             (TaskState::Running, TaskState::Failed),
             (TaskState::Running, TaskState::Cancelled),
             (TaskState::Blocked, TaskState::Running),
+            (TaskState::Blocked, TaskState::Ready),
             (TaskState::Blocked, TaskState::Failed),
             (TaskState::Blocked, TaskState::Cancelled),
             (TaskState::Verifying, TaskState::Review),
             (TaskState::Verifying, TaskState::Running),
+            (TaskState::Verifying, TaskState::Ready),
             (TaskState::Verifying, TaskState::Failed),
             (TaskState::Verifying, TaskState::Cancelled),
             (TaskState::Review, TaskState::Done),
             (TaskState::Review, TaskState::Running),
+            (TaskState::Review, TaskState::Ready),
             (TaskState::Review, TaskState::Cancelled),
         ];
         for (from, to) in edges {
@@ -92,7 +119,7 @@ mod tests {
     #[test]
     fn derive_run_status_completed() {
         assert_eq!(
-            derive_run_status(&[TaskState::Done, TaskState::Done], false),
+            derive_run_status(&[TaskState::Done, TaskState::Done], false, false),
             RunStatus::Completed
         );
     }
@@ -100,7 +127,7 @@ mod tests {
     #[test]
     fn derive_run_status_partial() {
         assert_eq!(
-            derive_run_status(&[TaskState::Done, TaskState::Failed], false),
+            derive_run_status(&[TaskState::Done, TaskState::Failed], false, false),
             RunStatus::Partial
         );
     }
@@ -108,7 +135,7 @@ mod tests {
     #[test]
     fn derive_run_status_failed() {
         assert_eq!(
-            derive_run_status(&[TaskState::Failed, TaskState::Cancelled], false),
+            derive_run_status(&[TaskState::Failed, TaskState::Cancelled], false, false),
             RunStatus::Failed
         );
     }
@@ -116,7 +143,7 @@ mod tests {
     #[test]
     fn derive_run_status_cancelled() {
         assert_eq!(
-            derive_run_status(&[TaskState::Running, TaskState::Done], true),
+            derive_run_status(&[TaskState::Running, TaskState::Done], true, false),
             RunStatus::Cancelled
         );
     }
@@ -124,7 +151,7 @@ mod tests {
     #[test]
     fn derive_run_status_cancel_requested_overrides_all_done() {
         assert_eq!(
-            derive_run_status(&[TaskState::Done, TaskState::Done], true),
+            derive_run_status(&[TaskState::Done, TaskState::Done], true, true),
             RunStatus::Cancelled
         );
     }
@@ -132,9 +159,33 @@ mod tests {
     #[test]
     fn derive_run_status_any_nonterminal_is_running() {
         assert_eq!(
-            derive_run_status(&[TaskState::Done, TaskState::Review], false),
+            derive_run_status(&[TaskState::Done, TaskState::Review], false, false),
             RunStatus::Running
         );
-        assert_eq!(derive_run_status(&[], false), RunStatus::Running);
+        assert_eq!(derive_run_status(&[], false, false), RunStatus::Running);
+    }
+
+    #[test]
+    fn derive_run_status_cancelled_beats_interrupted() {
+        assert_eq!(
+            derive_run_status(&[TaskState::Running], true, true),
+            RunStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn derive_run_status_all_terminal_beats_interrupted() {
+        assert_eq!(
+            derive_run_status(&[TaskState::Done, TaskState::Failed], false, true),
+            RunStatus::Partial
+        );
+    }
+
+    #[test]
+    fn derive_run_status_interrupted_beats_running() {
+        assert_eq!(
+            derive_run_status(&[TaskState::Running], false, true),
+            RunStatus::Interrupted
+        );
     }
 }
