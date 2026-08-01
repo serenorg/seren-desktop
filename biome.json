@@ -13,6 +13,7 @@
       "**/index.html",
       "**/vite.config.ts",
       "!**/.worktrees/**/*",
+      "!**/artifacts/**/*",
       "!**/src/api/generated/**/*",
       "!**/src-tauri/target/**/*",
       "!**/mcp-servers"
