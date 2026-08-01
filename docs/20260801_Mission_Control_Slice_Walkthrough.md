@@ -126,6 +126,59 @@ The previous in-flight run `a9c83443-d70a-4f5d-a9aa-a05d41caa5d6` has a `run_int
 
 The dispatcher now treats `seren` as a signed-in cloud-chat fallback, resolves the live Seren model catalog when the stored model is `auto`, falls back to that path when a native provider cannot start, records a provider-boundary coverage gap, and keeps parse failures in review. The titlebar now has the missing Mission Control trigger needed to open the launch box. The catalog fix was verified by focused dispatcher tests. The live run instead encountered a transient MCP gateway HTTP 503, a Codex HTTP 401, and local shell approvals; no evidence was synthesized from those blocked attempts.
 
+## Phase 9 merged-build verification — 2026-08-01
+
+The cleanup completed before this pass: the merged `origin/main` checkout was
+at `ccf40b388d829a2f76a77125931d290f23774b95`, the retired rehydration
+worktree was removed, and the documentation worktree was created from the
+merged build. `pnpm install --prefer-offline` and `pnpm prepare:mcp-servers`
+completed successfully.
+
+The one supervised rebuilt launch completed compilation and started the
+validation binary on slot 1422. The native validation-control bridge, rather
+than a browser tab pointed at the Vite server, drove the sign-in form. Its
+initial `dumpText` showed the signed-out shell. After the one in-memory vault
+credential submission, the native shell displayed exactly:
+
+```text
+Sign in to Seren
+Authentication failed (network: Gateway request failed: error sending request for url (https://api.serendb.com/auth/login))
+```
+
+The process log recorded successful keyring entry creation and deletion for
+the slot access and refresh token accounts, but no token was returned and no
+authenticated shell was reached. No Keychain dialog or secure-storage error
+was visible in this attempt. A shell-level diagnostic POST to the same
+endpoint returned HTTP 422 for an intentionally empty body, establishing that
+the endpoint was reachable from the operator shell while the Tauri Gateway
+bridge failed before receiving an HTTP status. This is an external runtime
+transport bound, not evidence of a keychain denial.
+
+Because sign-in did not complete, the required `--no-build` relaunch was not
+started, the launch box was not used, and no new run was created. A
+readonly query of this phase's slot database returned zero rows from `runs`.
+The restart-cycle, interrupted-banner, relaunch, findings, and approval
+assertions therefore remain unproven in this pass. The previous historical
+SQL evidence and the earlier no-build keychain evidence above remain intact;
+this attempt adds no contradictory keychain result.
+
+### Phase 9 proven / not proven
+
+| Area | Result | Evidence and bound |
+| --- | --- | --- |
+| Cleanup and merged-build launch | Proven | `git worktree list`, the merged `origin/main` commit, successful validation compilation, and the native control bridge log. |
+| Native sign-in on the merged build | Not proven | Native `dumpText` ended at the Gateway transport error above; the attempt stopped after the single supervised submission. |
+| Promptless `--no-build` rehydration | Not proven in this pass | No no-build relaunch was attempted after the sign-in transport failure; this slot had no `runs` row to hydrate. |
+| Interrupted/relaunch cycle and attempt 2 | Not proven in this pass | No run was created, so there can be no new `run_interrupted`, `run_relaunched`, or attempt-2 row. |
+| Findings and email approval | Not proven in this pass | The run never reached the launch box; no new finding or `finding_status_changed` row exists. |
+| Keychain root-cause and prior reuse evidence | Retained | The two-layer history and earlier authenticated same-binary evidence remain above; this pass saw keyring operations without a secure-storage error. |
+
+The phase-9 coverage bound is one rebuilt merged-main launch, one native
+sign-in submission, and a readonly inspection of that phase's slot database.
+It does not include a no-build restart, a run dispatch, a task completion, an
+approval, or a relaunch. The external Gateway transport must be restored
+before the remaining live walkthrough evidence can be collected.
+
 ## Walkthrough bounds and remaining gap
 
 The following required live proof remains absent and is intentionally not synthesized:
@@ -135,8 +188,13 @@ The following required live proof remains absent and is intentionally not synthe
 - the new run has not completed a restart/relaunch cycle with `run_relaunched`, attempt number 2, and a terminal post-relaunch status; startup reconciliation did produce `run_interrupted` for the prior in-flight run when the new run command started;
 - leases and worktree provisioning were not exercised by the dispatcher;
 - screenshots remain local-only; provider behavior and model output remain potentially flaky;
-- the current run gap is the external MCP gateway/provider path; keychain access is not the failing layer.
+- the current final-pass gap occurred before any run existed: the Tauri Gateway transport could not complete `/auth/login`; keychain access was not the failing layer observed in this attempt.
 
-The remaining work is the external-provider run path: restore the MCP gateway, rerun the three tasks without duplicating the run, approve an actual email artifact, and capture the relaunch rows with `sqlite3 -readonly`. Keychain access itself is resolved for the reused binary and issue #3529 can be closed on that evidence.
+The remaining work is the external Gateway/provider path: restore native
+Gateway transport, sign in, run the three tasks without duplicating a run,
+approve an actual email artifact, and capture the relaunch rows with
+`sqlite3 -readonly`. The earlier keychain evidence remains resolved for the
+reused binary, but this phase does not close the Mission Control tracking
+issue on partial evidence.
 
 Part of #3511
