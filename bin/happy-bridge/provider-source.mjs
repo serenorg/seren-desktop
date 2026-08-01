@@ -232,6 +232,10 @@ function normalizeSession(session) {
 // "ask" so approval prompts are never dropped silently.
 const CODEX_UNATTENDED_MODES = new Set(["auto", "bypassPermissions", "safe-yolo", "yolo"]);
 
+// Every mode the bridge accepts from mobile maps to one the target runtime
+// accepts. A mode that reaches a runtime it does not know throws, and the
+// bridge treats that throw as fatal — one mismatched value from a phone would
+// otherwise close the session's relay socket until the bridge restarts.
 export function providerPermissionMode(mode, agentType) {
   if (agentType === "codex") {
     return CODEX_UNATTENDED_MODES.has(mode) ? "auto" : "ask";
@@ -239,17 +243,21 @@ export function providerPermissionMode(mode, agentType) {
   if (agentType === "gemini") {
     return {
       default: "default",
+      ask: "default",
+      auto: "auto_edit",
       acceptEdits: "auto_edit",
       bypassPermissions: "yolo",
       plan: "plan",
       "read-only": "plan",
       "safe-yolo": "yolo",
       yolo: "yolo",
-    }[mode] ?? mode;
+    }[mode] ?? "default";
   }
   if (agentType === "grok") {
     return {
       default: "default",
+      ask: "default",
+      auto: "acceptEdits",
       auto_edit: "acceptEdits",
       acceptEdits: "acceptEdits",
       dontAsk: "dontAsk",
@@ -258,7 +266,20 @@ export function providerPermissionMode(mode, agentType) {
       "read-only": "plan",
       "safe-yolo": "bypassPermissions",
       yolo: "bypassPermissions",
-    }[mode] ?? mode;
+    }[mode] ?? "default";
+  }
+  if (agentType === "claude-code" || agentType === "claude-codex") {
+    return {
+      default: "default",
+      ask: "default",
+      auto: "acceptEdits",
+      acceptEdits: "acceptEdits",
+      plan: "plan",
+      "read-only": "plan",
+      "safe-yolo": "acceptEdits",
+      yolo: "bypassPermissions",
+      bypassPermissions: "bypassPermissions",
+    }[mode] ?? "default";
   }
   return mode;
 }
