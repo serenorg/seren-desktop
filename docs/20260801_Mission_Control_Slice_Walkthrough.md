@@ -5,7 +5,7 @@ ABOUTME: Separates the authenticated partial run from the incomplete restart wal
 
 ## Outcome
 
-The offline launch-box slice is committed in `5c314258`. A real validation instance reached the authenticated shell once, and a real three-task dispatch was started in slot 1422. The full restart/relaunch walkthrough is not complete: later same-slot launches stopped before publishing a fresh validation-control endpoint while macOS Keychain authorization was pending.
+The offline launch-box slice is committed in `5c314258`. A real validation instance reached the authenticated shell, and two same-slot restarts restored it without a visible prompt. The verification is not complete: the next relaunch displayed a fresh macOS Keychain authorization dialog before publishing a fresh validation-control endpoint, so issue #3529 remains open and the run walkthrough is blocked.
 
 This report is part of #3511. Issue [#3529](https://github.com/serenorg/seren-desktop/issues/3529) records the validation sign-in history.
 
@@ -41,7 +41,7 @@ The launcher prints the generated slot password locally for an assisted prompt; 
 
 ## Definitive sign-in evidence
 
-The second instrumented sign-in attempt in this phase reached the signed-in shell without a human answering a prompt. The validation control response for `waitFor button[aria-label^="SerenBucks balance"]` was:
+The instrumented sign-in and the next two same-slot restarts reached the signed-in shell without a human answering a prompt. The validation control response for `waitFor button[aria-label^="SerenBucks balance"]` was:
 
 ```json
 {"found":"button[aria-label^=\"SerenBucks balance\"]"}
@@ -49,9 +49,9 @@ The second instrumented sign-in attempt in this phase reached the signed-in shel
 
 The following `dumpText` then included `$3.07`, `Employees`, `New employee`, `Approval inbox`, and `Bounties`, with no sign-in form. This proves the API login and local token persistence path succeeded at least once in the slot.
 
-The corresponding issue evidence is recorded in [the #3529 resolution-history comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151085576).
+The corresponding earlier issue evidence is recorded in [the #3529 validation-history comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151085576).
 
-A later same-slot launch visibly displayed the Keychain dialog asking for the `login` keychain password. At the time of capture it had not been answered; the app log then ended with a keyring lookup followed by `tauri_runtime_wry: web content process terminated`, and the discovery file still contained the prior PID. The local-only screenshot is `/tmp/seren-validation-slot1422-current.png`; it is not committed.
+A later same-slot launch visibly displayed the Keychain dialog asking for the `login` keychain password. At the time of capture it had not been answered; the app log then ended with a keyring lookup followed by `tauri_runtime_wry: web content process terminated`, and the discovery file still contained the prior PID. The validation wrapper rebuilt the app during this relaunch, which is a deviation from the requested no-rebuild restart and means this attempt cannot prove promptless access for the rebuilt binary. The local-only capture is not committed. The new evidence is recorded in [the latest #3529 comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151176397), and the issue remains open.
 
 ## Partial real run evidence
 
@@ -72,7 +72,7 @@ attempt_number=1 for each of the three attempts
 
 Read-only SQL from the slot database (`.../chat.db`) confirmed the rows above. It also recorded three coverage gaps: an unknown `seren` native agent type, a failed local agent session, and an unparseable agent response. No finding was inserted, so this partial run does not satisfy the evidence or approval portion of the walkthrough.
 
-The dispatcher now treats `seren` as a signed-in cloud-chat fallback, falls back to that path when a native provider cannot start, records a provider-boundary coverage gap, and keeps parse failures in review. The titlebar now has the missing Mission Control trigger needed to open the launch box.
+The dispatcher now treats `seren` as a signed-in cloud-chat fallback, resolves the live Seren model catalog when the stored model is `auto`, falls back to that path when a native provider cannot start, records a provider-boundary coverage gap, and keeps parse failures in review. The titlebar now has the missing Mission Control trigger needed to open the launch box. The catalog fix was verified by the focused dispatcher tests but could not be exercised in the live UI because the validation control endpoint was blocked by the Keychain dialog.
 
 ## Walkthrough bounds and remaining gap
 
@@ -85,6 +85,6 @@ The following required live proof remains absent and is intentionally not synthe
 - screenshots remain local-only; provider behavior and model output remain potentially flaky;
 - the current restart failure is limited to the validation process/control path after the Keychain prompt, not established as a production fresh-sign-in defect.
 
-The next run must reuse slot 1422, confirm a fresh discovery PID, complete the launch-box run, approve the email artifact, interrupt a non-terminal task, click `run-relaunch`, and capture all SQL with `sqlite3 -readonly`.
+The next run must reuse slot 1422 after the operator completes the visible Keychain authorization, confirm a fresh discovery PID, complete the launch-box run, approve the email artifact, interrupt a non-terminal task, click `run-relaunch`, and capture all SQL with `sqlite3 -readonly`.
 
 Part of #3511
