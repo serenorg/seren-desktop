@@ -338,6 +338,9 @@ function createLayerHarness({
       if (!machineHandlers) throw new Error("machine handlers are not ready");
       return machineHandlers.spawnSession(options);
     },
+    // Captured before start() so it survives the layer wrapping the client's
+    // metadata writer to keep the bridge authoritative over cliAvailability.
+    machineMetadataWrites: machineClient.updateMachineMetadata,
     source,
     supervisorCall,
     supervisorNotify,
@@ -363,7 +366,7 @@ describe("Happy session liveness", () => {
 
     await harness.layer.start();
 
-    const update = harness.machineClient.updateMachineMetadata.mock.calls.at(-1)?.[0];
+    const update = harness.machineMetadataWrites.mock.calls.at(-1)?.[0];
     expect(update).toBeTypeOf("function");
     const metadata = update?.({ existing: "preserved" });
     expect(metadata).toMatchObject({
@@ -380,6 +383,28 @@ describe("Happy session liveness", () => {
         agents,
         roots: [SYNTHETIC_ROOT],
       },
+    });
+
+    // The relay client's own keep-alive rewrites cliAvailability from PATH
+    // probing, which never finds Seren's desktop-managed agents. The bridge
+    // stays authoritative no matter who writes.
+    await harness.machineClient.updateMachineMetadata(() => ({
+      cliAvailability: {
+        claude: false,
+        codex: false,
+        gemini: false,
+        openclaw: false,
+        agy: false,
+        detectedAt: 1,
+      },
+    }));
+    const probeWrite = harness.machineMetadataWrites.mock.calls.at(-1)?.[0];
+    expect(probeWrite?.({}).cliAvailability).toMatchObject({
+      claude: true,
+      codex: true,
+      agy: true,
+      gemini: true,
+      openclaw: false,
     });
 
     await harness.layer.close();

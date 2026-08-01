@@ -330,7 +330,14 @@ export function deriveHappySessionTitle(text) {
   if (trimmed.length <= HAPPY_SESSION_TITLE_MAX_CHARS) return trimmed;
   const prefix = trimmed.slice(0, HAPPY_SESSION_TITLE_MAX_CHARS);
   const lastSpace = prefix.lastIndexOf(" ");
-  return `${lastSpace > 10 ? prefix.slice(0, lastSpace) : prefix}\u2026`;
+  let head = lastSpace > 10 ? prefix.slice(0, lastSpace) : prefix;
+  // Cutting by code unit can split an emoji or other astral character, leaving
+  // a lone surrogate that renders as a replacement glyph on the phone.
+  const finalCodeUnit = head.charCodeAt(head.length - 1);
+  if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
+    head = head.slice(0, -1);
+  }
+  return `${head}\u2026`;
 }
 
 // Modes the provider runtimes accept. A remote peer may only move a session
@@ -2160,6 +2167,24 @@ export function createHappyLayer({
     }
   }
 
+  // The machine keep-alive rewrites cliAvailability from PATH probing when it
+  // connects and on every tick. Seren's agents are run by the desktop, not
+  // installed as PATH binaries, so that probe erases what the bridge
+  // advertises and the phone stops offering agents that work. The bridge is
+  // the authority on which agents exist, so its values survive every write.
+  function keepAdvertisedCliAvailability(client) {
+    const applyUpdate = client.updateMachineMetadata.bind(client);
+    client.updateMachineMetadata = (updater) =>
+      applyUpdate((metadata) => {
+        const next = updater(metadata);
+        if (!next || advertisedAgents.length === 0) return next;
+        return {
+          ...next,
+          cliAvailability: happyCliAvailability(advertisedAgents),
+        };
+      });
+  }
+
   async function updateCapabilities() {
     if (!machineClient || !source) return;
     const advertised = await source.advertise();
@@ -2549,6 +2574,7 @@ export function createHappyLayer({
       daemonState: { status: "running", pid: process.pid, startedAt: Date.now() },
     });
     machineClient = api.machineSyncClient(machine);
+    keepAdvertisedCliAvailability(machineClient);
     setupMachineHandlers();
     machineClient.connect();
     return true;

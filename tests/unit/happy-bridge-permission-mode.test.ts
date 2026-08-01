@@ -63,4 +63,41 @@ describe("codex permission mode mapping", () => {
     }
     expect(isSupportedPermissionMode("nope")).toBe(false);
   });
+
+  it("maps every remote mode to one the target runtime accepts", () => {
+    // The modes each runtime will accept; anything else throws and the bridge
+    // treats that throw as fatal for the session.
+    const runtimeModes: Record<string, Set<string>> = {
+      "claude-code": new Set([
+        "default",
+        "acceptEdits",
+        "plan",
+        "bypassPermissions",
+      ]),
+      "claude-codex": new Set([
+        "default",
+        "acceptEdits",
+        "plan",
+        "bypassPermissions",
+      ]),
+      gemini: new Set(["default", "auto_edit", "yolo", "plan"]),
+      codex: new Set(["ask", "auto"]),
+    };
+
+    for (const [agentType, accepted] of Object.entries(runtimeModes)) {
+      for (const mode of REMOTE_MODES) {
+        expect(
+          accepted.has(providerPermissionMode(mode, agentType)),
+          `${agentType} rejects ${mode} -> ${providerPermissionMode(mode, agentType)}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("never leaves a read-only request able to edit", () => {
+    expect(providerPermissionMode("read-only", "claude-code")).toBe("plan");
+    expect(providerPermissionMode("read-only", "gemini")).toBe("plan");
+    expect(providerPermissionMode("read-only", "grok")).toBe("plan");
+    expect(providerPermissionMode("read-only", "codex")).toBe("ask");
+  });
 });
