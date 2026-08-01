@@ -1,13 +1,13 @@
 <!-- ABOUTME: Records the validation sign-in investigation and Mission Control slice evidence.
-ABOUTME: Separates the authenticated partial run from the incomplete restart walkthrough. -->
+ABOUTME: Separates resolved slot-keychain access from the externally blocked run. -->
 
 # Mission Control slice walkthrough
 
 ## Outcome
 
-The offline launch-box slice is committed in `5c314258`. A real validation instance reached the authenticated shell, and two same-slot restarts restored it without a visible prompt. The verification is not complete: the next relaunch displayed a fresh macOS Keychain authorization dialog before publishing a fresh validation-control endpoint, so issue #3529 remains open and the run walkthrough is blocked.
+The offline launch-box slice is committed in `5c314258`. A rebuilt validation instance reached the authenticated shell, and two consecutive `--no-build` relaunches restored it without a visible prompt. The slot-keychain verification is resolved for the authorized binary. The later Mission Control run remains incomplete because the external MCP gateway returned HTTP 503 and native provider fallbacks were unavailable; those are run-coverage bounds, not keychain failures.
 
-This report is part of #3511. Issue [#3529](https://github.com/serenorg/seren-desktop/issues/3529) records the validation sign-in history.
+This report is part of #3511. Issue [#3529](https://github.com/serenorg/seren-desktop/issues/3529) records the validation sign-in history; its closure evidence is in [the closing comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151275967).
 
 ## Root-cause history
 
@@ -39,40 +39,45 @@ OS credential store could not store Seren access token: Platform secure storage 
 
 The launcher prints the generated slot password locally for an assisted prompt; it is deliberately absent from source, commits, this document, and the PR. The current launcher additionally configures the slot keychain's partition list and keeps the slot HOME explicit.
 
-## Definitive sign-in evidence
+## Keychain verification — RESOLVED
 
-The instrumented sign-in and the next two same-slot restarts reached the signed-in shell without a human answering a prompt. The validation control response for `waitFor button[aria-label^="SerenBucks balance"]` was:
+The rebuilt binary launched on slot 1422 at 11:34:51 and reached the signed-in shell. It was then stopped and relaunched twice with `SEREN_VALIDATION_DEV_PORT=1422 pnpm tauri:validation:dev -- --no-build`; the direct binary path reused the already-authorized build. Both no-build launches reached the signed-in shell without a human answering a Keychain prompt. The validation control responses for the two no-build launches contained these authenticated-shell rows:
 
 ```json
-{"found":"button[aria-label^=\"SerenBucks balance\"]"}
+{"selector":"span:nth-visible(9)","text":"Employees"}
+{"selector":"div:nth-visible(12)","text":"Approval inbox"}
+{"selector":"span:nth-visible(14)","text":"Bounties"}
+{"selector":"div:nth-visible(652)","text":"Mission control"}
 ```
 
-The following `dumpText` then included `$3.07`, `Employees`, `New employee`, `Approval inbox`, and `Bounties`, with no sign-in form. This proves the API login and local token persistence path succeeded at least once in the slot.
+The first no-build control server was `http://127.0.0.1:57784` at 11:35:28; the second was `http://127.0.0.1:57844` at 11:35:53. Their logs each showed reads of the slot access-token entry and successful token refresh, and neither log contained a Keychain prompt. The initial built launch's `dumpText` also included `$3.07`, `Employees`, `New employee`, `Approval inbox`, and `Bounties`, with no sign-in form. This proves store and read-back for the slot keychain across the built launch plus two no-build relaunches.
 
 The corresponding earlier issue evidence is recorded in [the #3529 validation-history comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151085576).
 
-A later same-slot launch visibly displayed the Keychain dialog asking for the `login` keychain password. At the time of capture it had not been answered; the app log then ended with a keyring lookup followed by `tauri_runtime_wry: web content process terminated`, and the discovery file still contained the prior PID. The validation wrapper rebuilt the app during this relaunch, which is a deviation from the requested no-rebuild restart and means this attempt cannot prove promptless access for the rebuilt binary. The local-only capture is not committed. The new evidence is recorded in [the latest #3529 comment](https://github.com/serenorg/seren-desktop/issues/3529#issuecomment-5151176397), and the issue remains open.
+The earlier same-slot prompt was caused by rebuilding an unsigned development binary. The dialog asked for the scratch keychain's generated `login` password, not Taariq's macOS password. The `--no-build` mode records the per-rebuild bound: a rebuild may require a fresh operator authorization, while relaunching the same already-authorized binary does not. The local-only screenshot and the generated slot password are not committed.
 
 ## Partial real run evidence
 
-Before the restart-only control failure, slot 1422 created two real runs. The first stopped after `run_create` because the original renderer bridge used snake_case Tauri argument names. The second used the corrected camelCase bridge and created three assignments, three tasks, and three dispatcher attempts:
+The current no-build session created one fresh real run after the keychain proof. The scheduler also reconciled the previous in-flight run when this command path started. Read-only SQL from the slot database confirmed:
 
 ```text
-run 7696ed9d-e978-480b-bfa5-26924cad6fb9  status=running
+run cf306239-d710-4301-aff6-335b4a3ebe02  status=running
 tasks:
-  e848877d-c5f6-418b-ab7a-7073bbf07fab  failed
-  38633e7c-fc1e-4897-ae05-7eeae90c3ce2  review
-  7d81ed6a-4b63-46a0-a71b-741ea5f3a416  failed
+  cc7a2696-6d4a-4891-86e8-11e1595c20c7  running
+  2d772e75-c087-4b63-872e-3c5f35e52f21  review
+  999911d2-b397-4a82-8f6d-221c1c945376  running
 agent sessions:
-  b699874e-b427-4567-9a5f-864d5c1adfa0
-  aa581134-e01f-42db-b358-a166729e48a7
-  3dff59f9-b214-499b-8e0f-448a15cbd21f
+  47fee3e1-8efc-45fc-9c27-78ec6fa8b1ab
+  05b7bd2a-a757-4040-961b-811d6f1db7c4
+  ceb0b07d-d0f4-4ab5-8b49-3cd0aded3316
 attempt_number=1 for each of the three attempts
+coverage gap:
+  d0447d07-880f-4aad-bc0b-987aab166b8a  unparseable  Summarize non-git release documents
 ```
 
-Read-only SQL from the slot database (`.../chat.db`) confirmed the rows above. It also recorded three coverage gaps: an unknown `seren` native agent type, a failed local agent session, and an unparseable agent response. No finding was inserted, so this partial run does not satisfy the evidence or approval portion of the walkthrough.
+The previous in-flight run `a9c83443-d70a-4f5d-a9aa-a05d41caa5d6` has a `run_interrupted` event at sequence 27 and `interrupted_at=1785584239863`, proving startup reconciliation. The new run's three sessions were real, but no attempt completed with a parseable `seren-findings` block. No finding was inserted, so this real run does not satisfy the evidence or approval portion of the walkthrough.
 
-The dispatcher now treats `seren` as a signed-in cloud-chat fallback, resolves the live Seren model catalog when the stored model is `auto`, falls back to that path when a native provider cannot start, records a provider-boundary coverage gap, and keeps parse failures in review. The titlebar now has the missing Mission Control trigger needed to open the launch box. The catalog fix was verified by the focused dispatcher tests but could not be exercised in the live UI because the validation control endpoint was blocked by the Keychain dialog.
+The dispatcher now treats `seren` as a signed-in cloud-chat fallback, resolves the live Seren model catalog when the stored model is `auto`, falls back to that path when a native provider cannot start, records a provider-boundary coverage gap, and keeps parse failures in review. The titlebar now has the missing Mission Control trigger needed to open the launch box. The catalog fix was verified by focused dispatcher tests. The live run instead encountered a transient MCP gateway HTTP 503, a Codex HTTP 401, and local shell approvals; no evidence was synthesized from those blocked attempts.
 
 ## Walkthrough bounds and remaining gap
 
@@ -80,11 +85,11 @@ The following required live proof remains absent and is intentionally not synthe
 
 - no run has yet completed the three requested tasks with two evidenced findings and an email artifact;
 - no `open → accepted` email finding or `finding_status_changed` approval event was produced;
-- no restart cycle has produced `run_interrupted`, a fresh attempt number, `run_relaunched`, or a terminal post-relaunch status;
+- the new run has not completed a restart/relaunch cycle with `run_relaunched`, attempt number 2, and a terminal post-relaunch status; startup reconciliation did produce `run_interrupted` for the prior in-flight run when the new run command started;
 - leases and worktree provisioning were not exercised by the dispatcher;
 - screenshots remain local-only; provider behavior and model output remain potentially flaky;
-- the current restart failure is limited to the validation process/control path after the Keychain prompt, not established as a production fresh-sign-in defect.
+- the current run gap is the external MCP gateway/provider path; keychain access is not the failing layer.
 
-The next run must reuse slot 1422 after the operator completes the visible Keychain authorization, confirm a fresh discovery PID, complete the launch-box run, approve the email artifact, interrupt a non-terminal task, click `run-relaunch`, and capture all SQL with `sqlite3 -readonly`.
+The remaining work is the external-provider run path: restore the MCP gateway, rerun the three tasks without duplicating the run, approve an actual email artifact, and capture the relaunch rows with `sqlite3 -readonly`. Keychain access itself is resolved for the reused binary and issue #3529 can be closed on that evidence.
 
 Part of #3511
