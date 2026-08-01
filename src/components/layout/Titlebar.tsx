@@ -14,6 +14,7 @@ import { updaterStore } from "@/stores/updater.store";
 interface TitlebarProps {
   onSignInClick: () => void;
   onToggleMeetings: () => void;
+  onToggleMissionControl: () => void;
   onToggleSkills: () => void;
   onToggleSettings: () => void;
   /** A meeting capture is live; show the recording indicator on the button. */
@@ -224,6 +225,32 @@ export const Titlebar: Component<TitlebarProps> = (props) => {
               }}
             />
           </Show>
+        </button>
+
+        <button
+          type="button"
+          data-testid="titlebar-mission-control-button"
+          class="flex items-center justify-center w-7 h-7 border-none rounded-md bg-transparent text-muted-foreground cursor-pointer transition-all duration-100 hover:bg-surface-2 hover:text-foreground active:scale-95"
+          onClick={props.onToggleMissionControl}
+          title="Mission Control"
+          aria-label="Mission Control"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            role="img"
+            aria-label="Mission Control"
+          >
+            <circle cx="12" cy="12" r="7" />
+            <circle cx="12" cy="12" r="2" />
+            <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+          </svg>
         </button>
 
         <button

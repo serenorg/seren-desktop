@@ -221,7 +221,7 @@ export async function runCreate(
 ): Promise<Run> {
   return invoke("run_create", {
     objective,
-    root_path: rootPath ?? null,
+    rootPath: rootPath ?? null,
   }) as Promise<Run>;
 }
 
@@ -232,10 +232,10 @@ export async function runAddTask(
   dependsOn: string[] = [],
 ): Promise<Task> {
   return invoke("run_add_task", {
-    run_id: runId,
+    runId,
     title,
     brief,
-    depends_on: dependsOn,
+    dependsOn,
   }) as Promise<Task>;
 }
 
@@ -246,19 +246,19 @@ export async function runAddAgent(
   roleLabel?: string | null,
 ): Promise<AgentAssignment> {
   return invoke("run_add_agent", {
-    run_id: runId,
-    agent_type: agentType,
-    model_id: modelId ?? null,
-    role_label: roleLabel ?? null,
+    runId,
+    agentType,
+    modelId: modelId ?? null,
+    roleLabel: roleLabel ?? null,
   }) as Promise<AgentAssignment>;
 }
 
 export async function runCancel(runId: string): Promise<Run> {
-  return invoke("run_cancel", { run_id: runId }) as Promise<Run>;
+  return invoke("run_cancel", { runId }) as Promise<Run>;
 }
 
 export async function runGetState(runId: string): Promise<RunSnapshot> {
-  return invoke("run_get_state", { run_id: runId }) as Promise<RunSnapshot>;
+  return invoke("run_get_state", { runId }) as Promise<RunSnapshot>;
 }
 
 export async function runListEvents(
@@ -266,8 +266,8 @@ export async function runListEvents(
   afterSequence = 0,
 ): Promise<RunEvent[]> {
   return invoke("run_list_events", {
-    run_id: runId,
-    after_sequence: afterSequence,
+    runId,
+    afterSequence,
   }) as Promise<RunEvent[]>;
 }
 
@@ -280,19 +280,19 @@ export async function runDeclareChecks(
   checks: CheckDeclaration[],
 ): Promise<RunCheck[]> {
   return invoke("run_declare_checks", {
-    run_id: runId,
+    runId,
     checks,
   }) as Promise<RunCheck[]>;
 }
 
 export async function runApproveCheck(checkId: string): Promise<RunCheck> {
   return invoke("run_approve_check", {
-    check_id: checkId,
+    checkId,
   }) as Promise<RunCheck>;
 }
 
 export async function runBaseline(runId: string): Promise<CheckResult[]> {
-  return invoke("run_baseline", { run_id: runId }) as Promise<CheckResult[]>;
+  return invoke("run_baseline", { runId }) as Promise<CheckResult[]>;
 }
 
 export async function runVerifyTask(
@@ -300,8 +300,8 @@ export async function runVerifyTask(
   taskId: string,
 ): Promise<CheckResult[]> {
   return invoke("run_verify_task", {
-    run_id: runId,
-    task_id: taskId,
+    runId,
+    taskId,
   }) as Promise<CheckResult[]>;
 }
 
@@ -310,8 +310,8 @@ export async function runCompleteTask(
   taskId: string,
 ): Promise<string[]> {
   return invoke("run_complete_task", {
-    run_id: runId,
-    task_id: taskId,
+    runId,
+    taskId,
   }) as Promise<string[]>;
 }
 
@@ -329,8 +329,8 @@ export async function runUpdateFindingStatus(
   status: Exclude<FindingStatus, "open">,
 ): Promise<void> {
   return invoke("run_update_finding_status", {
-    run_id: runId,
-    finding_id: findingId,
+    runId,
+    findingId,
     status,
   }) as Promise<void>;
 }
@@ -344,10 +344,10 @@ export async function runStartAttempt(
   agentSessionId?: string | null,
 ): Promise<string> {
   return invoke("run_start_attempt", {
-    run_id: runId,
-    task_id: taskId,
-    agent_assignment_id: agentAssignmentId ?? null,
-    agent_session_id: agentSessionId ?? null,
+    runId,
+    taskId,
+    agentAssignmentId: agentAssignmentId ?? null,
+    agentSessionId: agentSessionId ?? null,
   }) as Promise<string>;
 }
 
@@ -357,14 +357,14 @@ export async function runFinishAttempt(
   outcome: AttemptOutcome,
 ): Promise<void> {
   return invoke("run_finish_attempt", {
-    run_id: runId,
-    attempt_id: attemptId,
+    runId,
+    attemptId,
     outcome,
   }) as Promise<void>;
 }
 
 export async function runRelaunch(runId: string): Promise<Run> {
-  return invoke("run_relaunch", { run_id: runId }) as Promise<Run>;
+  return invoke("run_relaunch", { runId }) as Promise<Run>;
 }
 
 export function subscribeRunEvents(

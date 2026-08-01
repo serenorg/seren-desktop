@@ -20,14 +20,30 @@ export function validationChildEnv(inputs: {
   realHome: string;
   pnpmStoreDir?: string | null;
 }): NodeJS.ProcessEnv {
+  const validationHome = validationHomeForSlot(inputs.repoRoot, inputs.port);
+  const validationIdentifier = `com.serendb.desktop.validation.slot${inputs.port}`;
   const env: NodeJS.ProcessEnv = {
     ...inputs.baseEnv,
-    HOME: validationHomeForSlot(inputs.repoRoot, inputs.port),
+    HOME: validationHome,
     CARGO_HOME:
       inputs.baseEnv.CARGO_HOME ?? path.join(inputs.realHome, ".cargo"),
     RUSTUP_HOME:
       inputs.baseEnv.RUSTUP_HOME ?? path.join(inputs.realHome, ".rustup"),
+    SEREN_VALIDATION_DISCOVERY_PATH: path.join(
+      validationHome,
+      "Library",
+      "Application Support",
+      validationIdentifier,
+      "validation-control.json",
+    ),
   };
+
+  // macOS Foundation resolves Tauri's app-data directory from
+  // CFFIXED_USER_HOME rather than HOME. Keep the validation app's database,
+  // discovery token, and keychain in the same per-slot sandbox after a restart.
+  if (process.platform === "darwin") {
+    env.CFFIXED_USER_HOME = validationHome;
+  }
 
   if (inputs.pnpmStoreDir != null) {
     env.npm_config_store_dir = inputs.pnpmStoreDir;

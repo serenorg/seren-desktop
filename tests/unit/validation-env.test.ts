@@ -53,6 +53,18 @@ describe("validation environment", () => {
     expect(env.HOME).toBe(
       path.join(repoRoot, "artifacts", "validation-home", "slot1422"),
     );
+    if (process.platform === "darwin") {
+      expect(env.CFFIXED_USER_HOME).toBe(env.HOME);
+    }
+    expect(env.SEREN_VALIDATION_DISCOVERY_PATH).toBe(
+      path.join(
+        env.HOME as string,
+        "Library",
+        "Application Support",
+        "com.serendb.desktop.validation.slot1422",
+        "validation-control.json",
+      ),
+    );
     expect(validationHomeForSlot(repoRoot, 1422)).toBe(
       path.join(repoRoot, "artifacts", "validation-home", "slot1422"),
     );
