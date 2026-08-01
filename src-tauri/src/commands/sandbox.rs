@@ -33,7 +33,7 @@ const CREDENTIAL_STORE_SUFFIXES: &[&str] = &[
 const SEREN_APP_IDENTIFIER: &str = "com.serendb.desktop";
 
 #[cfg(target_os = "windows")]
-const WINDOWS_BOUNDED_UNAVAILABLE: &str = "Bounded local Claude Code sessions are blocked on native Windows because the current restricted-token backend cannot prevent reads outside the selected project. Select Full Access only if you accept unconfined file and network access.";
+const WINDOWS_BOUNDED_UNAVAILABLE: &str = "Bounded local Claude Code sessions are blocked on native Windows because the current restricted-token backend cannot prevent reads outside the selected project. Open Settings > Agent > Sandbox Mode and select Full Access only if you accept unconfined file and network access. Codex, Gemini, and Grok are unaffected and launch normally.";
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind")]

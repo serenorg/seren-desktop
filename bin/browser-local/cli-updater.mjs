@@ -236,7 +236,8 @@ export async function runNpmView(packageName, { npmCliScript } = {}) {
     const { stdout } = await execFileAsync(
       npmCommand,
       ["view", packageName, "version"],
-      { timeout: NPM_VIEW_TIMEOUT_MS },
+      // Node refuses to exec a .cmd shim without a shell.
+      { timeout: NPM_VIEW_TIMEOUT_MS, shell: process.platform === "win32" },
     );
     return stdout.trim();
   } catch {
@@ -262,7 +263,8 @@ async function runNpmInstallLatest(packageName, { npmCliScript } = {}) {
   await execFileAsync(
     npmCommand,
     ["install", "-g", `${packageName}@latest`],
-    { timeout: NPM_INSTALL_TIMEOUT_MS },
+    // Node refuses to exec a .cmd shim without a shell.
+    { timeout: NPM_INSTALL_TIMEOUT_MS, shell: process.platform === "win32" },
   );
 }
 
@@ -284,7 +286,8 @@ async function runNpmInstallFromTarball(tarballPath, { npmCliScript } = {}) {
   await execFileAsync(
     npmCommand,
     ["install", "-g", tarballPath],
-    { timeout: NPM_INSTALL_TIMEOUT_MS },
+    // Node refuses to exec a .cmd shim without a shell.
+    { timeout: NPM_INSTALL_TIMEOUT_MS, shell: process.platform === "win32" },
   );
 }
 
@@ -394,6 +397,8 @@ export async function runNpmViewIntegrity(
         : "npm";
     const { stdout } = await execFileAsync(command, args, {
       timeout: NPM_VIEW_TIMEOUT_MS,
+      // Node refuses to exec a .cmd shim without a shell.
+      shell: !npmCliScript && process.platform === "win32",
     });
     const trimmed = stdout.trim();
     if (!trimmed) return null;

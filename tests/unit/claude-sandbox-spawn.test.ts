@@ -186,4 +186,47 @@ describe("Claude bounded spawn boundary (#3192)", () => {
       });
     });
   });
+
+  it("quotes every argument when Windows launches a .cmd shim through cmd.exe", () => {
+    withWindows(() => {
+      const invocation = buildClaudeSpawnInvocation({
+        claudeBin: "C:\\Users\\First Last\\AppData\\Roaming\\npm\\claude.cmd",
+        claudeArgs: [
+          "--mcp-config",
+          "C:\\Users\\First Last\\AppData\\Local\\Temp\\seren-mcp-1.json",
+          "--strict-mcp-config",
+        ],
+        sandboxMode: "full-access",
+        sandboxProfile: null,
+      });
+
+      expect(invocation.shell).toBe("cmd.exe");
+      expect(invocation.args).toEqual([]);
+      // cmd.exe joins on spaces, so each argument carries its own quotes or a
+      // path containing a space splits into two arguments.
+      expect(invocation.command).toBe(
+        '"C:\\Users\\First Last\\AppData\\Roaming\\npm\\claude.cmd" ' +
+          '"--mcp-config" ' +
+          '"C:\\Users\\First Last\\AppData\\Local\\Temp\\seren-mcp-1.json" ' +
+          '"--strict-mcp-config"',
+      );
+    });
+  });
+
+  it("launches a native Windows executable without a shell", () => {
+    withWindows(() => {
+      expect(
+        buildClaudeSpawnInvocation({
+          claudeBin: "C:\\Program Files\\claude\\claude.exe",
+          claudeArgs: ["--version"],
+          sandboxMode: "full-access",
+          sandboxProfile: null,
+        }),
+      ).toEqual({
+        command: "C:\\Program Files\\claude\\claude.exe",
+        args: ["--version"],
+        shell: false,
+      });
+    });
+  });
 });

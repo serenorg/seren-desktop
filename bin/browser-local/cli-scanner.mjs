@@ -100,6 +100,8 @@ export async function npmPackToDirectory({
       : "npm";
   const { stdout } = await execFileAsync(exec, args, {
     timeout: NPM_PACK_TIMEOUT_MS,
+    // Node refuses to exec a .cmd shim without a shell.
+    shell: !npmCliScript && process.platform === "win32",
   });
   // npm pack prints the tarball filename on the last non-empty stdout line.
   const filename = stdout
