@@ -295,6 +295,21 @@ pub fn insert_finding(conn: &Connection, finding: &Finding) -> Result<()> {
     Ok(())
 }
 
+pub fn update_finding_status(conn: &Connection, finding_id: &str, status: &str) -> Result<()> {
+    let parsed = FindingStatus::parse(status).ok_or_else(|| invalid_value("finding status", status))?;
+    if parsed == FindingStatus::Open {
+        return Err(invalid_value("finding status", status));
+    }
+    let updated = conn.execute(
+        "UPDATE run_findings SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        params![parsed.as_str(), now_ms(), finding_id],
+    )?;
+    if updated == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    Ok(())
+}
+
 pub fn insert_check(conn: &Connection, check: &RunCheck) -> Result<()> {
     conn.execute(
         "INSERT INTO run_checks (id, run_id, name, command, approved, created_at)
@@ -1082,5 +1097,41 @@ mod tests {
         transition_task(&conn, "task-a", TaskState::Review, None).unwrap();
         transition_task(&conn, "task-a", TaskState::Done, None).unwrap();
         assert_eq!(ready_task_ids(&conn, "run-1").unwrap(), vec!["task-b"]);
+    }
+
+    #[test]
+    fn finding_status_round_trips_and_rejects_unknown_values() {
+        let conn = connection();
+        create_run(&conn, &run("run-1")).unwrap();
+        insert_finding(
+            &conn,
+            &Finding {
+                id: "finding-1".to_string(),
+                run_id: "run-1".to_string(),
+                task_id: None,
+                attempt_id: None,
+                claim: "A claim".to_string(),
+                confidence: FindingConfidence::Asserted,
+                evidence: Vec::new(),
+                proposed_artifact: None,
+                needs_approval: true,
+                status: FindingStatus::Open,
+                created_at: 1,
+                updated_at: 1,
+            },
+        )
+        .unwrap();
+
+        update_finding_status(&conn, "finding-1", "accepted").unwrap();
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM run_findings WHERE id = 'finding-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "accepted");
+        assert!(update_finding_status(&conn, "finding-1", "unknown").is_err());
+        assert!(update_finding_status(&conn, "finding-1", "open").is_err());
     }
 }

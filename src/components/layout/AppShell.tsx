@@ -31,6 +31,7 @@ import { ThreadSidebar } from "@/components/layout/ThreadSidebar";
 import { AudioPrimingDialog } from "@/components/meeting/AudioPrimingDialog";
 import { MeetingPanel } from "@/components/meeting/MeetingPanel";
 import { RecordingIndicator } from "@/components/meeting/RecordingIndicator";
+import { MissionControlPanel } from "@/components/run/MissionControlPanel";
 import { ConversationSearchOverlay } from "@/components/search/ConversationSearchOverlay";
 import { ConversationSearchResults } from "@/components/search/ConversationSearchResults";
 import { SessionPanel } from "@/components/session/SessionPanel";
@@ -100,6 +101,7 @@ export type SlidePanelView =
   | "tasks"
   | "sessions"
   | "meetings"
+  | "missioncontrol"
   | "skills"
   | null;
 
@@ -140,6 +142,7 @@ const PERSISTABLE_VIEWS: ReadonlySet<NonNullable<SlidePanelView>> = new Set([
   "tasks",
   "sessions",
   "meetings",
+  "missioncontrol",
   "skills",
 ]);
 
@@ -674,6 +677,8 @@ export const AppShell: Component<AppShellProps> = (props) => {
       setSlidePanel("sessions");
     } else if (p === "meetings") {
       setSlidePanel("meetings");
+    } else if (p === "missioncontrol") {
+      setSlidePanel("missioncontrol");
     } else if (p === "skills") {
       setSlidePanel("skills");
     }
@@ -1198,7 +1203,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
           onClose={handleCloseSlidePanel}
           docked={slidePanel() === "skills"}
           reader={slidePanel() === "meetings"}
-          wide={slidePanel() === "settings"}
+          wide={
+            slidePanel() === "settings" || slidePanel() === "missioncontrol"
+          }
         >
           <ShellSurfaceBoundary
             surface="slide_panel"
@@ -1223,6 +1230,9 @@ export const AppShell: Component<AppShellProps> = (props) => {
               </Match>
               <Match when={slidePanel() === "meetings"}>
                 <MeetingPanel />
+              </Match>
+              <Match when={slidePanel() === "missioncontrol"}>
+                <MissionControlPanel />
               </Match>
               <Match when={slidePanel() === "skills"}>
                 <SkillsExplorer panelMode />

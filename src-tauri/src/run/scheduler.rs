@@ -104,6 +104,12 @@ enum SchedulerCommand {
         gap: CoverageGap,
         reply: oneshot::Sender<Result<(), String>>,
     },
+    UpdateFindingStatus {
+        run_id: String,
+        finding_id: String,
+        status: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
     ReleaseLease {
         lease_id: String,
         reply: oneshot::Sender<Result<WorkspaceLease, String>>,
@@ -399,6 +405,29 @@ impl RunEngineState {
             .map_err(|_| "run scheduler dropped coverage-gap response".to_string())?
     }
 
+    pub async fn update_finding_status(
+        &self,
+        app: &AppHandle,
+        run_id: String,
+        finding_id: String,
+        status: String,
+    ) -> Result<(), String> {
+        let sender = self.sender(app).await?;
+        let (reply, response) = oneshot::channel();
+        sender
+            .send(SchedulerCommand::UpdateFindingStatus {
+                run_id,
+                finding_id,
+                status,
+                reply,
+            })
+            .await
+            .map_err(|_| "run scheduler stopped".to_string())?;
+        response
+            .await
+            .map_err(|_| "run scheduler dropped finding-status response".to_string())?
+    }
+
     pub async fn provision_workspace(
         &self,
         app: &AppHandle,
@@ -589,6 +618,20 @@ fn process_command(
         }
         SchedulerCommand::RecordCoverageGap { gap, reply } => {
             let _ = reply.send(record_coverage_gap(app, conn, gap));
+        }
+        SchedulerCommand::UpdateFindingStatus {
+            run_id,
+            finding_id,
+            status,
+            reply,
+        } => {
+            let _ = reply.send(update_finding_status(
+                app,
+                conn,
+                run_id,
+                finding_id,
+                status,
+            ));
         }
         SchedulerCommand::ReleaseLease { lease_id, reply } => {
             let _ = reply.send(release_lease(app, conn, lease_id));
@@ -1231,6 +1274,38 @@ fn record_coverage_gap(
                 "subject": gap.subject,
                 "detail": gap.detail,
             }),
+        ),
+    )?;
+    Ok(())
+}
+
+fn update_finding_status(
+    app: &AppHandle,
+    conn: &Connection,
+    run_id: String,
+    finding_id: String,
+    status: String,
+) -> Result<(), String> {
+    let finding_run_id: String = conn
+        .query_row(
+            "SELECT run_id FROM run_findings WHERE id = ?1",
+            params![finding_id],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())?;
+    if finding_run_id != run_id {
+        return Err("finding does not belong to run".to_string());
+    }
+    store::update_finding_status(conn, &finding_id, &status)
+        .map_err(|error| error.to_string())?;
+    append_and_emit(
+        app,
+        conn,
+        event_for_task_or_run(
+            &run_id,
+            None,
+            RunEventType::FindingStatusChanged,
+            json!({"finding_id": finding_id, "status": status}),
         ),
     )?;
     Ok(())

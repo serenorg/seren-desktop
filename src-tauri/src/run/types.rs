@@ -309,6 +309,7 @@ pub enum RunEventType {
     CheckResultRecorded,
     CoverageGapRecorded,
     TaskCompletionRejected,
+    FindingStatusChanged,
 }
 
 impl RunEventType {
@@ -332,6 +333,7 @@ impl RunEventType {
             Self::CheckResultRecorded => "check_result_recorded",
             Self::CoverageGapRecorded => "coverage_gap_recorded",
             Self::TaskCompletionRejected => "task_completion_rejected",
+            Self::FindingStatusChanged => "finding_status_changed",
         }
     }
 
@@ -355,6 +357,7 @@ impl RunEventType {
             "check_result_recorded" => Self::CheckResultRecorded,
             "coverage_gap_recorded" => Self::CoverageGapRecorded,
             "task_completion_rejected" => Self::TaskCompletionRejected,
+            "finding_status_changed" => Self::FindingStatusChanged,
             _ => return None,
         })
     }
