@@ -2,7 +2,7 @@
 // ABOUTME: Keeps app state in the worktree while preserving host toolchain caches.
 
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -52,7 +52,42 @@ export async function ensureValidationHome(
 ): Promise<string> {
   const validationHome = validationHomeForSlot(repoRoot, port);
   await mkdir(validationHome, { recursive: true, mode: 0o700 });
+  if (process.platform === "darwin") {
+    await ensureValidationKeychain(validationHome);
+  }
   return validationHome;
+}
+
+async function ensureValidationKeychain(validationHome: string): Promise<void> {
+  const keychainDirectory = path.join(validationHome, "Library", "Keychains");
+  const keychainPath = path.join(keychainDirectory, "login.keychain-db");
+  await mkdir(keychainDirectory, { recursive: true, mode: 0o700 });
+
+  const keychainPassword = `seren-validation-keychain-${path.basename(validationHome)}`;
+  let keychainExists = true;
+  try {
+    await stat(keychainPath);
+  } catch {
+    keychainExists = false;
+  }
+
+  if (!keychainExists) {
+    await execFileAsync("security", [
+      "create-keychain",
+      "-p",
+      keychainPassword,
+      keychainPath,
+    ]);
+  }
+
+  // macOS resolves the User keychain from HOME. Keep validation's app data
+  // hermetic while giving the slot its own persistent, unlocked keychain.
+  await execFileAsync("security", [
+    "unlock-keychain",
+    "-p",
+    keychainPassword,
+    keychainPath,
+  ]);
 }
 
 function assertValidPort(port: number): void {
