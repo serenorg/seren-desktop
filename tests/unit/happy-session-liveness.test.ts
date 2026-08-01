@@ -321,6 +321,7 @@ function createLayerHarness({
     api,
     client,
     layer,
+    machineClient,
     async processUserMessage(message: Record<string, unknown>, seq: number) {
       await client.dispatchUserMessage(message);
       await onMessageProcessed?.(seq);
@@ -349,6 +350,40 @@ function createLayerHarness({
 }
 
 describe("Happy session liveness", () => {
+  it("publishes Gemini in Happy's legacy picker metadata from live Seren capabilities", async () => {
+    const harness = createLayerHarness();
+    const agents = [
+      { type: "claude-code", available: true },
+      { type: "codex", available: true },
+      { type: "gemini", available: true },
+      { type: "grok", available: true },
+      { type: "openclaw", available: true },
+    ];
+    harness.source.advertise.mockResolvedValue({ agents });
+
+    await harness.layer.start();
+
+    const update = harness.machineClient.updateMachineMetadata.mock.calls.at(-1)?.[0];
+    expect(update).toBeTypeOf("function");
+    const metadata = update?.({ existing: "preserved" });
+    expect(metadata).toMatchObject({
+      existing: "preserved",
+      cliAvailability: {
+        claude: true,
+        codex: true,
+        gemini: true,
+        openclaw: false,
+        detectedAt: expect.any(Number),
+      },
+      remoteCapabilities: {
+        agents,
+        roots: [SYNTHETIC_ROOT],
+      },
+    });
+
+    await harness.layer.close();
+  });
+
   it("publishes one first-prompt summary so Happy threads receive distinct titles", async () => {
     const summary = {
       sessionId: "title-session",
