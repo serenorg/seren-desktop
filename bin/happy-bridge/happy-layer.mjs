@@ -243,6 +243,26 @@ const HAPPY_AGENT_TYPES = new Map([
 const RESTORABLE_HAPPY_AGENT_TYPES = new Set(HAPPY_AGENT_TYPES.values());
 const EXACT_RESUME_HAPPY_AGENT_TYPES = new Set(["claude-code", "codex"]);
 
+function happyCliAvailability(agents) {
+  const availableAgentTypes = new Set(
+    (Array.isArray(agents) ? agents : [])
+      .filter((agent) => agent?.available !== false)
+      .map((agent) => agent?.type)
+      .filter((type) => typeof type === "string"),
+  );
+  const supports = (happyType) => {
+    const serenType = HAPPY_AGENT_TYPES.get(happyType);
+    return typeof serenType === "string" && availableAgentTypes.has(serenType);
+  };
+  return {
+    claude: supports("claude"),
+    codex: supports("codex"),
+    gemini: supports("gemini"),
+    openclaw: supports("openclaw"),
+    detectedAt: Date.now(),
+  };
+}
+
 function happyAgentType(agent) {
   if (agent === undefined || agent === null) return "claude-code";
   return HAPPY_AGENT_TYPES.get(agent) ?? null;
@@ -2142,6 +2162,7 @@ export function createHappyLayer({
     advertisedAgents = Array.isArray(advertised.agents) ? advertised.agents : [];
     await machineClient.updateMachineMetadata((metadata) => ({
       ...(metadata ?? machineMetadata(config)),
+      cliAvailability: happyCliAvailability(advertisedAgents),
       remoteCapabilities: { agents: advertisedAgents, roots: advertisedRoots },
     }));
   }
