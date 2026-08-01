@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   entryAllowsDecision,
   groupInboxEntries,
+  inboxIsEmpty,
 } from "@/components/inbox/grouping";
 import type {
   ApprovalDecisionState,
@@ -126,5 +127,13 @@ describe("entryAllowsDecision", () => {
     expect(
       entryAllowsDecision(blockedEgress({ decision_state: "approved" })),
     ).toBe(false);
+  });
+});
+
+describe("inboxIsEmpty", () => {
+  it("does not report all clear while a local approval is pending", () => {
+    expect(inboxIsEmpty([], 1)).toBe(false);
+    expect(inboxIsEmpty([], 0)).toBe(true);
+    expect(inboxIsEmpty([toolCall()], 0)).toBe(false);
   });
 });

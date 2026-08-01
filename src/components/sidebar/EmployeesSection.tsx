@@ -24,6 +24,7 @@ import type {
   EmployeeSummary,
 } from "@/lib/employees/types";
 import {
+  countPendingDecisions,
   employeeApprovals,
   type OrgPendingApprovalRun,
 } from "@/services/employee-approvals";
@@ -210,6 +211,14 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
     for (const [key, rows] of left) {
       const other = right.get(key);
       if (!other || other.length !== rows.length) return false;
+      for (let index = 0; index < rows.length; index += 1) {
+        if (
+          rows[index].runId !== other[index].runId ||
+          rows[index].pendingCount !== other[index].pendingCount
+        ) {
+          return false;
+        }
+      }
     }
     return true;
   };
@@ -238,7 +247,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   };
 
   const pendingCountFor = (deploymentId: string): number =>
-    pendingByDeployment().get(deploymentId)?.length ?? 0;
+    countPendingDecisions(pendingByDeployment().get(deploymentId) ?? []);
 
   // The global inbox badge: local-gate blocks (this device) + cloud operator
   // approvals. Stays visible wherever the sidebar is, i.e. after navigating
@@ -246,7 +255,7 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const inboxPendingTotal = createMemo(() => {
     let cloud = 0;
     for (const rows of pendingByDeployment().values()) {
-      cloud += rows.length;
+      cloud += countPendingDecisions(rows);
     }
     return cloud + pendingApprovalCount();
   });
