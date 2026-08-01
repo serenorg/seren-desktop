@@ -235,6 +235,9 @@ const HAPPY_AGENT_TYPES = new Map([
   ["claude", "claude-code"],
   ["claude-code", "claude-code"],
   ["claude-codex", "claude-codex"],
+  // Current Happy clients offer Agy instead of their deprecated Gemini row.
+  // Seren keeps its supported Google runtime canonical as `gemini`.
+  ["agy", "gemini"],
   ["gemini", "gemini"],
   ["grok", "grok"],
   ["lmstudio", "lmstudio"],
@@ -257,6 +260,7 @@ function happyCliAvailability(agents) {
   return {
     claude: supports("claude"),
     codex: supports("codex"),
+    agy: supports("agy"),
     gemini: supports("gemini"),
     openclaw: supports("openclaw"),
     detectedAt: Date.now(),
