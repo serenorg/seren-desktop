@@ -100,10 +100,45 @@ export async function ensureValidationKeychain(
 
   // Keep validation's app data hermetic while making the slot keychain the
   // only user keychain visible to its security-tool mutations and the app.
-  await security(["set-keychain-settings", keychainPath]);
-  await security(["unlock-keychain", "-p", keychainPassword, keychainPath]);
-  await security(["default-keychain", "-d", "user", "-s", keychainPath]);
-  await security(["list-keychains", "-d", "user", "-s", keychainPath]);
+  await bestEffortSecurity(
+    security,
+    ["set-keychain-settings", keychainPath],
+  );
+  await bestEffortSecurity(security, [
+    "unlock-keychain",
+    "-p",
+    keychainPassword,
+    keychainPath,
+  ]);
+  await bestEffortSecurity(security, [
+    "default-keychain",
+    "-d",
+    "user",
+    "-s",
+    keychainPath,
+  ]);
+  await bestEffortSecurity(security, [
+    "list-keychains",
+    "-d",
+    "user",
+    "-s",
+    keychainPath,
+  ]);
+}
+
+async function bestEffortSecurity(
+  security: (args: string[]) => Promise<unknown>,
+  args: string[],
+): Promise<void> {
+  try {
+    await security(args);
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.split("\n", 1)[0] : String(error);
+    console.warn(
+      `[validation] security ${args[0]} did not complete; continuing for interactive keychain authorization: ${detail}`,
+    );
+  }
 }
 
 function assertValidationHome(validationHome: string, repoRoot: string): string {
