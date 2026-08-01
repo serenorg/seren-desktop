@@ -2,7 +2,11 @@
 // ABOUTME: Uses Tauri HTTP plugin when available, falls back to browser fetch.
 
 import { getToken } from "./tauri-bridge";
-import { getTauriFetch, shouldSkipRefresh } from "./tauri-fetch";
+import {
+  getTauriFetch,
+  isGatewayApiRequest,
+  shouldSkipRefresh,
+} from "./tauri-fetch";
 
 /**
  * Make an HTTP request using the appropriate fetch for the environment.
@@ -23,8 +27,12 @@ export async function appFetch(
     const request = baseRequest.clone();
     const response = await fetchFn(request);
 
+    // Only the Seren Gateway gets a refreshed Seren session token. A 401 from
+    // a third-party host must never cause the user's token to be attached to a
+    // retry aimed at that host.
     if (
       response.status === 401 &&
+      isGatewayApiRequest(request) &&
       !shouldSkipRefresh(request) &&
       !refreshedForRequest
     ) {

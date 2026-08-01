@@ -866,6 +866,14 @@ async fn execute_single_task(
                                 if let WorkerEvent::Error { ref message } = worker_event {
                                     captured_error = Some(message.clone());
                                 }
+                                // A worker that goes on to complete has
+                                // recovered: some forward intermediate errors
+                                // and keep streaming. Holding the earlier error
+                                // would reject a turn that produced a real
+                                // answer, blanking it in the conversation.
+                                if matches!(worker_event, WorkerEvent::Complete { .. }) {
+                                    captured_error = None;
+                                }
                                 let worker_event =
                                     guard_completion(&app_for_events, &conv_id, worker_event);
                                 if matches!(worker_event, WorkerEvent::Complete { .. }) {

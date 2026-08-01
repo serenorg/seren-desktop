@@ -92,6 +92,11 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
         if (repaired.warning) {
           console.warn(`[Auth Store] ${repaired.warning}`);
         }
+        // Repair revokes the old key. The gateway caches its authenticated
+        // connection and tool list for ten minutes, so without reconnecting
+        // here a mid-session repair leaves every MCP tool call answering 401
+        // until that cache expires.
+        await resetGateway();
       } else {
         verboseRuntimeConsole.debug(
           "[Auth Store] Stored API key scopes are current",

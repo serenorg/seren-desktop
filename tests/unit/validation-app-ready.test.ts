@@ -30,6 +30,7 @@ describe("validation app-ready scenario", () => {
     await runAppReady({
       client,
       artifactsDir: "/unused",
+      validationHome: "/unused",
       writeArtifact,
     });
 
