@@ -349,6 +349,31 @@ function createLayerHarness({
 }
 
 describe("Happy session liveness", () => {
+  it("uses one Happy compatibility semver for machine and session metadata", async () => {
+    const summary = {
+      sessionId: "compat-version-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+
+    await harness.layer.start();
+
+    expect(harness.api.getOrCreateMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ happyCliVersion: "1.2.0" }),
+      }),
+    );
+    expect(harness.api.getOrCreateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ version: "1.2.0" }),
+      }),
+    );
+
+    await harness.layer.close();
+  });
+
   it("publishes one first-prompt summary so Happy threads receive distinct titles", async () => {
     const summary = {
       sessionId: "title-session",
@@ -2946,6 +2971,32 @@ describe("Happy session liveness", () => {
       expectedAgentPermissionMode: null,
       agentSessionId: "synthetic-native-session",
     });
+
+    await harness.layer.close();
+  });
+
+  it.each([
+    ["claude-codex", "claude-codex"],
+    ["lmstudio", "lmstudio"],
+  ])("forwards the advertised %s agent to the provider runtime", async (mobileAgent, providerAgent) => {
+    const harness = createLayerHarness();
+    harness.source.spawn.mockImplementation(async (spec) => ({
+      sessionId: String(spec.localSessionId),
+      agentType: String(spec.agentType),
+      agentSessionId: "synthetic-native-session",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+      reused: false,
+      owned: true,
+    }));
+    await harness.layer.start();
+
+    await expect(harness.spawn({ directory: SYNTHETIC_ROOT, agent: mobileAgent })).resolves.toMatchObject({
+      type: "success",
+    });
+    expect(harness.source.spawn).toHaveBeenCalledWith(expect.objectContaining({
+      agentType: providerAgent,
+    }));
 
     await harness.layer.close();
   });
