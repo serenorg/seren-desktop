@@ -6,6 +6,8 @@ import {
   type FindingStatus,
   type RunEvent,
   type RunSnapshot,
+  runAddAgent,
+  runAddTask,
   runCancel,
   runCreate,
   runGetState,
@@ -27,6 +29,18 @@ export interface RunStoreState {
   lastSequence: number;
   launchPending: boolean;
   error: string | null;
+}
+
+export interface LaunchTaskInput {
+  title: string;
+  brief: string;
+}
+
+export interface LaunchOptions {
+  objective: string;
+  rootPath?: string | null;
+  tasks: LaunchTaskInput[];
+  agents: string[];
 }
 
 const INITIAL_STATE: RunStoreState = {
@@ -126,18 +140,23 @@ async function applyEvent(event: RunEvent): Promise<void> {
   setState("lastSequence", event.sequence);
 }
 
-async function launch(
-  objective: string,
-  rootPath?: string | null,
-): Promise<void> {
-  const trimmedObjective = objective.trim();
+async function launch(options: LaunchOptions): Promise<void> {
+  const trimmedObjective = options.objective.trim();
   if (!trimmedObjective) {
     setState("error", "Tell Seren what to investigate first.");
     return;
   }
   setState({ launchPending: true, error: null });
   try {
-    const run = await runCreate(trimmedObjective, rootPath);
+    const run = await runCreate(trimmedObjective, options.rootPath ?? null);
+    for (const agentType of options.agents) {
+      await runAddAgent(run.id, agentType);
+    }
+    for (const task of options.tasks) {
+      const title = task.title.trim();
+      if (!title) continue;
+      await runAddTask(run.id, title, task.brief.trim());
+    }
     setState("activeRunId", run.id);
     await hydrate(run.id);
   } catch (error) {
@@ -241,8 +260,8 @@ export const runStore = {
   isInterrupted: () => state.snapshot?.run.status === "interrupted",
 };
 
-export async function launchMission(objective: string): Promise<void> {
-  await runStore.launch(objective);
+export async function launchMission(options: LaunchOptions): Promise<void> {
+  await runStore.launch(options);
 }
 
 export { INITIAL_STATE, setState as setRunState, state as runState };

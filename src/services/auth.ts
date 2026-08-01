@@ -7,6 +7,8 @@ import {
   login as loginSdk,
   refreshToken as refreshTokenSdk,
 } from "@/api";
+import { apiBase } from "@/lib/config";
+import { benignConsoleError } from "@/lib/support/hook";
 import {
   clearDefaultOrganizationId,
   clearRefreshToken,
@@ -111,14 +113,28 @@ export async function login(
 
   if (error || !data?.data) {
     recordLoginAttempt(false);
+    const loginUrl = new URL("/auth/login", apiBase).toString();
+    const status = response?.status;
+    const transportMessage = shortTransportMessage(error);
+    const detail =
+      typeof status === "number"
+        ? `Authentication failed (HTTP ${status})`
+        : `Authentication failed (network: ${transportMessage})`;
+
+    benignConsoleError("auth.login", "[Auth] Login request failed", {
+      url: loginUrl,
+      status: status ?? null,
+      error: error ?? null,
+    });
+
     if (response?.status === 401) {
-      throw new Error("Invalid email or password");
+      throw new Error(`${detail}: Invalid email or password`);
     }
-    let message = "Authentication failed";
+    let message = detail;
     try {
       const parsed = (await response?.clone().json()) as Partial<AuthError>;
       if (typeof parsed?.message === "string") {
-        message = parsed.message;
+        message = `${detail}: ${parsed.message}`;
       }
     } catch {
       // Non-JSON body — fall back to default message.
@@ -131,6 +147,19 @@ export async function login(
   await storeRefreshToken(data.data.refresh_token);
   await storeDefaultOrganizationId(data.data.default_organization_id);
   return data.data;
+}
+
+function shortTransportMessage(error: unknown): string {
+  const raw =
+    error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : typeof error === "string"
+        ? error
+        : error && typeof error === "object" && "message" in error
+          ? String((error as { message?: unknown }).message)
+          : String(error ?? "unknown transport error");
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  return normalized.slice(0, 200) || "unknown transport error";
 }
 
 /**

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
+  login: vi.fn(),
   refreshToken: vi.fn(),
   getToken: vi.fn<() => Promise<string | null>>(),
   getRefreshToken: vi.fn<() => Promise<string | null>>(),
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/api", () => ({
   getCurrentUser: mocks.getCurrentUser,
+  login: mocks.login,
   refreshToken: mocks.refreshToken,
 }));
 
@@ -97,6 +99,61 @@ describe("auth service refresh during login validation", () => {
     expect(mocks.clearToken).not.toHaveBeenCalled();
     expect(mocks.clearAuthState).not.toHaveBeenCalled();
     expect(mocks.requestSignInModal).not.toHaveBeenCalled();
+  });
+
+  it("includes the HTTP status in login failures", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mocks.login.mockResolvedValue({
+      data: undefined,
+      error: { message: "upstream failure" },
+      response: {
+        status: 503,
+        clone: () => ({ json: async () => ({ message: "try again" }) }),
+      },
+    });
+
+    const { login } = await import("@/services/auth");
+
+    await expect(login("user@example.test", "secret")).rejects.toThrow(
+      "Authentication failed (HTTP 503): try again",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "[benign:auth.login]",
+      "[Auth] Login request failed",
+      expect.objectContaining({
+        url: "https://api.serendb.com/auth/login",
+        status: 503,
+      }),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("includes transport detail when login has no HTTP response", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mocks.login.mockResolvedValue({
+      data: undefined,
+      error: { message: "Gateway request failed: credential store unavailable" },
+      response: undefined,
+    });
+
+    const { login } = await import("@/services/auth");
+
+    await expect(login("user@example.test", "secret")).rejects.toThrow(
+      "Authentication failed (network: Gateway request failed: credential store unavailable)",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "[benign:auth.login]",
+      "[Auth] Login request failed",
+      expect.objectContaining({
+        url: "https://api.serendb.com/auth/login",
+        status: null,
+      }),
+    );
+    consoleError.mockRestore();
   });
 
   it("shares concurrent Tauri refresh calls through one backend invoke", async () => {

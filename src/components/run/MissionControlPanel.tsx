@@ -71,6 +71,7 @@ export const MissionControlPanel: Component = () => {
                     </span>
                     <button
                       type="button"
+                      data-testid="run-relaunch"
                       class="shrink-0 rounded-md border border-amber-200/40 px-2 py-1 font-medium hover:bg-amber-200/10"
                       onClick={() => void runStore.relaunch()}
                     >

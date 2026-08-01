@@ -1,20 +1,49 @@
 // ABOUTME: First-run Mission Control launch surface for a plain-language objective.
 // ABOUTME: Keeps the safety boundary visible before a durable run is created.
 
-import { type Component, createSignal, Show } from "solid-js";
+import { type Component, createSignal, For, Show } from "solid-js";
+import { createStore } from "solid-js/store";
+import { fileTreeState } from "@/stores/fileTree";
 import { launchMission, runStore } from "@/stores/run.store";
 
 export interface RunLaunchBoxProps {
   onStarted?: () => void;
 }
 
+const TASK_SLOTS = [0, 1, 2] as const;
+const AGENT_TYPES = ["claude-code", "codex", "seren"] as const;
+type AgentType = (typeof AGENT_TYPES)[number];
+
+interface LaunchTaskDraft {
+  title: string;
+  brief: string;
+}
+
 export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
   const [objective, setObjective] = createSignal("");
+  const [tasks, setTasks] = createStore<LaunchTaskDraft[]>(
+    TASK_SLOTS.map(() => ({ title: "", brief: "" })),
+  );
+  const [agents, setAgents] = createStore<Record<AgentType, boolean>>({
+    "claude-code": true,
+    codex: true,
+    seren: true,
+  });
 
   const start = async () => {
     const value = objective().trim();
     if (!value) return;
-    await launchMission(value);
+    await launchMission({
+      objective: value,
+      rootPath: fileTreeState.rootPath,
+      tasks: tasks
+        .filter((task) => task.title.trim())
+        .map((task) => ({
+          title: task.title.trim(),
+          brief: task.brief.trim(),
+        })),
+      agents: AGENT_TYPES.filter((agentType) => agents[agentType]),
+    });
     props.onStarted?.();
   };
 
@@ -43,6 +72,7 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
         </label>
         <textarea
           id="mission-objective"
+          data-testid="run-objective"
           rows="4"
           value={objective()}
           onInput={(event) => setObjective(event.currentTarget.value)}
@@ -98,6 +128,80 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
               <span class="float-right text-foreground/70">Review first</span>
             </div>
           </div>
+
+          <div class="mt-4 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+            <div class="mb-3 flex items-baseline justify-between gap-3">
+              <div>
+                <div class="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Tasks
+                </div>
+                <p class="mt-1 text-[11px] leading-5 text-muted-foreground/80">
+                  Add up to three concrete work items. Empty rows are ignored.
+                </p>
+              </div>
+              <span class="font-mono text-[10px] text-cyan-200/60">0–3</span>
+            </div>
+            <div class="grid gap-3">
+              <For each={TASK_SLOTS}>
+                {(slot) => (
+                  <div class="grid gap-2 rounded-lg border border-border/40 bg-slate-950/25 p-3">
+                    <label
+                      for={`run-task-title-${slot}`}
+                      class="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                    >
+                      Task {slot + 1}
+                    </label>
+                    <input
+                      id={`run-task-title-${slot}`}
+                      data-testid={`run-task-title-${slot}`}
+                      type="text"
+                      value={tasks[slot].title}
+                      onInput={(event) =>
+                        setTasks(slot, "title", event.currentTarget.value)
+                      }
+                      placeholder="Short task title"
+                      class="rounded-lg border border-border/70 bg-slate-950/45 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
+                    />
+                    <textarea
+                      id={`run-task-brief-${slot}`}
+                      data-testid={`run-task-brief-${slot}`}
+                      rows="2"
+                      value={tasks[slot].brief}
+                      onInput={(event) =>
+                        setTasks(slot, "brief", event.currentTarget.value)
+                      }
+                      placeholder="What should this task establish?"
+                      class="resize-none rounded-lg border border-border/70 bg-slate-950/45 px-3 py-2 text-xs leading-5 text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
+                    />
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+
+          <div class="mt-4 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+            <div class="mb-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Agent types
+            </div>
+            <div class="grid gap-2 sm:grid-cols-3">
+              <For each={AGENT_TYPES}>
+                {(agentType) => (
+                  <label class="flex items-center gap-2 rounded-lg border border-border/40 bg-slate-950/25 px-3 py-2 text-xs text-muted-foreground transition hover:border-cyan-300/40 hover:text-foreground">
+                    <input
+                      data-testid={`run-agent-${agentType}`}
+                      type="checkbox"
+                      checked={agents[agentType]}
+                      onChange={(event) =>
+                        setAgents(agentType, event.currentTarget.checked)
+                      }
+                      class="accent-cyan-300"
+                    />
+                    <span>{agentType}</span>
+                  </label>
+                )}
+              </For>
+            </div>
+          </div>
         </details>
 
         <div class="mt-5 flex items-center justify-between gap-3">
@@ -106,6 +210,7 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
           </span>
           <button
             type="button"
+            data-testid="run-launch-start"
             onClick={() => void start()}
             disabled={!objective().trim() || runStore.launchPending}
             class="rounded-lg bg-cyan-300 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
