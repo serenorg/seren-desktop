@@ -117,6 +117,19 @@ async function smokeRuntime({ label, wsUrl, token }) {
     if (!Array.isArray(agents)) {
       throw new Error(`${label}: provider_get_available_agents did not return an array`);
     }
+    const advertisedAgentTypes = new Set(agents.map((agent) => agent?.type));
+    for (const agentType of [
+      "codex",
+      "claude-code",
+      "claude-codex",
+      "gemini",
+      "grok",
+      "lmstudio",
+    ]) {
+      if (!advertisedAgentTypes.has(agentType)) {
+        throw new Error(`${label}: provider_get_available_agents omitted ${agentType}`);
+      }
+    }
 
     const sessions = await rpcCall(ws, "provider_list_sessions");
     if (!Array.isArray(sessions)) {

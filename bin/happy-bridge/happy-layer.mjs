@@ -24,6 +24,7 @@ import { createHappySessionKeyStore } from "./session-key-store.mjs";
 const AUTH_POLL_MS = 1000;
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 const SESSION_KEEP_ALIVE_MS = 2000;
+const HAPPY_CLI_COMPAT_VERSION = "1.2.0";
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
 const HAPPY_CONTEXT_RESET_NOTICE =
   "Provider context reset: the original native session was unavailable, so Seren started a new provider context for this existing Happy thread.";
@@ -219,7 +220,7 @@ function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
   return {
     host: config.machineName,
     platform: `${process.platform}-${process.arch}`,
-    happyCliVersion: "1.2.0",
+    happyCliVersion: HAPPY_CLI_COMPAT_VERSION,
     homeDir: os.homedir(),
     happyHomeDir: os.homedir(),
     happyLibDir: "seren-desktop",
@@ -233,8 +234,10 @@ function machineMetadata(config, capabilities = { agents: [], roots: [] }) {
 const HAPPY_AGENT_TYPES = new Map([
   ["claude", "claude-code"],
   ["claude-code", "claude-code"],
+  ["claude-codex", "claude-codex"],
   ["gemini", "gemini"],
   ["grok", "grok"],
+  ["lmstudio", "lmstudio"],
   ["codex", "codex"],
 ]);
 const RESTORABLE_HAPPY_AGENT_TYPES = new Set(HAPPY_AGENT_TYPES.values());
@@ -247,8 +250,8 @@ function happyAgentType(agent) {
 
 function defaultApprovalPolicy(agentType) {
   // Match the desktop's fresh-session defaults. Codex is explicitly
-  // on-failure; Claude, Gemini, and Grok resolve their normal defaults in their
-  // runtimes when no stricter policy is supplied.
+  // on-failure; every other runtime resolves its normal default when no
+  // stricter policy is supplied.
   return agentType === "codex" ? DEFAULT_CODEX_APPROVAL_POLICY : undefined;
 }
 
@@ -285,7 +288,7 @@ function sessionMetadata(config, summary, machineId) {
     path: cwd,
     host: config.machineName,
     name: summary.title ?? `${summary.agentType ?? "Agent"} session`,
-    version: "seren-desktop",
+    version: HAPPY_CLI_COMPAT_VERSION,
     os: process.platform,
     machineId,
     homeDir: os.homedir(),
