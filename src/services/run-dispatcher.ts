@@ -24,6 +24,7 @@ import {
   runVerifyTask,
   type Task,
 } from "@/services/run";
+import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { runState } from "@/stores/run.store";
@@ -407,10 +408,18 @@ async function runSerenChatTask(
   task: Task,
 ): Promise<string> {
   let continuation: Parameters<typeof continueToolIteration>[0] | null = null;
+  const activeModel = getActiveModel();
+  const model =
+    activeModel !== "auto"
+      ? activeModel
+      : (await getLiveSerenModelCatalog())[0]?.id;
+  if (!model) {
+    throw new Error("Seren model catalog returned no usable model");
+  }
 
   for await (const event of streamMessageWithTools(
     buildTaskPrompt(objective, task),
-    getActiveModel(),
+    model,
     undefined,
     true,
   )) {
