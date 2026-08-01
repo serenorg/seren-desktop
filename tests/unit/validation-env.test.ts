@@ -2,11 +2,43 @@
 // ABOUTME: Covers worktree state roots while keeping toolchain caches stable.
 
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  ensureValidationKeychain,
   validationChildEnv,
   validationHomeForSlot,
 } from "../../scripts/validation-env";
+
+const mocks = vi.hoisted(() => ({
+  execFile: vi.fn(),
+  mkdir: vi.fn(),
+  stat: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => ({ execFile: mocks.execFile }));
+vi.mock("node:fs/promises", () => ({
+  mkdir: mocks.mkdir,
+  stat: mocks.stat,
+}));
+
+function resolveExecFile(
+  _command: string,
+  _args: string[],
+  optionsOrCallback: unknown,
+  maybeCallback?: unknown,
+): void {
+  const callback =
+    typeof maybeCallback === "function" ? maybeCallback : optionsOrCallback;
+  if (typeof callback === "function") {
+    callback(null, { stdout: "", stderr: "" });
+  }
+}
+
+beforeEach(() => {
+  mocks.execFile.mockReset().mockImplementation(resolveExecFile);
+  mocks.mkdir.mockReset().mockResolvedValue(undefined);
+  mocks.stat.mockReset().mockRejectedValue(new Error("missing"));
+});
 
 describe("validation environment", () => {
   it("roots HOME in the repo-local slot directory", () => {
@@ -83,5 +115,61 @@ describe("validation environment", () => {
     expect(() => validationHomeForSlot("/repo", 65_536)).toThrow(
       "validation port must be an integer from 1 to 65535",
     );
+  });
+
+  it("configures the slot keychain in order with the slot HOME", async () => {
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const slotHome = validationHomeForSlot("/repo", 1422);
+
+    await ensureValidationKeychain(slotHome, "/repo");
+
+    const securityCalls = mocks.execFile.mock.calls.filter(
+      ([command]) => command === "security",
+    );
+    const keychainPath = path.join(
+      slotHome,
+      "Library",
+      "Keychains",
+      "login.keychain-db",
+    );
+    expect(securityCalls.map(([, args]) => args)).toEqual([
+      [
+        "create-keychain",
+        "-p",
+        expect.any(String),
+        keychainPath,
+      ],
+      ["set-keychain-settings", keychainPath],
+      [
+        "unlock-keychain",
+        "-p",
+        expect.any(String),
+        keychainPath,
+      ],
+      ["default-keychain", "-d", "user", "-s", keychainPath],
+      ["list-keychains", "-d", "user", "-s", keychainPath],
+    ]);
+    for (const [, , options] of securityCalls) {
+      expect(options).toEqual(
+        expect.objectContaining({
+          env: expect.objectContaining({ HOME: slotHome }),
+        }),
+      );
+    }
+    expect(consoleLog).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "scratch keychain password for slot 1422",
+      ),
+    );
+    consoleLog.mockRestore();
+  });
+
+  it("rejects security mutations outside the validation HOME", async () => {
+    await expect(
+      ensureValidationKeychain("/Users/taariqlewis", "/repo"),
+    ).rejects.toThrow("refusing security mutation outside validation HOME");
+    expect(mocks.execFile).not.toHaveBeenCalled();
   });
 });

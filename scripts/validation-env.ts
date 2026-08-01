@@ -53,17 +53,31 @@ export async function ensureValidationHome(
   const validationHome = validationHomeForSlot(repoRoot, port);
   await mkdir(validationHome, { recursive: true, mode: 0o700 });
   if (process.platform === "darwin") {
-    await ensureValidationKeychain(validationHome);
+    await ensureValidationKeychain(validationHome, repoRoot);
   }
   return validationHome;
 }
 
-async function ensureValidationKeychain(validationHome: string): Promise<void> {
-  const keychainDirectory = path.join(validationHome, "Library", "Keychains");
+export async function ensureValidationKeychain(
+  validationHome: string,
+  repoRoot: string,
+): Promise<void> {
+  const resolvedHome = assertValidationHome(validationHome, repoRoot);
+  const keychainDirectory = path.join(
+    resolvedHome,
+    "Library",
+    "Keychains",
+  );
   const keychainPath = path.join(keychainDirectory, "login.keychain-db");
   await mkdir(keychainDirectory, { recursive: true, mode: 0o700 });
 
-  const keychainPassword = `seren-validation-keychain-${path.basename(validationHome)}`;
+  const keychainPassword = `seren-validation-keychain-${path.basename(resolvedHome)}`;
+  const securityEnv = {
+    ...process.env,
+    HOME: resolvedHome,
+  };
+  const security = (args: string[]) =>
+    execFileAsync("security", args, { env: securityEnv });
   let keychainExists = true;
   try {
     await stat(keychainPath);
@@ -72,7 +86,7 @@ async function ensureValidationKeychain(validationHome: string): Promise<void> {
   }
 
   if (!keychainExists) {
-    await execFileAsync("security", [
+    await security([
       "create-keychain",
       "-p",
       keychainPassword,
@@ -80,14 +94,37 @@ async function ensureValidationKeychain(validationHome: string): Promise<void> {
     ]);
   }
 
-  // macOS resolves the User keychain from HOME. Keep validation's app data
-  // hermetic while giving the slot its own persistent, unlocked keychain.
-  await execFileAsync("security", [
-    "unlock-keychain",
-    "-p",
-    keychainPassword,
-    keychainPath,
-  ]);
+  // Keep validation's app data hermetic while making the slot keychain the
+  // only user keychain visible to its security-tool mutations and the app.
+  await security(["set-keychain-settings", keychainPath]);
+  await security(["unlock-keychain", "-p", keychainPassword, keychainPath]);
+  await security(["default-keychain", "-d", "user", "-s", keychainPath]);
+  await security(["list-keychains", "-d", "user", "-s", keychainPath]);
+
+  const slot = path.basename(resolvedHome).replace(/^slot/, "");
+  console.log(
+    `[validation] scratch keychain password for slot ${slot} (safe to type into a Keychain prompt for login.keychain-db under artifacts/validation-home): ${keychainPassword}`,
+  );
+}
+
+function assertValidationHome(validationHome: string, repoRoot: string): string {
+  const resolvedHome = path.resolve(validationHome);
+  const validationRoot = path.resolve(
+    repoRoot,
+    "artifacts",
+    "validation-home",
+  );
+  const relativeHome = path.relative(validationRoot, resolvedHome);
+  if (
+    relativeHome.length === 0 ||
+    relativeHome.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeHome)
+  ) {
+    throw new Error(
+      `refusing security mutation outside validation HOME: ${resolvedHome}`,
+    );
+  }
+  return resolvedHome;
 }
 
 function assertValidPort(port: number): void {
