@@ -2620,6 +2620,7 @@ function attachProcessListeners(
   session,
   exitPromises,
   admissionGate,
+  respawningSessions,
 ) {
   const logPrefix = session.logPrefix ?? providerLogPrefix("claude");
   session.output.on("line", (line) => handleLine(emit, session, line));
@@ -2682,7 +2683,12 @@ function attachProcessListeners(
     // to reuse this session ID.
     const finish = () => {
       exitPromises.delete(session.id);
-      admissionGate.release(session.id);
+      // A wedged process being replaced keeps its slot: the respawn reuses the
+      // same session id without re-acquiring, so releasing here would let a
+      // queued session in alongside it and exceed the concurrency limit.
+      if (!respawningSessions?.has(session.id)) {
+        admissionGate.release(session.id);
+      }
       resolveExit();
     };
 
@@ -2753,6 +2759,9 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
   // this to prevent the old exit handler from deleting the new session.
   const exitPromises = new Map();
   const admissionMetadata = new Map();
+  // Session ids whose process is being replaced by the initialize-handshake
+  // respawn. Their exit must not hand the admission slot back.
+  const respawningSessions = new Set();
   const admissionGate = createAdmissionGate({
     limit: resolveClaudeSessionLimit(),
     onQueued(sessionId, position) {
@@ -2900,9 +2909,12 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       currentModelId: preferredModel,
       reasoningEffort: effectiveEffort,
     });
-    await admissionGate.acquire(sessionId);
+    try {
+      await admissionGate.acquire(sessionId);
+    } finally {
+      admissionMetadata.delete(sessionId);
+    }
     admissionAcquired = true;
-    admissionMetadata.delete(sessionId);
     let serenMcpProxy = null;
     let mcpConfig;
     let claudeArgs;
@@ -2938,6 +2950,13 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       });
     } catch (error) {
       await serenMcpProxy?.close();
+      // Session setup failed before the process exists, so no exit handler will
+      // ever hand this slot back. Release it here or the gate loses capacity
+      // permanently.
+      if (admissionAcquired) {
+        admissionAcquired = false;
+        admissionGate.release(sessionId);
+      }
       throw error;
     }
     // Surface the resolved --model value at every spawn so UI/runtime model
@@ -3090,6 +3109,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         launchedSession,
         exitPromises,
         admissionGate,
+        respawningSessions,
       );
       return { processHandle, session: launchedSession };
     };
@@ -3125,9 +3145,14 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
           // down with it, mirroring terminateSession's cleanup.
           session.output.close();
           const pendingExit = exitPromises.get(sessionId);
-          killChildTree(processHandle);
-          if (pendingExit) await pendingExit;
-          ({ processHandle, session } = launchClaudeProcess());
+          respawningSessions.add(sessionId);
+          try {
+            killChildTree(processHandle);
+            if (pendingExit) await pendingExit;
+            ({ processHandle, session } = launchClaudeProcess());
+          } finally {
+            respawningSessions.delete(sessionId);
+          }
         }
       }
 
