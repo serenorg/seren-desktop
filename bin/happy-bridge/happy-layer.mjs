@@ -28,6 +28,7 @@ const SESSION_KEEP_ALIVE_MS = 2000;
 const DEFAULT_CODEX_APPROVAL_POLICY = "on-failure";
 const HAPPY_CONTEXT_RESET_NOTICE =
   "Provider context reset: the original native session was unavailable, so Seren started a new provider context for this existing Happy thread.";
+const HAPPY_SESSION_TITLE_MAX_CHARS = 30;
 const BUSY_SESSION_STATUSES = new Set(["prompting", "busy", "running"]);
 const DENY_OPTION_IDS = new Set([
   "deny",
@@ -294,6 +295,16 @@ function sessionMetadata(config, summary, machineId) {
     lifecycleState: "running",
     lifecycleStateSince: Date.now(),
   };
+}
+
+export function deriveHappySessionTitle(text) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim().replace(/\s+/g, " ");
+  if (!trimmed) return null;
+  if (trimmed.length <= HAPPY_SESSION_TITLE_MAX_CHARS) return trimmed;
+  const prefix = trimmed.slice(0, HAPPY_SESSION_TITLE_MAX_CHARS);
+  const lastSpace = prefix.lastIndexOf(" ");
+  return `${lastSpace > 10 ? prefix.slice(0, lastSpace) : prefix}\u2026`;
 }
 
 // Modes the provider runtimes accept. A remote peer may only move a session
@@ -1876,6 +1887,9 @@ export function createHappyLayer({
         summary,
         session,
         client,
+        sessionTitlePublished:
+          typeof session.metadata?.summary?.text === "string" &&
+          session.metadata.summary.text.trim().length > 0,
         suppressProviderHistoryReplay: resumedBinding,
         liveness: createSessionLiveness(client, thinking),
       };
@@ -2068,6 +2082,25 @@ export function createHappyLayer({
       (event.payload?.replay === true || event.payload?.historyReplay === true)
     ) {
       return;
+    }
+    if (event.kind === "user-message" && entry.sessionTitlePublished !== true) {
+      const title = deriveHappySessionTitle(event.payload?.text);
+      if (title) {
+        // Happy Mobile renders the session summary as its thread title. The
+        // official Happy client uses this same message for change_title, which
+        // also updates the encrypted summary metadata on /v1/updates.
+        entry.sessionTitlePublished = true;
+        try {
+          entry.client.sendClaudeSessionMessage({
+            type: "summary",
+            summary: title,
+            leafUuid: randomUUID(),
+          });
+        } catch {
+          entry.sessionTitlePublished = false;
+          debug("failed to publish Happy session title");
+        }
+      }
     }
     if (providerThinking) {
       entry.liveness.setThinking(true);
