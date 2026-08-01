@@ -20,14 +20,30 @@ export function validationChildEnv(inputs: {
   realHome: string;
   pnpmStoreDir?: string | null;
 }): NodeJS.ProcessEnv {
+  const validationHome = validationHomeForSlot(inputs.repoRoot, inputs.port);
+  const validationIdentifier = `com.serendb.desktop.validation.slot${inputs.port}`;
   const env: NodeJS.ProcessEnv = {
     ...inputs.baseEnv,
-    HOME: validationHomeForSlot(inputs.repoRoot, inputs.port),
+    HOME: validationHome,
     CARGO_HOME:
       inputs.baseEnv.CARGO_HOME ?? path.join(inputs.realHome, ".cargo"),
     RUSTUP_HOME:
       inputs.baseEnv.RUSTUP_HOME ?? path.join(inputs.realHome, ".rustup"),
+    SEREN_VALIDATION_DISCOVERY_PATH: path.join(
+      validationHome,
+      "Library",
+      "Application Support",
+      validationIdentifier,
+      "validation-control.json",
+    ),
   };
+
+  // macOS Foundation resolves Tauri's app-data directory from
+  // CFFIXED_USER_HOME rather than HOME. Keep the validation app's database,
+  // discovery token, and keychain in the same per-slot sandbox after a restart.
+  if (process.platform === "darwin") {
+    env.CFFIXED_USER_HOME = validationHome;
+  }
 
   if (inputs.pnpmStoreDir != null) {
     env.npm_config_store_dir = inputs.pnpmStoreDir;
@@ -53,17 +69,35 @@ export async function ensureValidationHome(
   const validationHome = validationHomeForSlot(repoRoot, port);
   await mkdir(validationHome, { recursive: true, mode: 0o700 });
   if (process.platform === "darwin") {
-    await ensureValidationKeychain(validationHome);
+    await ensureValidationKeychain(validationHome, repoRoot);
   }
   return validationHome;
 }
 
-async function ensureValidationKeychain(validationHome: string): Promise<void> {
-  const keychainDirectory = path.join(validationHome, "Library", "Keychains");
+export async function ensureValidationKeychain(
+  validationHome: string,
+  repoRoot: string,
+): Promise<void> {
+  const resolvedHome = assertValidationHome(validationHome, repoRoot);
+  const keychainDirectory = path.join(
+    resolvedHome,
+    "Library",
+    "Keychains",
+  );
   const keychainPath = path.join(keychainDirectory, "login.keychain-db");
   await mkdir(keychainDirectory, { recursive: true, mode: 0o700 });
 
-  const keychainPassword = `seren-validation-keychain-${path.basename(validationHome)}`;
+  const keychainPassword = `seren-validation-keychain-${path.basename(resolvedHome)}`;
+  const securityEnv = {
+    ...process.env,
+    HOME: resolvedHome,
+  };
+  const security = (args: string[]) =>
+    execFileAsync("security", args, { env: securityEnv });
+  const slot = path.basename(resolvedHome).replace(/^slot/, "");
+  console.log(
+    `[validation] scratch keychain password for slot ${slot} (safe to type into a Keychain prompt for login.keychain-db under artifacts/validation-home): ${keychainPassword}`,
+  );
   let keychainExists = true;
   try {
     await stat(keychainPath);
@@ -72,7 +106,7 @@ async function ensureValidationKeychain(validationHome: string): Promise<void> {
   }
 
   if (!keychainExists) {
-    await execFileAsync("security", [
+    await security([
       "create-keychain",
       "-p",
       keychainPassword,
@@ -80,14 +114,67 @@ async function ensureValidationKeychain(validationHome: string): Promise<void> {
     ]);
   }
 
-  // macOS resolves the User keychain from HOME. Keep validation's app data
-  // hermetic while giving the slot its own persistent, unlocked keychain.
-  await execFileAsync("security", [
+  // Keep validation's app data hermetic while making the slot keychain the
+  // only user keychain visible to its security-tool mutations and the app.
+  await bestEffortSecurity(
+    security,
+    ["set-keychain-settings", keychainPath],
+  );
+  await bestEffortSecurity(security, [
     "unlock-keychain",
     "-p",
     keychainPassword,
     keychainPath,
   ]);
+  await bestEffortSecurity(security, [
+    "default-keychain",
+    "-d",
+    "user",
+    "-s",
+    keychainPath,
+  ]);
+  await bestEffortSecurity(security, [
+    "list-keychains",
+    "-d",
+    "user",
+    "-s",
+    keychainPath,
+  ]);
+}
+
+async function bestEffortSecurity(
+  security: (args: string[]) => Promise<unknown>,
+  args: string[],
+): Promise<void> {
+  try {
+    await security(args);
+  } catch (error) {
+    const detail =
+      error instanceof Error ? error.message.split("\n", 1)[0] : String(error);
+    console.warn(
+      `[validation] security ${args[0]} did not complete; continuing for interactive keychain authorization: ${detail}`,
+    );
+  }
+}
+
+function assertValidationHome(validationHome: string, repoRoot: string): string {
+  const resolvedHome = path.resolve(validationHome);
+  const validationRoot = path.resolve(
+    repoRoot,
+    "artifacts",
+    "validation-home",
+  );
+  const relativeHome = path.relative(validationRoot, resolvedHome);
+  if (
+    relativeHome.length === 0 ||
+    relativeHome.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeHome)
+  ) {
+    throw new Error(
+      `refusing security mutation outside validation HOME: ${resolvedHome}`,
+    );
+  }
+  return resolvedHome;
 }
 
 function assertValidPort(port: number): void {

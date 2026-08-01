@@ -2,6 +2,11 @@
 // ABOUTME: It turns agent replies into durable findings, coverage gaps, and attempt results.
 
 import { createEffect, createRoot } from "solid-js";
+import {
+  continueToolIteration,
+  getActiveModel,
+  streamMessageWithTools,
+} from "@/services/chat";
 import type { AgentType } from "@/services/providers";
 import {
   type AgentAssignment,
@@ -19,6 +24,7 @@ import {
   runVerifyTask,
   type Task,
 } from "@/services/run";
+import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { runState } from "@/stores/run.store";
@@ -42,6 +48,14 @@ const CONFIDENCES = new Set<FindingConfidence>([
   "refuted",
 ]);
 const ARTIFACT_KINDS = new Set(["diff", "document", "email", "comment"]);
+const NATIVE_AGENT_TYPES = new Set<AgentType>([
+  "claude-code",
+  "codex",
+  "gemini",
+  "grok",
+  "claude-codex",
+  "lmstudio",
+]);
 
 export interface ParsedEvidence {
   kind: EvidenceKind;
@@ -233,6 +247,7 @@ export function buildTaskPrompt(
     "",
     "Investigate the task using the available tools and workspace.",
     "Report only claims you can support. State what you could not check as coverage_gaps.",
+    "Include a coverage_gaps entry for every material boundary you did not exercise, such as leases or worktree provisioning.",
     "End your reply with a fenced JSON block tagged seren-findings using this shape:",
     "```seren-findings",
     '{"findings":[{"claim":"...","confidence":"asserted|verified|refuted","evidence":[{"kind":"command_result|file_range|email|document|url|log_excerpt|publisher_result","locator":"...","excerpt":"..."}],"proposed_artifact":{"kind":"diff|document|email|comment","uri":"...","digest":"..."},"needs_approval":false}],"coverage_gaps":[{"kind":"other","subject":"...","detail":"..."}]}',
@@ -378,6 +393,52 @@ async function recordGap(
   );
 }
 
+function isNativeAgentType(agentType: string): agentType is AgentType {
+  return NATIVE_AGENT_TYPES.has(agentType as AgentType);
+}
+
+/**
+ * Use the signed-in Seren model when a launch-box assignment is not backed by
+ * a local CLI, or when a local CLI cannot start. The assignment remains the
+ * durable source of truth; this fallback keeps a run honest by recording the
+ * provider boundary as a coverage gap alongside the model's own findings.
+ */
+async function runSerenChatTask(
+  objective: string,
+  task: Task,
+): Promise<string> {
+  let continuation: Parameters<typeof continueToolIteration>[0] | null = null;
+  const activeModel = getActiveModel();
+  const model =
+    activeModel !== "auto"
+      ? activeModel
+      : (await getLiveSerenModelCatalog())[0]?.id;
+  if (!model) {
+    throw new Error("Seren model catalog returned no usable model");
+  }
+
+  for await (const event of streamMessageWithTools(
+    buildTaskPrompt(objective, task),
+    model,
+    undefined,
+    true,
+  )) {
+    if (event.type === "complete") return event.finalContent;
+    if (event.type === "iteration_limit") {
+      continuation = event.continueState;
+      break;
+    }
+  }
+
+  if (continuation) {
+    for await (const event of continueToolIteration(continuation, 10)) {
+      if (event.type === "complete") return event.finalContent;
+    }
+  }
+
+  throw new Error("Seren chat task did not produce a final response");
+}
+
 async function dispatchTask(
   snapshot: RunSnapshot,
   task: Task,
@@ -394,22 +455,47 @@ async function dispatchTask(
       assignment.id,
       localSessionId,
     );
-    const sessionId = await agentStore.spawnSession(
-      snapshot.run.root_path ?? fileTreeState.rootPath ?? ".",
-      assignment.agent_type as AgentType,
-      { localSessionId, conversationTitle: task.title },
-    );
-    if (!sessionId) throw new Error("agent session failed to start");
-    ownedSessionIds.set(sessionId, runId);
-    agentStore.markSessionRunOwned(sessionId, runId);
-    await agentStore.sendPrompt(
-      buildTaskPrompt(snapshot.run.objective, task),
-      undefined,
-      undefined,
-      sessionId,
-    );
-    await waitForTurn(sessionId);
-    const response = finalAssistantMessage(sessionId);
+    let response: string | null = null;
+    let fallbackDetail: string | null = null;
+
+    if (!isNativeAgentType(assignment.agent_type)) {
+      fallbackDetail = `assignment ${assignment.agent_type} uses the signed-in Seren chat model because no local runtime supports that label`;
+      response = await runSerenChatTask(snapshot.run.objective, task);
+    } else {
+      try {
+        const sessionId = await agentStore.spawnSession(
+          snapshot.run.root_path ?? fileTreeState.rootPath ?? ".",
+          assignment.agent_type,
+          { localSessionId, conversationTitle: task.title },
+        );
+        if (!sessionId) throw new Error("agent session failed to start");
+        ownedSessionIds.set(sessionId, runId);
+        agentStore.markSessionRunOwned(sessionId, runId);
+        await agentStore.sendPrompt(
+          buildTaskPrompt(snapshot.run.objective, task),
+          undefined,
+          undefined,
+          sessionId,
+        );
+        await waitForTurn(sessionId);
+        response = finalAssistantMessage(sessionId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        fallbackDetail = `${assignment.agent_type} local session unavailable; used the signed-in Seren chat model: ${detail}`;
+        response = await runSerenChatTask(snapshot.run.objective, task);
+      }
+    }
+
+    if (fallbackDetail) {
+      await recordGap(
+        runId,
+        task.id,
+        "provider_boundary",
+        task.title,
+        fallbackDetail,
+      );
+    }
+
     const parsed = response ? parseAgentFindings(response) : null;
     if (!parsed) {
       await recordGap(
