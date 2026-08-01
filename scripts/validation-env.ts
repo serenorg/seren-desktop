@@ -78,6 +78,10 @@ export async function ensureValidationKeychain(
   };
   const security = (args: string[]) =>
     execFileAsync("security", args, { env: securityEnv });
+  const slot = path.basename(resolvedHome).replace(/^slot/, "");
+  console.log(
+    `[validation] scratch keychain password for slot ${slot} (safe to type into a Keychain prompt for login.keychain-db under artifacts/validation-home): ${keychainPassword}`,
+  );
   let keychainExists = true;
   try {
     await stat(keychainPath);
@@ -100,11 +104,6 @@ export async function ensureValidationKeychain(
   await security(["unlock-keychain", "-p", keychainPassword, keychainPath]);
   await security(["default-keychain", "-d", "user", "-s", keychainPath]);
   await security(["list-keychains", "-d", "user", "-s", keychainPath]);
-
-  const slot = path.basename(resolvedHome).replace(/^slot/, "");
-  console.log(
-    `[validation] scratch keychain password for slot ${slot} (safe to type into a Keychain prompt for login.keychain-db under artifacts/validation-home): ${keychainPassword}`,
-  );
 }
 
 function assertValidationHome(validationHome: string, repoRoot: string): string {
