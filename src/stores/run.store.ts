@@ -4,6 +4,7 @@
 import { createStore } from "solid-js/store";
 import {
   type FindingStatus,
+  type Run,
   type RunEvent,
   type RunSnapshot,
   runAddAgent,
@@ -11,6 +12,7 @@ import {
   runCancel,
   runCreate,
   runGetState,
+  runList,
   runRelaunch,
   runUpdateFindingStatus,
   type Task,
@@ -96,6 +98,30 @@ async function hydrate(runId: string): Promise<void> {
       snapshot,
       lastSequence: 0,
     });
+  } catch (error) {
+    setState("error", errorMessage(error));
+  }
+}
+
+async function hydrateLatest(): Promise<void> {
+  setState("error", null);
+  try {
+    const latest = (await runList())
+      .filter((run) => run.status === "running" || run.status === "interrupted")
+      .reduce<Run | null>(
+        (current, candidate) =>
+          current === null || candidate.created_at > current.created_at
+            ? candidate
+            : current,
+        null,
+      );
+
+    if (latest) {
+      await hydrate(latest.id);
+      return;
+    }
+
+    setState({ activeRunId: null, snapshot: null, lastSequence: 0 });
   } catch (error) {
     setState("error", errorMessage(error));
   }
@@ -246,6 +272,7 @@ export const runStore = {
     return state.error;
   },
   hydrate,
+  hydrateLatest,
   applyEvent,
   launch,
   cancel,

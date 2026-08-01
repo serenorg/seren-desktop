@@ -665,6 +665,14 @@ pub fn run() {
                     .await;
             });
 
+            let run_engine_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let run_engine = run_engine_app.state::<run::scheduler::RunEngineState>();
+                if let Err(error) = run_engine.ensure_started(&run_engine_app).await {
+                    log::warn!("[run-engine] Startup reconciliation deferred: {error}");
+                }
+            });
+
             // Create the configured windows here rather than letting Tauri
             // auto-create them (the window is marked "create": false in
             // tauri.conf.json) so the Windows e2e release gate can enable
