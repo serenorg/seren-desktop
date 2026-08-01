@@ -29,6 +29,7 @@ export const MissionControlPanel: Component = () => {
   let disposed = false;
 
   onMount(() => {
+    void runStore.hydrateLatest();
     startRunDispatcher();
     const subscription = subscribeRunEvents((event) => {
       void runStore.applyEvent(event);

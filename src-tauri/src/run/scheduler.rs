@@ -192,6 +192,10 @@ impl RunEngineState {
         Ok(sender)
     }
 
+    pub async fn ensure_started(&self, app: &AppHandle) -> Result<(), String> {
+        self.sender(app).await.map(|_| ())
+    }
+
     pub async fn create_run(
         &self,
         app: &AppHandle,
