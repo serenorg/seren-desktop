@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn<() => Promise<string | null>>(),
   getTauriFetch: vi.fn<() => Promise<typeof globalThis.fetch>>(),
   shouldSkipRefresh: vi.fn<(input: RequestInfo | URL) => boolean>(),
+  isGatewayApiRequest: vi.fn<(input: RequestInfo | URL) => boolean>(),
   refreshAccessToken: vi.fn<() => Promise<boolean>>(),
 }));
 
@@ -17,6 +18,7 @@ vi.mock("@/lib/tauri-bridge", () => ({
 vi.mock("@/lib/tauri-fetch", () => ({
   getTauriFetch: mocks.getTauriFetch,
   shouldSkipRefresh: mocks.shouldSkipRefresh,
+  isGatewayApiRequest: mocks.isGatewayApiRequest,
 }));
 
 vi.mock("@/services/auth", () => ({
@@ -29,9 +31,11 @@ describe("fetch retry behavior", () => {
     mocks.getToken.mockReset();
     mocks.getTauriFetch.mockReset();
     mocks.shouldSkipRefresh.mockReset();
+    mocks.isGatewayApiRequest.mockReset();
     mocks.refreshAccessToken.mockReset();
 
     mocks.shouldSkipRefresh.mockReturnValue(false);
+    mocks.isGatewayApiRequest.mockReturnValue(true);
   });
 
   it("appFetch retries once with refreshed bearer token", async () => {
@@ -57,6 +61,27 @@ describe("fetch retry behavior", () => {
     expect(firstRequest.headers.get("Authorization")).toBe("Bearer old-token");
     expect(secondRequest.headers.get("Authorization")).toBe("Bearer new-token");
     expect(response.status).toBe(200);
+  });
+
+  it("never sends a refreshed Seren token to a third-party host", async () => {
+    const fetchMock = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response("unauthorized", { status: 401 }));
+
+    mocks.getTauriFetch.mockResolvedValue(fetchMock);
+    mocks.isGatewayApiRequest.mockReturnValue(false);
+    mocks.refreshAccessToken.mockResolvedValue(true);
+    mocks.getToken.mockResolvedValue("seren-session-token");
+
+    const { appFetch } = await import("@/lib/fetch");
+    const response = await appFetch("https://openrouter.ai/api/v1/models");
+
+    // No refresh, no retry, and nothing carrying the user's session token.
+    expect(mocks.refreshAccessToken).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0]?.[0] as Request;
+    expect(request.headers.get("Authorization")).toBeNull();
+    expect(response.status).toBe(401);
   });
 
   it("appFetch does not retry when endpoint is in refresh skip list", async () => {

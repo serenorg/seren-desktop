@@ -504,6 +504,25 @@ fn tail_output(output: Vec<u8>) -> String {
     String::from_utf8_lossy(&output[start..]).to_string()
 }
 
+/// The repository a worktree belongs to, read from the worktree itself. The
+/// run's recorded root can differ from where the worktree was provisioned, and
+/// removing from the wrong repository fails and leaks the directory.
+fn worktree_owner(root: &Path) -> Option<PathBuf> {
+    let output = hidden_command("git")
+        .current_dir(root)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let common_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if common_dir.is_empty() {
+        return None;
+    }
+    PathBuf::from(common_dir).parent().map(Path::to_path_buf)
+}
+
 pub fn release(
     root: &Path,
     source_repo: Option<&Path>,
@@ -514,7 +533,10 @@ pub fn release(
             if !root.exists() {
                 return Ok(());
             }
-            let source_repo = source_repo
+            let owner = worktree_owner(root);
+            let source_repo = owner
+                .as_deref()
+                .or(source_repo)
                 .ok_or_else(|| "worktree release requires source repository".to_string())?;
             let output = hidden_command("git")
                 .current_dir(source_repo)
@@ -594,6 +616,39 @@ mod tests {
         fs::write(root.join("tracked.txt"), "initial\n").unwrap();
         git_command(root, &["add", "tracked.txt"]);
         git_command(root, &["commit", "-m", "initial"]);
+    }
+
+    #[test]
+    fn releasing_a_worktree_finds_its_own_repository() {
+        let source = tempfile::tempdir().unwrap();
+        let workspaces = tempfile::tempdir().unwrap();
+        make_git_repo(source.path());
+
+        let provisioned = provision(&request(
+            "run-release",
+            "task-release",
+            "release me",
+            LeaseMode::Worktree,
+            Some(source.path().to_path_buf()),
+            workspaces.path(),
+        ))
+        .unwrap();
+        assert!(provisioned.root_path.exists());
+
+        // A run whose recorded root is not the provisioning repository — the
+        // lease never stored where it actually came from. Releasing must still
+        // remove the worktree rather than fail and leak it.
+        let unrelated = tempfile::tempdir().unwrap();
+        make_git_repo(unrelated.path());
+
+        release(
+            &provisioned.root_path,
+            Some(unrelated.path()),
+            LeaseMode::Worktree,
+        )
+        .unwrap();
+
+        assert!(!provisioned.root_path.exists());
     }
 
     fn test_db() -> Connection {
