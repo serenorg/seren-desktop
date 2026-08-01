@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createEmployeeRunManager,
+  employeeAssistantDisplayText,
   employeeErrorTextFromCode,
   employeeCapabilityGuidanceForError,
   employeeErrorCodeFromConversationMessage,
@@ -75,6 +76,38 @@ function runtimeApi(frames: unknown[], terminal: EmployeeRunEventLike) {
 }
 
 describe("employees-core sequenced run stream", () => {
+  it("presents readiness acknowledgements as chat prose", () => {
+    const acknowledgement = JSON.stringify({
+      skill: "Operations Assistant",
+      status: "ready",
+      scheduled_at: null,
+      artifact_url: null,
+      verification: { status: "not_applicable" },
+      employee: "Operations Assistant",
+    });
+
+    expect(employeeAssistantDisplayText(acknowledgement)).toBe(
+      "I'm Operations Assistant. I'm ready to help.",
+    );
+    expect(
+      employeeTextFromConversationMessage({
+        role: "assistant",
+        content: acknowledgement,
+        run_summary: { status: "completed" },
+      }),
+    ).toBe("I'm Operations Assistant. I'm ready to help.");
+  });
+
+  it("preserves JSON that is not the readiness contract", () => {
+    const jsonAnswer = JSON.stringify({
+      employee: "Operations Assistant",
+      status: "ready",
+      answer: { queue_depth: 3 },
+    });
+
+    expect(employeeAssistantDisplayText(jsonAnswer)).toBe(jsonAnswer);
+  });
+
   it("selects assistant conversation text from typed events before raw content", () => {
     const text = employeeTextFromConversationMessage({
       role: "assistant",
@@ -716,6 +749,29 @@ describe("employees-core sequenced run stream", () => {
     expect(getRun).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("completed");
     expect(result.text).toBe("final");
+  });
+
+  it("presents a terminal readiness envelope as chat prose", async () => {
+    const acknowledgement = JSON.stringify({
+      employee: "Operations Assistant",
+      status: "ready",
+      scheduled_at: null,
+      artifact_url: null,
+      verification: { status: "not_applicable" },
+    });
+    const { api } = runtimeApi(
+      [control("end")],
+      runEvent("completed", undefined, { output: acknowledgement }),
+    );
+
+    const result = await createEmployeeRunManager(api).runEmployeeMessage(
+      "dep_1",
+      "Who are you?",
+    );
+
+    expect(result.text).toBe(
+      "I'm Operations Assistant. I'm ready to help.",
+    );
   });
 
   it("does not append divergent terminal snapshots as text chunks", async () => {

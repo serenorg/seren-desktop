@@ -787,7 +787,9 @@ export function createEmployeeRunManager(
       if (registered) registered.runId = runId;
 
       if (!runId) {
-        const text = fallbackTextFromResult(invocation.result);
+        const text = employeeAssistantDisplayText(
+          fallbackTextFromResult(invocation.result),
+        );
         const status = invocation.status ?? "completed";
         if (isFailureStatus(status) && !text) {
           throw new Error(`Run ${status} with no output`);
@@ -901,7 +903,9 @@ export function createEmployeeRunManager(
         Date.now(),
       );
 
-      const text = state.text || final.output || "";
+      const text = employeeAssistantDisplayText(
+        state.text || final.output || "",
+      );
       const errorMessage = state.errorMessage ?? final.statusMessage ?? null;
       if (isFailureStatus(final.status)) {
         throw new Error(
@@ -1018,8 +1022,7 @@ export function messageFromInvocationPayload(payload: unknown): string {
 
 export function assistantTextFromRun(run: EmployeeRunEventLike): string {
   const fromEvents = textFromOutputEvents(run.output_events);
-  if (fromEvents) return fromEvents;
-  return run.output?.trim() ?? "";
+  return employeeAssistantDisplayText(fromEvents || run.output?.trim() || "");
 }
 
 export function textFromOutputEvents(value: unknown): string {
@@ -1027,6 +1030,53 @@ export function textFromOutputEvents(value: unknown): string {
     .map((event) => (event.type === "text" ? event.text : ""))
     .join("")
     .trim();
+}
+
+const EMPLOYEE_READINESS_KEYS = new Set([
+  "artifact_url",
+  "employee",
+  "scheduled_at",
+  "skill",
+  "status",
+  "verification",
+]);
+
+/**
+ * Converts the employee runtime's readiness acknowledgement into chat prose.
+ * The key allowlist keeps arbitrary JSON answers byte-for-byte unchanged.
+ */
+export function employeeAssistantDisplayText(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return value;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return value;
+  }
+
+  const acknowledgement = parsed as Record<string, unknown>;
+  const keys = Object.keys(acknowledgement);
+  if (
+    acknowledgement.status !== "ready" ||
+    !keys.every((key) => EMPLOYEE_READINESS_KEYS.has(key)) ||
+    !keys.some((key) =>
+      ["artifact_url", "scheduled_at", "verification"].includes(key),
+    )
+  ) {
+    return value;
+  }
+
+  const rawName =
+    stringValue(acknowledgement.employee) ?? stringValue(acknowledgement.skill);
+  if (!rawName) return value;
+  const name = rawName.replace(/\s+/g, " ").trim();
+  if (!name || name.length > 120) return value;
+  return `I'm ${name}. I'm ready to help.`;
 }
 
 export function errorTextFromOutputEvents(value: unknown): string {
@@ -1263,7 +1313,9 @@ export function employeeTextFromConversationMessage(
     message.run?.status_message?.trim() ||
     assistantTextFromRunOutput(message.run) ||
     "";
-  return isFailureStatus(status) ? sanitizeEmployeeErrorText(text) : text;
+  return isFailureStatus(status)
+    ? sanitizeEmployeeErrorText(text)
+    : employeeAssistantDisplayText(text);
 }
 
 function looksLikeStructuredError(value: string): boolean {
@@ -1283,8 +1335,7 @@ function assistantTextFromRunOutput(
 ): string {
   if (!run) return "";
   const fromEvents = textFromOutputEvents(run.output_events);
-  if (fromEvents) return fromEvents;
-  return run.output?.trim() ?? "";
+  return employeeAssistantDisplayText(fromEvents || run.output?.trim() || "");
 }
 
 export function outputEventEnvelopes(
