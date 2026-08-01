@@ -99,15 +99,29 @@ Just do what's asked — including obvious follow-up actions. Only pause when:
 - You genuinely don't understand.
 - User specifically asks "how should I approach X?".
 
-## Test Driven Development (TDD)
+## Ground Design in Observed Usage (REQUIRED)
 
-TDD ONLY for critical functionality:
+Before designing, scoping, or prioritizing any feature, MEASURE how the product is actually used. Do not design from a plan document's assertions, a competitor's feature list, a mockup, or your own intuition about what a user "would" do. Those are hypotheses. The database is evidence.
 
-- Security utilities (escapeHtml, input validation, auth).
-- Core business logic (billing, wallet, API integrations).
-- Complex algorithms.
+**The ground truth is local and free to query:**
 
-DO NOT test: UI components, simple CRUD, mocked behavior.
+```bash
+DB=~/Library/Application\ Support/com.serendb.desktop/chat.db
+sqlite3 -readonly "$DB" "select kind, agent_type, count(*) from conversations where deleted_at is null group by 1,2;"
+```
+
+ALWAYS open it `-readonly` — the app may be running. Aggregate queries cost zero model usage, so there is never a budget excuse for guessing.
+
+**Rules:**
+
+- Quantify before you propose. "Users probably want X" is not an input; "X happens in 2.6% of conversations" is.
+- Report the number and the query that produced it, so the finding is checkable.
+- When the data contradicts the plan, SAY SO PLAINLY and change the plan. Do not quietly build the thing the data just invalidated.
+- Distinguish what is measured from what is a persistence artifact. If a table looks empty, verify the feature isn't simply recorded elsewhere before concluding it is unused.
+- Scrub PII from anything you report. Summarize themes; do not dump message contents.
+- The same discipline applies to the codebase: grep and read the actual code before asserting how it behaves. A subagent's or a doc's claim about `file:line` is a hypothesis until you have verified it yourself.
+
+**Design for the measured user, not the imagined one.** Taariq ships software but is not a career software engineer. Optimize for the workflow the data shows — investigating across systems, steering in short bursts, long-running sessions — not for the workflow a developer-tools competitor optimizes for.
 
 ---
 
