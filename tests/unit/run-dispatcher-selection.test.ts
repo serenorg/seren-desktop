@@ -46,12 +46,22 @@ describe("run dispatcher selection", () => {
     expect(selectReadyTasks(tasks, new Set(["two"]), 3).map((item) => item.id)).toEqual([
       "one",
       "three",
-      "four",
     ]);
     expect(selectReadyTasks(tasks, new Set(), 2).map((item) => item.id)).toEqual([
       "one",
       "two",
     ]);
+  });
+
+  it("counts in-flight tasks against the concurrency cap", () => {
+    const tasks = [task("one"), task("two"), task("three"), task("four")];
+    expect(
+      selectReadyTasks(tasks, new Set(["one", "two", "three"]), 3),
+    ).toEqual([]);
+    expect(
+      selectReadyTasks(tasks, new Set(["one"]), 3).map((item) => item.id),
+    ).toEqual(["two", "three"]);
+    expect(selectReadyTasks(tasks, new Set(["one", "two"]), 3)).toHaveLength(1);
   });
 
   it("round-robins assignments in the selected plan", () => {

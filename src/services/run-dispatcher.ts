@@ -260,9 +260,12 @@ export function selectReadyTasks(
   inFlight: ReadonlySet<string>,
   cap = MAX_CONCURRENT_TASKS,
 ): Task[] {
+  // The cap bounds total concurrency, so tasks already running count against
+  // it. The dispatch effect re-runs on every snapshot change; without this,
+  // each re-run would admit a fresh capful on top of the in-flight ones.
   return tasks
     .filter((task) => task.state === "ready" && !inFlight.has(task.id))
-    .slice(0, Math.max(0, cap));
+    .slice(0, Math.max(0, cap - inFlight.size));
 }
 
 export interface DispatchPlan {
@@ -448,6 +451,7 @@ async function dispatchTask(
   const runId = snapshot.run.id;
   const localSessionId = crypto.randomUUID();
   let attemptId: string | null = null;
+  let spawnedSessionId: string | null = null;
   try {
     attemptId = await runStartAttempt(
       runId,
@@ -469,6 +473,7 @@ async function dispatchTask(
           { localSessionId, conversationTitle: task.title },
         );
         if (!sessionId) throw new Error("agent session failed to start");
+        spawnedSessionId = sessionId;
         ownedSessionIds.set(sessionId, runId);
         agentStore.markSessionRunOwned(sessionId, runId);
         await agentStore.sendPrompt(
@@ -528,6 +533,28 @@ async function dispatchTask(
         // Preserve the original dispatch failure; the durable event loop may be stopping.
       }
     }
+  } finally {
+    // A task owns its agent session for the length of the task. Holding it
+    // open afterwards would keep an admission slot and a live CLI process for
+    // work that is already finished, starving the next task and any chat the
+    // user starts while the run is going.
+    if (spawnedSessionId) {
+      ownedSessionIds.delete(spawnedSessionId);
+      await retireRunSession(spawnedSessionId);
+    }
+  }
+}
+
+async function retireRunSession(sessionId: string): Promise<void> {
+  agentStore.releaseSessionRunOwnership(sessionId);
+  try {
+    await agentStore.terminateSession(sessionId);
+  } catch (error) {
+    console.warn(
+      "[RunDispatcher] Failed to terminate run-owned session:",
+      sessionId,
+      error,
+    );
   }
 }
 
@@ -540,8 +567,11 @@ function releaseTerminalOwnership(snapshot: RunSnapshot | null): void {
   if (!isTerminalRun(snapshot)) return;
   for (const [sessionId, runId] of ownedSessionIds) {
     if (runId === snapshot?.run.id) {
-      agentStore.releaseSessionRunOwnership(sessionId);
       ownedSessionIds.delete(sessionId);
+      // Stopping a run must stop its agents. Leaving them alive lets a
+      // cancelled run keep spending tokens and appending findings to a record
+      // the user already closed.
+      void retireRunSession(sessionId);
     }
   }
 }
@@ -587,7 +617,7 @@ export function stopRunDispatcher(): void {
   disposeDispatcher?.();
   disposeDispatcher = null;
   for (const sessionId of ownedSessionIds.keys()) {
-    agentStore.releaseSessionRunOwnership(sessionId);
+    void retireRunSession(sessionId);
   }
   ownedSessionIds.clear();
   inFlightTasks.clear();
