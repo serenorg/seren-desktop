@@ -3,6 +3,7 @@
 
 import {
   type EmployeeOutputEventEnvelope,
+  employeeAssistantDisplayText,
   formatToolAuditEvent,
   isFailureStatus,
   outputEventEnvelopes,
@@ -514,7 +515,9 @@ function buildAssistantMessageDrafts(
     }),
   );
 
-  const assistantText = textParts.join("").trim() || message.content.trim();
+  const assistantText = employeeAssistantDisplayText(
+    textParts.join("").trim() || message.content.trim(),
+  );
   if (assistantText || statusMessage || thinkingParts.length > 0) {
     messages.push(
       draftFromUnifiedMessage(
