@@ -24,17 +24,32 @@ describe("RunLaunchBox", () => {
 
   it("defines an objective input and advanced disclosure", () => {
     expect(launchBoxSource).toContain('id="mission-objective"');
+    expect(launchBoxSource).toContain('data-testid="run-objective"');
     expect(launchBoxSource).toContain("<details");
     expect(launchBoxSource).toContain("Seren will");
     expect(launchBoxSource).toContain("It will not");
-    expect(launchBoxSource).toContain("await launchMission(value)");
+    expect(launchBoxSource).toContain("run-task-title-${slot}");
+    expect(launchBoxSource).toContain("run-task-brief-${slot}");
+    expect(launchBoxSource).toContain("run-agent-${agentType}");
+    expect(launchBoxSource).toContain('data-testid="run-launch-start"');
+    expect(launchBoxSource).toContain("await launchMission({");
   });
 
-  it("sends the typed objective to the store launch action", async () => {
+  it("sends objective, tasks, agents, and workspace root to the store", async () => {
     const launch = vi.spyOn(runStore, "launch").mockResolvedValue(undefined);
 
-    await launchMission("  Reconcile the billing records  ");
+    await launchMission({
+      objective: "  Reconcile the billing records  ",
+      rootPath: "/tmp/project",
+      tasks: [{ title: "Inspect invoices", brief: "Compare totals." }],
+      agents: ["codex", "seren"],
+    });
 
-    expect(launch).toHaveBeenCalledWith("  Reconcile the billing records  ");
+    expect(launch).toHaveBeenCalledWith({
+      objective: "  Reconcile the billing records  ",
+      rootPath: "/tmp/project",
+      tasks: [{ title: "Inspect invoices", brief: "Compare totals." }],
+      agents: ["codex", "seren"],
+    });
   });
 });

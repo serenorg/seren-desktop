@@ -1,0 +1,604 @@
+<!doctype html>
+<!-- ABOUTME: Mission Control mockups rendered inside the real SerenDesktop chrome — packed sidebar,
+     composer, model toolbar — so the actual content real estate is honest. Rebuilt 2026-07-31. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Seren Mission Control — in a busy app</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --background: #0a0e17;
+        --foreground: #e2e8f0;
+        --surface-0: #0f1623;
+        --surface-1: #151d2e;
+        --surface-2: #1c2640;
+        --surface-3: #243049;
+        --primary: #38bdf8;
+        --primary-foreground: #0a0e17;
+        --primary-muted: rgba(56, 189, 248, 0.12);
+        --muted-foreground: #94a3b8;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --destructive: #f87171;
+        --border: rgba(148, 163, 184, 0.1);
+        --border-strong: rgba(148, 163, 184, 0.25);
+        --font-mono: "JetBrains Mono", "SF Mono", Menlo, Monaco, monospace;
+        font-family: "General Sans", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      html.light {
+        color-scheme: light;
+        --background: #f6f8fb; --foreground: #0f172a;
+        --surface-0: #ffffff; --surface-1: #ffffff; --surface-2: #eef2f8; --surface-3: #e2e8f0;
+        --primary: #0284c7; --primary-foreground: #fff; --primary-muted: rgba(2,132,199,.1);
+        --muted-foreground: #5b6577; --success: #047857; --warning: #92400e; --destructive: #b91c1c;
+        --border: rgba(15,23,42,.1); --border-strong: rgba(15,23,42,.2);
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { background: var(--background); color: var(--foreground); font-size: 13px; overflow: hidden; }
+      .mono { font-family: var(--font-mono); }
+      button { font-family: inherit; }
+
+      .app { display: flex; flex-direction: column; height: 100vh; }
+
+      /* ?frame=1 renders the app at a realistic laptop window size on a desktop
+         backdrop, so stills show true content real estate rather than a 1920 canvas. */
+      html.framed body { display: grid; place-items: center; height: 100vh; background: linear-gradient(160deg, #16324a, #0b1a2b); }
+      html.framed .app { width: 1440px; height: 880px; border: 1px solid rgba(148,163,184,.22); border-radius: 11px; overflow: hidden; box-shadow: 0 24px 70px rgba(0,0,0,.6); background: var(--background); }
+
+      /* ---------- titlebar ---------- */
+      .titlebar { display: flex; align-items: center; justify-content: space-between; height: 38px; padding: 0 11px; border-bottom: 1px solid var(--border); background: var(--surface-0); flex: none; }
+      .tl { display: flex; align-items: center; gap: 7px; }
+      .ws { width: 21px; height: 21px; border: 1px solid var(--primary); border-radius: 5px; background: var(--primary-muted); color: var(--primary); font: 10px var(--font-mono); cursor: pointer; }
+      .ic { border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font-size: 12px; padding: 3px 4px; }
+      .tr { display: flex; align-items: center; gap: 6px; }
+      .bal { display: flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); font: 11px var(--font-mono); }
+
+      .body { display: flex; flex: 1; min-height: 0; }
+
+      /* ---------- sidebar (the real one) ---------- */
+      .sidebar { width: 280px; flex: none; border-right: 1px solid var(--border); background: var(--surface-0); display: flex; flex-direction: column; min-height: 0; }
+      .proj { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; font-size: 12.5px; }
+      .proj span { display: flex; align-items: center; gap: 7px; color: var(--foreground); }
+      .newbtn { margin: 0 11px 9px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-1); color: var(--foreground); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+      .search { margin: 0 11px 4px; padding: 6px 9px; border: 1px solid var(--border); border-radius: 6px; background: transparent; display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted-foreground); }
+      .search .kbd { margin-left: auto; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; font: 8.5px var(--font-mono); }
+      .scroll { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
+      .scroll::-webkit-scrollbar { width: 6px; }
+      .scroll::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+      .grp { display: flex; align-items: center; gap: 6px; padding: 11px 13px 4px; font: 8.5px var(--font-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); }
+      .grp .n { margin-left: auto; }
+      .row { display: flex; align-items: center; gap: 8px; width: calc(100% - 12px); margin: 0 6px 1px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font-size: 12px; text-align: left; cursor: pointer; }
+      .row:hover { background: var(--surface-1); }
+      .row.on { background: var(--surface-2); }
+      .row .av { display: inline-grid; place-items: center; width: 21px; height: 21px; border-radius: 6px; font: 8.5px var(--font-mono); flex: none; background: var(--surface-3); color: var(--muted-foreground); }
+      .row .av.pink { background: #be185d; color: #fff; }
+      .row .av.amber { background: #b45309; color: #fff; }
+      .row .av.mc { background: var(--primary-muted); color: var(--primary); }
+      .row .tx { min-width: 0; flex: 1; }
+      .row .tx b { display: block; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row .tx s { display: block; margin-top: 1px; font-size: 10px; color: var(--muted-foreground); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row .t { flex: none; font: 9px var(--font-mono); color: var(--muted-foreground); }
+      .live { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+      .badge2 { flex: none; padding: 0 5px; border-radius: 99px; background: rgba(251,191,36,.16); color: var(--warning); font: 9px var(--font-mono); }
+      .thr { display: flex; align-items: center; gap: 8px; width: calc(100% - 12px); margin: 0 6px 1px; padding: 5px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font-size: 12px; text-align: left; cursor: pointer; }
+      .thr:hover { background: var(--surface-1); }
+      .thr.on { background: var(--surface-2); }
+      .thr .em { flex: none; font-size: 11px; }
+      .thr .ti { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+      /* ---------- main ---------- */
+      .main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+      .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--border); flex: none; }
+      .tb { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); color: var(--muted-foreground); font-size: 11px; cursor: pointer; }
+      .ava { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--muted-foreground); font: 10px var(--font-mono); display: grid; place-items: center; }
+
+      .screen { display: none; flex-direction: column; flex: 1; min-height: 0; }
+      .screen.active { display: flex; }
+
+      .rh { padding: 13px 18px 0; flex: none; }
+      .eyebrow { font: 8.5px var(--font-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); display: flex; align-items: center; gap: 6px; }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+      .rh h1 { margin-top: 5px; font-size: 17px; font-weight: 600; }
+      .hrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+      .stats { display: flex; align-items: center; gap: 14px; }
+      .stat strong { display: block; font-size: 12px; }
+      .stat span { font: 7.5px var(--font-mono); text-transform: uppercase; letter-spacing: .07em; color: var(--muted-foreground); }
+      .btn { padding: 5px 11px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface-1); color: var(--foreground); font-size: 11.5px; cursor: pointer; }
+      .btn.primary { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); font-weight: 500; }
+      .btn.quiet { background: transparent; color: var(--muted-foreground); }
+      .btn.sm { padding: 3px 8px; font-size: 10.5px; }
+
+      .tabs { display: flex; gap: 17px; padding: 0 18px; margin-top: 11px; border-bottom: 1px solid var(--border); flex: none; }
+      .tab { padding: 7px 0; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-foreground); font-size: 11.5px; cursor: pointer; }
+      .tab.active { color: var(--foreground); border-bottom-color: var(--primary); }
+      .tab .b { margin-left: 5px; padding: 0 5px; border-radius: 99px; background: rgba(251,191,36,.16); color: var(--warning); font: 8px var(--font-mono); }
+
+      .content { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px 18px; }
+      .content::-webkit-scrollbar { width: 7px; }
+      .content::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
+
+      .needs { display: flex; align-items: center; gap: 13px; padding: 11px 13px; border: 1px solid rgba(251,191,36,.3); border-left: 3px solid var(--warning); border-radius: 8px; background: rgba(251,191,36,.05); }
+      .needs .c { flex: 1; }
+      .needs .l { font: 8.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--warning); }
+      .needs .t { margin-top: 4px; font-size: 13px; font-weight: 500; }
+      .needs .d { margin-top: 3px; font-size: 11.5px; color: var(--muted-foreground); }
+
+      .st { margin: 18px 0 9px; font: 8.5px var(--font-mono); letter-spacing: .09em; text-transform: uppercase; color: var(--muted-foreground); }
+      .lanes { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; align-items: start; }
+      .lane { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); padding: 9px; }
+      .lh { display: flex; justify-content: space-between; font: 8.5px var(--font-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 8px; }
+      .card { border: 1px solid var(--border); border-radius: 7px; background: var(--surface-1); padding: 9px; margin-bottom: 6px; }
+      .card:last-child { margin-bottom: 0; }
+      .card .who { display: flex; align-items: center; gap: 5px; font: 8.5px var(--font-mono); color: var(--muted-foreground); }
+      .card .doing { margin-top: 5px; font-size: 11.5px; line-height: 1.42; }
+      .card .meta { margin-top: 6px; font: 8.5px var(--font-mono); color: var(--muted-foreground); }
+      .mk { display: inline-grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; background: var(--surface-3); font: 7.5px var(--font-mono); color: var(--muted-foreground); flex: none; }
+
+      .finding { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); padding: 12px 13px; margin-bottom: 8px; }
+      .finding.attn { border-color: rgba(251,191,36,.35); }
+      .ftop { display: flex; align-items: baseline; gap: 9px; }
+      .fclaim { flex: 1; font-size: 13px; font-weight: 500; line-height: 1.38; }
+      .chip { padding: 2px 6px; border-radius: 99px; font: 7.5px var(--font-mono); letter-spacing: .05em; text-transform: uppercase; white-space: nowrap; }
+      .chip.ver { background: rgba(52,211,153,.12); color: var(--success); }
+      .chip.uns { background: var(--surface-3); color: var(--muted-foreground); }
+      .chip.ndy { background: rgba(251,191,36,.16); color: var(--warning); }
+      .evs { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+      .ev { display: flex; gap: 8px; font-size: 10.5px; color: var(--muted-foreground); line-height: 1.4; }
+      .ev .k { flex: none; width: 54px; font: 7.5px var(--font-mono); text-transform: uppercase; letter-spacing: .05em; padding-top: 1px; }
+      .ev .lo { color: var(--foreground); }
+      .fact { margin-top: 9px; display: flex; gap: 6px; align-items: center; }
+      .fag { margin-left: auto; font: 8.5px var(--font-mono); color: var(--muted-foreground); }
+      .cov { border: 1px dashed var(--border-strong); border-radius: 8px; padding: 11px 13px; }
+      .cov h3 { font-size: 12px; font-weight: 500; margin-bottom: 3px; }
+      .cov p { font-size: 10.5px; color: var(--muted-foreground); }
+      .cov ul { margin: 7px 0 0 15px; font-size: 10.5px; color: var(--muted-foreground); line-height: 1.65; }
+
+      .aw { display: grid; grid-template-columns: 178px minmax(0,1fr); flex: 1; min-height: 0; }
+      .al { border-right: 1px solid var(--border); padding: 11px 9px; overflow-y: auto; }
+      .ai { padding: 7px 8px; border: 1px solid transparent; border-radius: 6px; cursor: pointer; margin-bottom: 3px; }
+      .ai.on { border-color: var(--border-strong); background: var(--surface-1); }
+      .ai b { display: block; font-size: 11.5px; font-weight: 500; }
+      .ai s { display: block; margin-top: 2px; font: 8.5px var(--font-mono); color: var(--muted-foreground); text-decoration: none; }
+      .ab { padding: 13px 16px; overflow-y: auto; }
+      .ab > * { max-width: 760px; }
+      .ff { margin-bottom: 11px; padding: 7px 10px; border-left: 2px solid var(--primary); background: var(--primary-muted); font-size: 10.5px; }
+      .draft { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); }
+      .dh { padding: 10px 13px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
+      .dh .r { display: flex; gap: 8px; margin-bottom: 4px; color: var(--muted-foreground); }
+      .dh .r:last-child { margin-bottom: 0; }
+      .dh .r b { width: 46px; font: 8.5px var(--font-mono); text-transform: uppercase; font-weight: 400; }
+      .dh .r span { color: var(--foreground); }
+      .db { padding: 13px; font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; }
+      .diff { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font: 10px var(--font-mono); }
+      .dfh { padding: 7px 11px; border-bottom: 1px solid var(--border); background: var(--surface-1); color: var(--muted-foreground); font-size: 9px; }
+      .dl { display: flex; padding: 1px 11px; }
+      .dl.a { background: rgba(52,211,153,.07); }
+      .dl.d { background: rgba(248,113,113,.07); }
+      .dl .s { width: 14px; flex: none; color: var(--muted-foreground); }
+
+      /* ---------- composer (the real one) ---------- */
+      .composer { flex: none; border-top: 1px solid var(--border); background: var(--surface-0); padding: 8px 14px 9px; }
+      .cwd { display: flex; align-items: center; gap: 6px; font: 9.5px var(--font-mono); color: var(--muted-foreground); margin-bottom: 6px; }
+      .attach { padding: 3px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-1); color: var(--muted-foreground); font-size: 10.5px; cursor: pointer; }
+      .inp { margin: 6px 0 7px; padding: 9px 11px; border: 1px solid var(--primary); border-radius: 8px; background: var(--surface-1); color: var(--muted-foreground); font-size: 12px; min-height: 38px; }
+      .ctrl { display: flex; align-items: center; gap: 6px; }
+      .pillbtn { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-1); color: var(--foreground); font-size: 10.5px; cursor: pointer; white-space: nowrap; }
+      .pillbtn s { color: var(--muted-foreground); text-decoration: none; }
+      .send { margin-left: auto; padding: 5px 15px; border: 0; border-radius: 7px; background: #22c55e; color: #05270f; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+
+      .statusbar { display: flex; justify-content: space-between; align-items: center; height: 22px; padding: 0 12px; border-top: 1px solid var(--border); background: var(--surface-0); font: 9px var(--font-mono); color: var(--muted-foreground); flex: none; }
+
+      .lw { flex: 1; display: grid; place-items: center; padding: 20px; overflow-y: auto; }
+      .lc { width: 100%; max-width: 520px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-0); padding: 18px; }
+      .lc h2 { font-size: 15px; font-weight: 600; }
+      .lc .ask { width: 100%; margin-top: 11px; padding: 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-1); color: var(--foreground); font-family: inherit; font-size: 12px; line-height: 1.5; resize: none; }
+      .pl { margin-top: 12px; }
+      .pl .l { display: flex; gap: 8px; font-size: 11.5px; line-height: 1.5; color: var(--muted-foreground); margin-bottom: 4px; }
+      .pl .l b { color: var(--foreground); font-weight: 500; white-space: nowrap; }
+      .warn { margin-top: 11px; padding: 8px 10px; border: 1px solid rgba(251,191,36,.3); border-radius: 7px; background: rgba(251,191,36,.05); font-size: 10.5px; color: var(--muted-foreground); }
+      .warn b { color: var(--warning); }
+      .adv { margin-top: 11px; border-top: 1px solid var(--border); padding-top: 10px; }
+      .adv summary { font-size: 11.5px; color: var(--muted-foreground); cursor: pointer; }
+      .la { margin-top: 14px; display: flex; align-items: center; gap: 10px; }
+      .la .e { font-size: 10.5px; color: var(--muted-foreground); }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="titlebar">
+        <div class="tl">
+          <button class="ws">1</button>
+          <button class="ic">＋</button>
+          <button class="ic">▥</button>
+          <button class="ic">▤</button>
+        </div>
+        <div class="tr">
+          <div class="bal">💰 $446.51</div>
+          <button class="ic">▢</button>
+          <button class="ic">🎙</button>
+          <button class="ic" id="theme">⚙</button>
+          <button class="ic">▤</button>
+        </div>
+      </header>
+
+      <div class="body">
+        <!-- ============ REAL SIDEBAR ============ -->
+        <aside class="sidebar">
+          <div class="proj"><span>🗀 seren-desktop</span><button class="ic">☰</button></div>
+          <button class="newbtn" data-go="launch">＋ New</button>
+          <div class="search">🔍 Search history <span class="kbd">⌘⇧H</span></div>
+
+          <div class="scroll">
+            <div class="grp">Mission Control <span class="n">1</span></div>
+            <button class="row on" data-go="overview">
+              <span class="av mc">MC</span>
+              <span class="tx"><b>SSL.com cost overrun</b><s>3 agents · 4 findings</s></span>
+              <span class="badge2">1</span>
+            </button>
+
+            <div class="grp">Employees <span class="n">3</span></div>
+            <button class="row">
+              <span class="av pink">3</span>
+              <span class="tx"><b>3D Recovery Case Originati…</b><s>Scheduled · Live</s></span>
+              <span class="live"></span>
+            </button>
+            <button class="row">
+              <span class="av amber">A</span>
+              <span class="tx"><b>AlphaGrowth Borrower Origi…</b><s>Scheduled · Live</s></span>
+              <span class="live"></span>
+            </button>
+            <button class="row">
+              <span class="av amber">A</span>
+              <span class="tx"><b>AlphaGrowth Borrower Origi…</b><s>Scheduled · Live</s></span>
+              <span class="live"></span>
+            </button>
+            <button class="row">
+              <span class="av">＋</span>
+              <span class="tx"><b>New employee</b><s>Persistent cloud worker</s></span>
+            </button>
+            <button class="row">
+              <span class="av">✉</span>
+              <span class="tx"><b>Approval inbox</b><s>Blocked actions awaiting you</s></span>
+            </button>
+
+            <div class="grp">Bounties <span class="n">1</span></div>
+            <button class="row">
+              <span class="av">$</span>
+              <span class="tx"><b>SerenBucks $500 Weekly Cont…</b><s>serenbucks – 500 SB remaining</s></span>
+            </button>
+
+            <div class="grp"><span class="live"></span> seren-desktop <span class="n">3</span></div>
+            <button class="thr"><span class="em">⚡</span><span class="ti">You are working in Ser…</span><span class="t">1h</span><span class="live"></span></button>
+            <button class="thr"><span class="em">🤖</span><span class="ti">I've got an idea I want to…</span><span class="t">2h</span></button>
+            <button class="thr"><span class="em">🤖</span><span class="ti">You are working in Seren…</span><span class="t">3h</span></button>
+
+            <div class="grp">seren-skills <span class="n">1</span></div>
+            <button class="thr"><span class="em">🤖</span><span class="ti">Continue from this threa…</span><span class="t">1h</span></button>
+
+            <div class="grp">equi-eos <span class="n">1</span></div>
+            <button class="thr"><span class="em">⚡</span><span class="ti">Wait. is there no more c…</span><span class="t">2h</span></button>
+
+            <div class="grp">equi <span class="n">2</span></div>
+            <button class="thr"><span class="em">🤖</span><span class="ti">Fork of Great. Here's a q…</span><span class="t">3h</span></button>
+            <button class="thr"><span class="em">⚡</span><span class="ti">Great. Here's a questi…</span><span class="t">Jul 15</span></button>
+
+            <div class="grp">seren <span class="n">3</span></div>
+            <button class="thr"><span class="em">🤖</span><span class="ti">Audit the seren-router de…</span><span class="t">Jul 29</span></button>
+            <button class="thr"><span class="em">⚡</span><span class="ti">Check my email for the su…</span><span class="t">Jul 28</span></button>
+          </div>
+        </aside>
+
+        <!-- ============ MAIN ============ -->
+        <main class="main">
+          <div class="topbar">
+            <button class="tb">Compact</button>
+            <button class="tb">⧉</button>
+            <button class="tb">⤓</button>
+            <button class="tb">Clear</button>
+            <button class="tb">Privacy</button>
+            <div class="ava">T</div>
+          </div>
+
+          <!-- LAUNCH -->
+          <section class="screen" data-screen="launch">
+            <div class="lw">
+              <div class="lc">
+                <h2>What do you want to find out?</h2>
+                <textarea class="ask" rows="3">Audit the SSL.com signing cost overrun across the last seven releases. Check my gmail for the ssl.com invoices too.</textarea>
+                <div class="pl">
+                  <div class="l"><b>Seren will</b><span>read the release workflow and CI history for the last seven tags.</span></div>
+                  <div class="l"><b>and</b><span>search your Gmail for SSL.com invoices and billing notices.</span></div>
+                  <div class="l"><b>and</b><span>report what it found, with a link to every source.</span></div>
+                  <div class="l"><b>It will not</b><span>send anything or change a file until you approve it.</span></div>
+                </div>
+                <div class="warn"><b>Gmail access is read-only for this run.</b> Replying to SSL.com will need your approval.</div>
+                <details class="adv"><summary>Advanced — models, isolation, budget, permissions</summary></details>
+                <div class="la">
+                  <button class="btn primary" data-go="overview">Start run</button>
+                  <span class="e">Roughly $1.20–$2.40 · stop it any time</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- OVERVIEW -->
+          <section class="screen active" data-screen="overview">
+            <div class="rh">
+              <div class="hrow">
+                <div>
+                  <div class="eyebrow"><span class="dot"></span> Run · Working</div>
+                  <h1>SSL.com signing cost overrun</h1>
+                </div>
+                <div class="stats">
+                  <div class="stat"><strong>3</strong><span>agents</span></div>
+                  <div class="stat"><strong>9m 04s</strong><span>elapsed</span></div>
+                  <div class="stat"><strong>$0.83</strong><span>of $5.00</span></div>
+                  <button class="btn quiet">Stop</button>
+                </div>
+              </div>
+            </div>
+            <nav class="tabs">
+              <button class="tab active" data-go="overview">Overview</button>
+              <button class="tab" data-go="findings">Findings<span class="b">4</span></button>
+              <button class="tab">Activity</button>
+            </nav>
+            <div class="content">
+              <div class="needs">
+                <div class="c">
+                  <div class="l">Needs you</div>
+                  <div class="t">Approve a reply to SSL.com billing</div>
+                  <div class="d">The draft disputes two duplicate signing charges. Nothing sends until you approve it.</div>
+                </div>
+                <button class="btn primary" data-go="artifact">Review draft →</button>
+              </div>
+
+              <div class="st">What the team is doing</div>
+              <div class="lanes">
+                <section class="lane">
+                  <div class="lh"><span>Working</span><span>2</span></div>
+                  <div class="card">
+                    <div class="who"><span class="mk">GM</span> Gemini · mail</div>
+                    <div class="doing">Reading SSL.com invoices in Gmail. Found 7 charges, matching them to release tags.</div>
+                    <div class="meta">read-only · 5 of 7 matched</div>
+                  </div>
+                  <div class="card">
+                    <div class="who"><span class="mk">CX</span> Codex · workflows</div>
+                    <div class="doing">Comparing cache keys across release.yml history to see when restore last worked.</div>
+                    <div class="meta">read-only · 3 findings</div>
+                  </div>
+                </section>
+                <section class="lane">
+                  <div class="lh"><span>Blocked</span><span>1</span></div>
+                  <div class="card">
+                    <div class="who"><span class="mk">CL</span> Claude · portal</div>
+                    <div class="doing">Cannot open the SSL.com billing portal — no stored credentials.</div>
+                    <div class="meta">recorded as a coverage gap</div>
+                  </div>
+                </section>
+                <section class="lane">
+                  <div class="lh"><span>Done</span><span>1</span></div>
+                  <div class="card">
+                    <div class="who"><span class="mk">CX</span> Codex · CI history</div>
+                    <div class="doing">Read all 7 release runs and extracted signing invocations per run.</div>
+                    <div class="meta">1 finding · verified</div>
+                  </div>
+                </section>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="cwd">🗀 /Users/taariqlewis/Projects/Seren_Projects/seren-desktop <button class="attach" style="margin-left:8px">📎 Attach</button></div>
+              <div class="inp">Message the run, or an agent by name…</div>
+              <div class="ctrl">
+                <button class="pillbtn">🤖 Claude Code <s>▾</s></button>
+                <button class="pillbtn">✷ Opus 4.8 (1M conte… <s>▾</s></button>
+                <button class="pillbtn">🔒 Bypass Permissions <s>▾</s></button>
+                <button class="pillbtn">⚡ Fast</button>
+                <button class="pillbtn">✳ xhigh <s>▾</s></button>
+                <button class="pillbtn">◈ Skills <s>36</s></button>
+                <button class="send">Send</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- FINDINGS -->
+          <section class="screen" data-screen="findings">
+            <div class="rh">
+              <div class="hrow">
+                <div>
+                  <div class="eyebrow"><span class="dot"></span> Run · Working</div>
+                  <h1>SSL.com signing cost overrun</h1>
+                </div>
+                <div class="stats">
+                  <div class="stat"><strong>4</strong><span>findings</span></div>
+                  <div class="stat"><strong>$0.83</strong><span>spent</span></div>
+                  <button class="btn">Export</button>
+                </div>
+              </div>
+            </div>
+            <nav class="tabs">
+              <button class="tab" data-go="overview">Overview</button>
+              <button class="tab active" data-go="findings">Findings<span class="b">4</span></button>
+              <button class="tab">Activity</button>
+            </nav>
+            <div class="content">
+              <div class="finding">
+                <div class="ftop">
+                  <div class="fclaim">The signing cache never restored across tags, so every release paid for a full re-sign.</div>
+                  <span class="chip ver">Verified</span>
+                </div>
+                <div class="evs">
+                  <div class="ev"><span class="k">workflow</span><span><span class="lo mono">release.yml:212</span> — cache key includes <span class="mono">github.sha</span>, which changes every tag</span></div>
+                  <div class="ev"><span class="k">ci logs</span><span>7 of 7 release runs logged <span class="mono">Cache not found</span> — v3.69.0 → v3.75.0</span></div>
+                  <div class="ev"><span class="k">command</span><span><span class="mono">gh run list --workflow release.yml</span> · exit 0 · 7 runs</span></div>
+                </div>
+                <div class="fact">
+                  <button class="btn sm" data-go="artifact">Review proposed fix</button>
+                  <button class="btn sm quiet">Dismiss</button>
+                  <span class="fag">Codex · workflows</span>
+                </div>
+              </div>
+
+              <div class="finding attn">
+                <div class="ftop">
+                  <div class="fclaim">Two signing charges in April were billed twice for the same release tag.</div>
+                  <span class="chip ndy">Needs you</span>
+                </div>
+                <div class="evs">
+                  <div class="ev"><span class="k">email</span><span>Invoice <span class="mono">mi-c896-1l1sjri</span> — SSL.com billing, 2026-04-14</span></div>
+                  <div class="ev"><span class="k">email</span><span>Invoice <span class="mono">mi-c896-1l4kfpz</span> — same tag <span class="mono">v3.71.2</span>, 2026-04-15</span></div>
+                  <div class="ev"><span class="k">ci logs</span><span>Only one signing invocation recorded for that tag</span></div>
+                </div>
+                <div class="fact">
+                  <button class="btn primary sm" data-go="artifact">Review reply draft →</button>
+                  <span class="fag">Gemini · mail</span>
+                </div>
+              </div>
+
+              <div class="finding">
+                <div class="ftop">
+                  <div class="fclaim">Three earlier fixes were signed off against mocked walkthroughs and never verified against a real release.</div>
+                  <span class="chip ver">Verified</span>
+                </div>
+                <div class="evs">
+                  <div class="ev"><span class="k">issues</span><span>#2818, #2821, #2824 — each closed citing a passing local walkthrough</span></div>
+                  <div class="ev"><span class="k">ci logs</span><span>The next real release after each fix still logged <span class="mono">Cache not found</span></span></div>
+                </div>
+                <div class="fact">
+                  <button class="btn sm quiet">Open issues</button>
+                  <span class="fag">Codex · CI history</span>
+                </div>
+              </div>
+
+              <div class="finding">
+                <div class="ftop">
+                  <div class="fclaim">The account may have entered overage pricing in May, which would change the per-sign rate.</div>
+                  <span class="chip uns">Unverified</span>
+                </div>
+                <div class="evs">
+                  <div class="ev"><span class="k">email</span><span>Billing notice mentions a tier change but does not state the new rate</span></div>
+                  <div class="ev"><span class="k">blocked</span><span>Could not confirm — SSL.com portal needs credentials Seren does not have</span></div>
+                </div>
+                <div class="fact">
+                  <button class="btn sm">Give portal access</button>
+                  <span class="fag">Claude · portal</span>
+                </div>
+              </div>
+
+              <div class="st">Coverage</div>
+              <div class="cov">
+                <h3>What this run could not check</h3>
+                <p>Stated so you know the bounds of the report above.</p>
+                <ul>
+                  <li>SSL.com billing portal — no stored credentials, so pricing tiers are unconfirmed</li>
+                  <li>Releases before v3.69.0 — outside the seven tags you asked about</li>
+                  <li>Bank statements — not connected to this run</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="cwd">🗀 /Users/taariqlewis/Projects/Seren_Projects/seren-desktop <button class="attach" style="margin-left:8px">📎 Attach</button></div>
+              <div class="inp">Ask about a finding, or send a correction…</div>
+              <div class="ctrl">
+                <button class="pillbtn">🤖 Claude Code <s>▾</s></button>
+                <button class="pillbtn">✷ Opus 4.8 (1M conte… <s>▾</s></button>
+                <button class="pillbtn">🔒 Bypass Permissions <s>▾</s></button>
+                <button class="pillbtn">⚡ Fast</button>
+                <button class="pillbtn">✳ xhigh <s>▾</s></button>
+                <button class="pillbtn">◈ Skills <s>36</s></button>
+                <button class="send">Send</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- ARTIFACT -->
+          <section class="screen" data-screen="artifact">
+            <div class="rh">
+              <div class="hrow">
+                <div>
+                  <div class="eyebrow">Review · nothing sends without you</div>
+                  <h1>Reply to SSL.com billing</h1>
+                </div>
+                <div class="stats">
+                  <button class="btn">Request changes</button>
+                  <button class="btn primary" id="approve">Approve &amp; send</button>
+                </div>
+              </div>
+            </div>
+            <nav class="tabs">
+              <button class="tab" data-go="overview">Overview</button>
+              <button class="tab" data-go="findings">Findings<span class="b">4</span></button>
+              <button class="tab active">Review</button>
+            </nav>
+            <div class="aw">
+              <aside class="al">
+                <div class="ai on"><b>Reply to SSL.com</b><s>email · needs approval</s></div>
+                <div class="ai"><b>release.yml cache key</b><s>code · 1 file, +3 −1</s></div>
+                <div class="ai"><b>Cost summary</b><s>document · draft</s></div>
+              </aside>
+              <div class="ab">
+                <div class="ff">From finding: <strong>Two signing charges in April were billed twice for the same release tag.</strong></div>
+                <div class="draft">
+                  <div class="dh">
+                    <div class="r"><b>To</b><span>billing@ssl.com</span></div>
+                    <div class="r"><b>Subject</b><span>Duplicate signing charges for release v3.71.2</span></div>
+                    <div class="r"><b>Attach</b><span class="mono">2 invoices, 1 CI log excerpt</span></div>
+                  </div>
+                  <div class="db">Hello,
+
+We were billed twice for code signing on the same release tag, v3.71.2, on invoices mi-c896-1l1sjri and mi-c896-1l4kfpz. Our build logs record a single signing invocation for that tag.
+
+Could you confirm whether the second charge was issued in error, and credit it if so?
+
+Thank you,
+Taariq</div>
+                </div>
+                <div class="st">Also proposed</div>
+                <div class="diff">
+                  <div class="dfh">.github/workflows/release.yml · +3 −1</div>
+                  <div class="dl d"><span class="s">−</span><span>  key: sign-${{ github.sha }}</span></div>
+                  <div class="dl a"><span class="s">+</span><span>  key: sign-${{ hashFiles('**/signing.lock') }}</span></div>
+                  <div class="dl a"><span class="s">+</span><span>  restore-keys: |</span></div>
+                  <div class="dl a"><span class="s">+</span><span>    sign-</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="composer">
+              <div class="inp">Comment on this draft, or ask the agent to revise…</div>
+              <div class="ctrl">
+                <button class="pillbtn">🤖 Gemini <s>▾</s></button>
+                <button class="pillbtn">◈ Skills <s>36</s></button>
+                <span style="font-size:10.5px;color:var(--muted-foreground);margin-left:6px">Approving sends one email and opens one branch.</span>
+                <button class="send">Send</button>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <footer class="statusbar">
+        <div>● 1 agent running · 3 in run</div>
+        <div>Mission Control · usage-grounded</div>
+      </footer>
+    </div>
+
+    <script>
+      const S = new Set(["launch", "overview", "findings", "artifact"]);
+      if (new URLSearchParams(location.search).get("frame") === "1") {
+        document.documentElement.classList.add("framed");
+      }
+      function go(n, push = true) {
+        if (!S.has(n)) return;
+        document.querySelectorAll("[data-screen]").forEach((s) => s.classList.toggle("active", s.dataset.screen === n));
+        if (push) { const u = new URL(location.href); u.searchParams.set("screen", n); history.replaceState({}, "", u); }
+      }
+      document.querySelectorAll("[data-go]").forEach((e) => e.addEventListener("click", () => go(e.dataset.go)));
+      document.getElementById("theme").addEventListener("click", () => document.documentElement.classList.toggle("light"));
+      document.getElementById("approve").addEventListener("click", (e) => { e.currentTarget.textContent = "Sent ✓"; e.currentTarget.disabled = true; });
+      go(S.has(new URLSearchParams(location.search).get("screen")) ? new URLSearchParams(location.search).get("screen") : "overview", false);
+    </script>
+  </body>
+</html>
