@@ -7,14 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   composeApprovalNotification,
   createAssistantMessageCoalescer,
-  createFileReadSummarizer,
   createTurnCorrelator,
   translateNeutralEvent,
 } from "../../bin/happy-bridge/translate.mjs";
-// @ts-expect-error — the bridge seam is plain ESM and has no generated declarations.
-import { translateProviderEvent } from "../../bin/happy-bridge/provider-source.mjs";
-// @ts-expect-error — the browser-local runtime is plain ESM without declarations.
-import { _emitAcpToolCallUpdate } from "../../bin/browser-local/acp-runtime.mjs";
 
 const payload = {
   text: "assistant text",
@@ -43,8 +38,6 @@ describe("neutral-to-Happy session translation", () => {
   it.each([
     ["assistant-delta", "session"],
     ["user-message", "session"],
-    ["tool-start", "agent"],
-    ["tool-end", "agent"],
     ["file-diff", "agent"],
     ["diff-proposal", "agent"],
     ["diff-proposal-resolved", "session"],
@@ -62,6 +55,46 @@ describe("neutral-to-Happy session translation", () => {
 
   it("drops an unknown neutral event", () => {
     expect(translateNeutralEvent({ kind: "unknown", sessionId: "session-1", payload })).toEqual([]);
+  });
+
+  it.each(["tool-start", "tool-end"])(
+    "does not forward routine %s payloads to Happy",
+    (kind) => {
+      expect(
+        translateNeutralEvent({
+          kind,
+          sessionId: "session-1",
+          payload: {
+            toolCallId: "call-private",
+            name: "mcpToolCall",
+            parameters: { value: "do-not-forward" },
+            result: "do-not-forward",
+          },
+        }),
+      ).toEqual([]);
+    },
+  );
+
+  it("keeps permission requests actionable while routine tool events are hidden", () => {
+    const [message] = translateNeutralEvent({
+      kind: "permission-request",
+      sessionId: "session-1",
+      payload: {
+        requestId: "request-1",
+        toolName: "mcpToolCall",
+        description: "Approval required",
+        options: [{ optionId: "allow-once" }, { optionId: "deny" }],
+      },
+    });
+
+    expect(message).toMatchObject({
+      transport: "agent",
+      body: {
+        type: "permission-request",
+        permissionId: "request-1",
+        toolName: "mcpToolCall",
+      },
+    });
   });
 
   it("does not republish a Happy-originated user message back to Happy", () => {
@@ -114,151 +147,6 @@ describe("neutral-to-Happy session translation", () => {
     expect(assistant.envelope.id).toBe("message-remote-1");
     expect(assistant.envelope.ev.text).toBe("TURN3157FIXED");
     expect(turnEnd.envelope.turn).toBe("turn-remote-1");
-  });
-
-  it("bounds tool output for mobile while retaining more error context", () => {
-    const success = translateNeutralEvent({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "call-success", result: "x".repeat(6_000) },
-    })[0].body;
-    const error = translateNeutralEvent({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "call-error", error: "e".repeat(3_000) },
-    })[0].body;
-
-    expect(success).toMatchObject({ callId: "call-success", id: "call-success" });
-    expect(success.output).toHaveLength(1_200);
-    expect(success.output).toContain("[truncated for Happy Mobile]");
-    expect(error).toMatchObject({
-      callId: "call-error",
-      id: "call-error",
-      isError: true,
-      output: "e".repeat(3_000),
-    });
-  });
-
-  it("summarizes a completed file read body while keeping the read visible", () => {
-    const summarizer = createFileReadSummarizer();
-    const body = "line one\nline two\nline three";
-
-    // The read announces itself on tool-start (claude-code emits kind "fileRead").
-    const startEvent = summarizer.annotate({
-      kind: "tool-start",
-      sessionId: "session-1",
-      payload: {
-        toolCallId: "read-1",
-        kind: "fileRead",
-        title: "Read: /workspace/project/app.ts",
-        parameters: { file_path: "/workspace/project/app.ts" },
-      },
-    });
-    const [startMessage] = translateNeutralEvent(startEvent);
-    expect(startMessage.body).toMatchObject({ type: "tool-call", callId: "read-1" });
-
-    // tool-end carries only the body; it is replaced with a line-count summary.
-    const endEvent = summarizer.annotate({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "read-1", result: body },
-    });
-    const [endMessage] = translateNeutralEvent(endEvent);
-    expect(endMessage.body.output).toBe("[3 lines hidden on Happy Mobile]");
-    expect(endMessage.body.output).not.toContain("line two");
-  });
-
-  it("summarizes an ACP `read` result emitted by the real runtime pipeline", () => {
-    // The ACP wire carries the tool category on `kind` and has no `name`
-    // field, so a hand-built payload can pass while the runtime emits
-    // something else (#3454). Drive the fixture through the runtime's own
-    // emitter and the provider event mapping instead.
-    const summarizer = createFileReadSummarizer();
-    const session = { id: "session-1" };
-    const neutralEvents: Array<Record<string, unknown>> = [];
-    const emit = (method: string, params: Record<string, unknown>) => {
-      const event = translateProviderEvent(method, params);
-      if (event) neutralEvents.push(summarizer.annotate(event));
-    };
-
-    _emitAcpToolCallUpdate(emit, session, {
-      sessionUpdate: "tool_call",
-      toolCallId: "read-2",
-      title: "Read app.ts",
-      kind: "read",
-      status: "pending",
-    });
-    _emitAcpToolCallUpdate(emit, session, {
-      sessionUpdate: "tool_call_update",
-      toolCallId: "read-2",
-      status: "completed",
-      content: [{ type: "text", text: "only one line" }],
-    });
-
-    const toolStart = neutralEvents.find((event) => event.kind === "tool-start");
-    expect(toolStart).toMatchObject({ payload: { kind: "read" } });
-    const toolEnd = neutralEvents.find((event) => event.kind === "tool-end");
-    expect(toolEnd).toBeDefined();
-    expect(translateNeutralEvent(toolEnd)[0].body.output).toBe(
-      "[1 line hidden on Happy Mobile]",
-    );
-  });
-
-  it("leaves a failed read and a non-read result untouched", () => {
-    const summarizer = createFileReadSummarizer();
-    // A read that errored keeps its short, diagnostic failure text.
-    summarizer.annotate({
-      kind: "tool-start",
-      sessionId: "session-1",
-      payload: { toolCallId: "read-err", kind: "fileRead" },
-    });
-    const failed = summarizer.annotate({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "read-err", error: "ENOENT: no such file" },
-    });
-    expect(translateNeutralEvent(failed)[0].body).toMatchObject({
-      isError: true,
-      output: "ENOENT: no such file",
-    });
-
-    // A shell command's output is not a read and stays on the character-cap path.
-    summarizer.annotate({
-      kind: "tool-start",
-      sessionId: "session-1",
-      payload: { toolCallId: "run-1", kind: "shell" },
-    });
-    const command = summarizer.annotate({
-      kind: "tool-end",
-      sessionId: "session-1",
-      payload: { toolCallId: "run-1", result: "build succeeded" },
-    });
-    expect(translateNeutralEvent(command)[0].body.output).toBe("build succeeded");
-  });
-
-  it("bounds tool input without flattening its shape", () => {
-    // A `Write` call carries the whole file body in its parameters. Left
-    // unbounded it went to the relay and onto the phone in full, while the
-    // diff the same write produces was capped.
-    const [message] = translateNeutralEvent({
-      kind: "tool-start",
-      sessionId: "session-1",
-      payload: {
-        toolCallId: "call-write",
-        name: "Write",
-        parameters: {
-          file_path: "/workspace/project/file.ts",
-          content: "x".repeat(2_000_000),
-          replacements: [{ old: "y".repeat(5_000), count: 3 }],
-        },
-      },
-    });
-
-    expect(message.body.input.file_path).toBe("/workspace/project/file.ts");
-    expect(message.body.input.content).toHaveLength(2_000);
-    expect(message.body.input.content).toContain("[truncated for Happy Mobile]");
-    expect(message.body.input.replacements[0].old).toHaveLength(2_000);
-    expect(message.body.input.replacements[0].count).toBe(3);
   });
 
   it.each([

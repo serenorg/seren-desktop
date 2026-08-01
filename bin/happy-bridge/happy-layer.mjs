@@ -11,7 +11,6 @@ import nacl from "tweetnacl";
 import {
   composeApprovalNotification,
   createAssistantMessageCoalescer,
-  createFileReadSummarizer,
   createTurnCorrelator,
   translateNeutralEvent,
 } from "./translate.mjs";
@@ -701,7 +700,6 @@ export function createHappyLayer({
   const liveSessions = new Set();
   const turnCorrelator = createTurnCorrelator();
   const assistantMessageCoalescer = createAssistantMessageCoalescer();
-  const fileReadSummarizer = createFileReadSummarizer();
 
   const sessionSummaries = new Map();
   const sessionSummaryRevisions = new Map();
@@ -2110,8 +2108,7 @@ export function createHappyLayer({
     const provider = summary?.agentType === "claude-code" ? "claude" : summary?.agentType ?? "codex";
     const correlatedEvent = turnCorrelator.correlate(event);
     for (const publishableEvent of assistantMessageCoalescer.consume(correlatedEvent)) {
-      const summarizedEvent = fileReadSummarizer.annotate(publishableEvent);
-      for (const message of translateNeutralEvent(summarizedEvent, { provider })) {
+      for (const message of translateNeutralEvent(publishableEvent, { provider })) {
         if (message.transport === "session") entry.client.sendSessionProtocolMessage(message.envelope);
         if (message.transport === "agent") entry.client.sendAgentMessage(message.provider, message.body);
       }
@@ -2686,7 +2683,6 @@ export function createHappyLayer({
       await promptQueue.close();
       turnCorrelator.close();
       assistantMessageCoalescer.close();
-      fileReadSummarizer.close();
       cancelPairing();
       await pairingAuthorizationPromise;
       // A remote spawn may already own a persisted relay row while provider

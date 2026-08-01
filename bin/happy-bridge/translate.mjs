@@ -6,17 +6,8 @@ import { randomUUID } from "node:crypto";
 import { createEnvelope } from "@slopus/happy-wire";
 
 const AGENT_PROVIDER = "codex";
-const TOOL_OUTPUT_MAX_CHARS = 1_200;
-const TOOL_ERROR_MAX_CHARS = 6_000;
 const FILE_DIFF_MAX_CHARS = 2_000;
-const TOOL_INPUT_MAX_CHARS = 2_000;
 const MOBILE_TRUNCATION_MARKER = "\n… [truncated for Happy Mobile]";
-// A file read streams the whole file body to the phone. Provider runtimes label
-// that read differently: claude-code emits the semantic kind `fileRead`, while
-// ACP surfaces the ToolKind `read`. Either one identifies a read whose result
-// body should be summarized rather than forwarded. lmstudio labels calls by
-// transport (`local`/`mcp`), so its reads fall back to the character cap below.
-const FILE_READ_TOOL_KINDS = new Set(["fileRead", "read"]);
 
 function stringValue(value, fallback = "") {
   return typeof value === "string" ? value : fallback;
@@ -43,21 +34,6 @@ function boundedMobileText(value, maxChars) {
     prefix = prefix.slice(0, -1);
   }
   return `${prefix}${MOBILE_TRUNCATION_MARKER}`;
-}
-
-// Tool parameters carry whole file bodies — a `Write` call's content arrives
-// here in full. Every string is bounded in place so the argument shape the
-// phone renders survives, matching the limit already applied to the diff the
-// same write produces.
-function boundedToolInput(value) {
-  if (typeof value === "string") return boundedMobileText(value, TOOL_INPUT_MAX_CHARS);
-  if (Array.isArray(value)) return value.map(boundedToolInput);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, boundedToolInput(entry)]),
-    );
-  }
-  return value;
 }
 
 function summarizeFileContent(value) {
@@ -233,57 +209,6 @@ export function createAssistantMessageCoalescer({ createMessageId = randomUUID }
 }
 
 /**
- * A file `Read` streams its whole result to the phone, and an agent that reads
- * many files buries the conversation. `tool-end` carries only the call id and
- * body, while the read kind arrives on the earlier `tool-start`, so remember
- * which calls are reads and replace a completed read's body with a line-count
- * summary — the same elision `summarizeFileContent` already applies to diffs.
- * Errors are never elided; a truncated failure is worse than useless.
- *
- * @param {{maxPending?: number}} options
- */
-export function createFileReadSummarizer({ maxPending = 512 } = {}) {
-  const fileReadCallIds = new Set();
-
-  function annotate(event) {
-    if (!event || typeof event !== "object" || typeof event.kind !== "string") {
-      return event;
-    }
-    const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
-    const callId = stringValue(payload.toolCallId);
-    if (event.kind === "tool-start") {
-      if (callId && FILE_READ_TOOL_KINDS.has(stringValue(payload.kind))) {
-        // A read whose `tool-end` never arrives (e.g. a cancelled turn) would
-        // otherwise pin its call id forever; evict the oldest to bound growth.
-        if (fileReadCallIds.size >= maxPending) {
-          const oldest = fileReadCallIds.values().next().value;
-          if (oldest !== undefined) fileReadCallIds.delete(oldest);
-        }
-        fileReadCallIds.add(callId);
-      }
-      return event;
-    }
-    if (event.kind === "tool-end" && callId && fileReadCallIds.has(callId)) {
-      fileReadCallIds.delete(callId);
-      if (!payload.error && typeof payload.result === "string") {
-        return {
-          ...event,
-          payload: { ...payload, result: summarizeFileContent(payload.result) },
-        };
-      }
-    }
-    return event;
-  }
-
-  return {
-    annotate,
-    close() {
-      fileReadCallIds.clear();
-    },
-  };
-}
-
-/**
  * Convert exactly one neutral event. The returned list is deliberate: a
  * completion can carry both a turn boundary and usage metadata.
  *
@@ -315,24 +240,10 @@ export function translateNeutralEvent(event, { provider = AGENT_PROVIDER } = {})
       if (!text) return [];
       return [eventEnvelope("user", { t: "text", text }, payload, "user")];
     case "tool-start":
-      return [{ ...acp({
-        type: "tool-call",
-        callId: stringValue(payload.toolCallId, "unknown-call"),
-        name: stringValue(payload.name, stringValue(payload.kind, "tool")),
-        input: boundedToolInput(payload.parameters ?? {}),
-        id: stringValue(payload.toolCallId, "unknown-call"),
-      }), provider }];
     case "tool-end":
-      return [{ ...acp({
-        type: "tool-result",
-        callId: stringValue(payload.toolCallId, "unknown-call"),
-        output: boundedMobileText(
-          payload.error ?? payload.result ?? "",
-          payload.error ? TOOL_ERROR_MAX_CHARS : TOOL_OUTPUT_MAX_CHARS,
-        ),
-        id: stringValue(payload.toolCallId, "unknown-call"),
-        ...(payload.error ? { isError: true } : {}),
-      }), provider }];
+      // Happy has no working global visibility control for routine tool cards.
+      // Permission requests use their own message type below and stay actionable.
+      return [];
     case "file-diff":
       return [{ ...acp({
         type: "file-edit",
