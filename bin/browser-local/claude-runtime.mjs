@@ -23,6 +23,7 @@ import {
   DEFAULT_CLAUDE_EFFORT,
 } from "./effort.mjs";
 import { updatePeakInputTokens } from "./usage.mjs";
+import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
 import { binaryRunsOnHost } from "./agent-registry.mjs";
 import { chooseUpdatedModelId, inferCurrentModelId } from "./model-resolution.mjs";
 import {
@@ -243,10 +244,23 @@ function buildClaudeSpawnInvocation({
     };
   }
 
+  const shell = resolveSpawnShell(claudeBin);
+  if (shell) {
+    // cmd.exe joins the command line with spaces and no per-argument quoting,
+    // so an unquoted path containing a space — a Windows username in the temp
+    // directory is enough — splits one argument into two and the launch fails
+    // or silently drops its MCP config.
+    return {
+      command: composeWindowsShellCommand(claudeBin, claudeArgs),
+      args: [],
+      shell,
+    };
+  }
+
   return {
     command: claudeBin,
     args: claudeArgs,
-    shell: resolveSpawnShell(claudeBin),
+    shell: false,
   };
 }
 

@@ -399,13 +399,14 @@ async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
       );
     });
   } else {
-    // Fallback: try npm directly (works in dev where symlinks are intact,
-    // and on Windows where npm.cmd is a valid batch file).
+    // Fallback: try npm directly, for a dev checkout where symlinks are intact.
+    // Node refuses to exec a .cmd shim without a shell, so Windows needs one.
     const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
     await new Promise((resolvePromise, rejectPromise) => {
       execFile(
         npmCommand,
         ["install", "-g", packageName],
+        { shell: process.platform === "win32" },
         (error, stdout, stderr) => {
           if (error) {
             rejectPromise(new Error(stderr || error.message));
