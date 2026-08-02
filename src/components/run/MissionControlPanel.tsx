@@ -52,7 +52,17 @@ export const MissionControlPanel: Component = () => {
 
   return (
     <div class="relative flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.08),transparent_35%),#080d18] text-foreground">
-      <Show when={runStore.snapshot} fallback={<RunLaunchBox />}>
+      <Show
+        when={runStore.snapshot}
+        fallback={
+          <div
+            data-testid="mission-launch-scroll-region"
+            class="h-full min-h-0 overflow-y-scroll overscroll-contain [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-950/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/30 [&::-webkit-scrollbar-thumb:hover]:bg-cyan-200/45"
+          >
+            <RunLaunchBox />
+          </div>
+        }
+      >
         <div class="flex h-full min-h-0 flex-col">
           <header class="shrink-0 border-b border-border/70 px-5 pb-3 pt-5 lg:px-6">
             <div class="flex items-start justify-between gap-5">
