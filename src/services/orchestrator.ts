@@ -104,6 +104,12 @@ type WorkerEvent =
     }
   | { type: "error"; message: string }
   | {
+      type: "failure";
+      message: string;
+      retryable: boolean;
+      cost?: number;
+    }
+  | {
       type: "reroute";
       from_model: string;
       to_model: string;
@@ -540,6 +546,14 @@ function handleWorkerEvent(event: OrchestratorEvent): void {
       break;
     case "error":
       handleError(workerEvent.message, event.conversation_id);
+      break;
+    case "failure":
+      handleError(
+        workerEvent.message,
+        event.conversation_id,
+        "orchestrator",
+        workerEvent.cost,
+      );
       break;
     case "reroute":
       handleReroute(event.conversation_id, workerEvent);
@@ -1199,9 +1213,13 @@ function handleError(
   message: string,
   conversationId?: string,
   workerType: WorkerType = "orchestrator",
+  cost?: number,
 ): void {
   const stream = conversationId ? activeStreams.get(conversationId) : null;
   if (conversationId && stream) {
+    const existing = conversationStore
+      .getMessagesFor(conversationId)
+      .find((message) => message.id === stream.messageId);
     const errorMessage: UnifiedMessage = {
       id: stream.messageId,
       type: "assistant",
@@ -1211,13 +1229,11 @@ function handleError(
       status: "error",
       error: message,
       workerType,
+      cost: cost ?? existing?.cost,
     };
     conversationStore.setRLMProcessing(false, conversationId);
     conversationStore.finalizeStreaming(conversationId);
-    const hasMessage = conversationStore
-      .getMessagesFor(conversationId)
-      .some((existing) => existing.id === stream.messageId);
-    if (hasMessage) {
+    if (existing) {
       conversationStore.updateMessage(
         stream.messageId,
         errorMessage,
