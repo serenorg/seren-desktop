@@ -862,6 +862,28 @@ jobs:
           Add-Content -LiteralPath $summary -Value "- MAX_SIGNATURES: $env:MAX_SIGNATURES"
           Add-Content -LiteralPath $summary -Value "- Telemetry: ``$telemetry``"
           if (-not $telemetry -or -not (Test-Path -LiteralPath $telemetry)) {
+            # No telemetry is the expected, truthful outcome when signing was
+            # skipped: nothing signed, so nothing recorded. Absent telemetry
+            # while signing was expected is still an anomaly and still fails.
+            if ($env:WINDOWS_SIGNING_BLOCKED -eq "true") {
+              Add-Content -LiteralPath $summary -Value "- Status: signing skipped; no operations recorded"
+              # Downstream upload and release-notes steps consume this file and
+              # treat its absence as an error, so record the skip truthfully
+              # rather than leaving nothing behind.
+              $skippedState = [PSCustomObject]@{
+                schema_version = 1
+                status = "signing_skipped"
+                blocked = $true
+                max_signatures = [int]$env:MAX_SIGNATURES
+                projected_total = 0
+                actual_signed = 0
+                monthly = if (Test-Path -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE) { Get-Content -Raw -LiteralPath $env:WINDOWS_SIGNING_MONTHLY_STATE_FILE | ConvertFrom-Json } else { $null }
+                sources = @()
+              }
+              ($skippedState | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath "windows-signing-budget-state.json"
+              Write-Host "Windows signing budget summary: status=signing_skipped projected=0 signed=0 max=$env:MAX_SIGNATURES"
+              exit 0
+            }
             throw "No Windows signing telemetry found at: $telemetry"
           }
 
