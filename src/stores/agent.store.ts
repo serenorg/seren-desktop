@@ -99,7 +99,11 @@ import { openExternalLink } from "@/lib/external-link";
 import { runtimeHasCapability } from "@/lib/runtime";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import { estimateTokens } from "@/lib/token-counter";
-import { getEnabledMcpServers, settingsStore } from "@/stores/settings.store";
+import {
+  getEnabledMcpServers,
+  resolveAgentSandboxMode,
+  settingsStore,
+} from "@/stores/settings.store";
 import { skillsStore } from "@/stores/skills.store";
 // @ts-expect-error — shared provider-runtime ESM has no generated declaration.
 import { serenMcpToolName } from "../../bin/browser-local/seren-mcp-contract.mjs";
@@ -3472,7 +3476,9 @@ export const agentStore = {
         const info = await providerService.spawnAgent(
           resolvedAgentType,
           cwd,
-          settingsStore.settings.agentSandboxMode,
+          // Resolved at spawn so the agent starts on every platform, including
+          // one where the stored mode has no working containment backend.
+          resolveAgentSandboxMode(settingsStore.settings.agentSandboxMode),
           serenCredential,
           approvalPolicy,
           settingsStore.settings.agentSearchEnabled,

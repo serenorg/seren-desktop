@@ -3,6 +3,7 @@
 
 import { createStore } from "solid-js/store";
 import type { McpServerConfig, McpSettings } from "@/lib/mcp/types";
+import { isWindowsPlatform } from "@/lib/platform";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 const SETTINGS_STORE = "settings.json";
@@ -230,6 +231,32 @@ export interface ToolsetSettings {
 }
 
 /**
+ * The sandbox mode an agent can actually launch under on this platform.
+ *
+ * Windows has no working bounded backend — the restricted token cannot prevent
+ * reads outside the selected project, so every bounded mode is refused at the
+ * launch-spec boundary. Defaulting Windows to a bounded mode therefore does not
+ * produce a contained agent, it produces an agent that will not start. Full
+ * access is the only mode that runs there. macOS (Seatbelt) and Linux
+ * (Landlock) keep real containment as their default.
+ */
+export function defaultAgentSandboxMode(): Settings["agentSandboxMode"] {
+  return isWindowsPlatform() ? "full-access" : "workspace-write";
+}
+
+/**
+ * Resolves a stored preference to one this platform can launch. A Windows
+ * install carrying a bounded mode — the old default, or a choice made before
+ * this build — cannot start any agent, so it resolves to the mode that works.
+ */
+export function resolveAgentSandboxMode(
+  mode: Settings["agentSandboxMode"],
+): Settings["agentSandboxMode"] {
+  if (isWindowsPlatform() && mode !== "full-access") return "full-access";
+  return mode;
+}
+
+/**
  * Default settings values.
  */
 const DEFAULT_SETTINGS: Settings = {
@@ -286,7 +313,7 @@ const DEFAULT_SETTINGS: Settings = {
   historySyncDatabaseName: null,
   historySyncLastSyncedAt: null,
   // Agent
-  agentSandboxMode: "workspace-write",
+  agentSandboxMode: defaultAgentSandboxMode(),
   agentApprovalPolicy: "on-request",
   agentSearchEnabled: true,
   agentNetworkEnabled: true,
@@ -375,7 +402,11 @@ async function loadAppSettings(): Promise<void> {
 
     if (stored) {
       const parsed = JSON.parse(stored) as Partial<Settings>;
-      setSettingsState("app", { ...DEFAULT_SETTINGS, ...parsed });
+      const merged = { ...DEFAULT_SETTINGS, ...parsed };
+      merged.agentSandboxMode = resolveAgentSandboxMode(
+        merged.agentSandboxMode,
+      );
+      setSettingsState("app", merged);
     }
   } catch {
     // Use defaults if loading fails
