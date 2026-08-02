@@ -38,7 +38,7 @@ const staleRecord = {
   name: "Seren Desktop",
   organization_id: "00000000-0000-4000-8000-000000000010",
   revoked_at: null,
-  scopes: ["publisher:*"],
+  scopes: ["publisher:*", "managed-deployment:update"],
 };
 
 const replacementRecord = {
@@ -50,7 +50,12 @@ const replacementRecord = {
   key_type: "user" as const,
   name: "Seren Desktop",
   organization_id: "00000000-0000-4000-8000-000000000010",
-  scopes: ["publisher:*", "managed-deployment:update"],
+  scopes: [
+    "publisher:*",
+    "managed-deployment:update",
+    "managed-deployment:stop",
+    "managed-deployment:delete",
+  ],
 };
 
 describe("Desktop API access reconciliation (#3520)", () => {
@@ -75,11 +80,14 @@ describe("Desktop API access reconciliation (#3520)", () => {
     });
   });
 
-  it("detects a pre-#3490 key, replaces it, and returns a green scope state", async () => {
+  it("detects a pre-#3606 key, replaces it, and returns a green scope state", async () => {
     const stale = await getDesktopApiKeyStatus();
 
     expect(stale.state).toBe("outdated");
-    expect(stale.missingScopes).toEqual(["managed-deployment:update"]);
+    expect(stale.missingScopes).toEqual([
+      "managed-deployment:stop",
+      "managed-deployment:delete",
+    ]);
     expect(stale.unexpectedScopes).toEqual([]);
     expect(stale.maskedValue).toBe("seren_legacy_••••••••");
     expect(JSON.stringify(stale)).not.toContain("seren_legacy_secret");
@@ -94,7 +102,12 @@ describe("Desktop API access reconciliation (#3520)", () => {
         name: "Seren Desktop",
         key_type: undefined,
         agent_identity_id: undefined,
-        scopes: ["publisher:*", "managed-deployment:update"],
+        scopes: [
+          "publisher:*",
+          "managed-deployment:update",
+          "managed-deployment:stop",
+          "managed-deployment:delete",
+        ],
       },
       throwOnError: false,
     });
@@ -119,6 +132,8 @@ describe("Desktop API access reconciliation (#3520)", () => {
             scopes: [
               "publisher:*",
               "managed-deployment:update",
+              "managed-deployment:stop",
+              "managed-deployment:delete",
               "managed-deployment:*",
             ],
           },

@@ -15,6 +15,8 @@ export const DESKTOP_API_KEY_NAME = "Seren Desktop";
 export const DESKTOP_API_KEY_SCOPES = [
   "publisher:*",
   "managed-deployment:update",
+  "managed-deployment:stop",
+  "managed-deployment:delete",
 ] as const;
 
 export interface CreateApiKeyOptions {
