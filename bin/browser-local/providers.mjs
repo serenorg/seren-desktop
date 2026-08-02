@@ -8,7 +8,10 @@ import {
   createBrowserLocalAgentRegistry,
   resolveInstalledCodexBinary,
 } from "./agent-registry.mjs";
-import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
+import {
+  createOAuthSelectionEventEmitter,
+  createSerenMcpOAuthProxy,
+} from "./seren-mcp-oauth-proxy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import {
   buildProviderMcpConfig,
@@ -1840,6 +1843,10 @@ export function createProviderHandlers({
         serenMcpProxy = await createSerenMcpOAuthProxy({
           gatewayUrl: serenCredential.mcpUrl,
           apiUrl: serenCredential.apiBaseUrl,
+          onConnectionSelected: createOAuthSelectionEventEmitter(
+            emit,
+            sessionId,
+          ),
         });
       }
       serenMcpConfigured = buildProviderMcpConfig({

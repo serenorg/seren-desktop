@@ -39,6 +39,11 @@ describe("first-class Seren tools (#1422)", () => {
     expect(definitionsSource).toContain('`seren__${schema.name}`');
   });
 
+  it("advertises the confirmed account selector on call_publisher", () => {
+    expect(definitionsSource).toContain('schema.name === "call_publisher"');
+    expect(definitionsSource).toContain("properties.connection_id");
+  });
+
   it("executor.ts dispatches seren__ tools via callSerenTool", () => {
     expect(executorSource).toContain("callSerenTool");
     expect(executorSource).toContain('name.startsWith("seren__")');

@@ -11,7 +11,10 @@ import {
   SEREN_MCP_SERVER_NAME,
 } from "./mcp-config.mjs";
 import { providerLogPrefix } from "./logging.mjs";
-import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
+import {
+  createOAuthSelectionEventEmitter,
+  createSerenMcpOAuthProxy,
+} from "./seren-mcp-oauth-proxy.mjs";
 
 // ============================================================================
 // Process helpers
@@ -678,6 +681,10 @@ export function createAcpRuntime({
         serenMcpProxy = await createSerenMcpOAuthProxy({
           gatewayUrl: serenCredential.mcpUrl,
           apiUrl: serenCredential.apiBaseUrl,
+          onConnectionSelected: createOAuthSelectionEventEmitter(
+            emit,
+            sessionId,
+          ),
         });
       }
       mcpConfig = buildProviderMcpConfig({

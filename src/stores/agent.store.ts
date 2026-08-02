@@ -37,12 +37,14 @@ import {
   serializeAgentConversationMetadata,
   serializeAgentMessageMetadata,
 } from "@/lib/agent/message-metadata";
+import { buildOAuthAccountConfirmationInstruction } from "@/lib/agent/oauth-account-guidance";
 import {
   agentOAuthRoutingAvailability,
   agentOAuthRoutingDelivery,
   agentOAuthRoutingRefreshes,
   agentOAuthRoutingRevisions,
   agentOAuthRoutingSelectionThreads,
+  agentOAuthRoutingSnapshots,
   expectedTerminateSessionIds,
   happyArchiveFence,
   happyProviderArchiveTombstones,
@@ -474,11 +476,15 @@ import type {
   ToolCallEvent,
 } from "@/services/providers";
 import * as providerService from "@/services/providers";
-import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
+import {
+  computeAgentOAuthRouting,
+  resolveOAuthProviderForPublisher,
+} from "@/services/publisher-oauth";
 import { authStore, requestSignInModal } from "@/stores/auth.store";
 import {
   oauthConnectionsRevision,
   oauthSelectionsRevision,
+  setThreadOAuthConnectionId,
 } from "@/stores/oauth-account.store";
 import { privacyStore } from "@/stores/privacy.store";
 
@@ -1891,6 +1897,7 @@ async function refreshAgentOAuthRouting(
           providerSessionId,
           selectionThreadId,
         );
+        agentOAuthRoutingSnapshots.set(providerSessionId, routing);
         return true;
       } catch (error) {
         agentOAuthRoutingAvailability.set(providerSessionId, false);
@@ -4669,7 +4676,10 @@ export const agentStore = {
     const publisherInstruction = resolvePublisherLiveQueryInstruction(
       session.info.serenMcpConfigured === true,
     );
-    const currentSignature = `${publisherInstruction ?? ""}\n\n${skillsContent}`;
+    const oauthAccountInstruction = buildOAuthAccountConfirmationInstruction(
+      agentOAuthRoutingSnapshots.get(session.info.id),
+    );
+    const currentSignature = `${publisherInstruction ?? ""}\n\n${oauthAccountInstruction ?? ""}\n\n${skillsContent}`;
     const messageCount = session.messages.length;
     const messagesSincePrimed =
       messageCount - (session.primedAtMessageCount ?? 0);
@@ -4745,6 +4755,12 @@ export const agentStore = {
       if (publisherInstruction) {
         mergedContext = [
           { type: "text", text: publisherInstruction },
+          ...mergedContext,
+        ];
+      }
+      if (oauthAccountInstruction) {
+        mergedContext = [
+          { type: "text", text: oauthAccountInstruction },
           ...mergedContext,
         ];
       }
@@ -7662,6 +7678,33 @@ export const agentStore = {
             tool_calls: [],
           },
         });
+        break;
+      }
+
+      case "oauthAccountSelected": {
+        const selectedSession = state.sessions[sessionId];
+        const conversationId = selectedSession?.conversationId;
+        if (!selectedSession || !conversationId) break;
+
+        const publisherSlug = event.data.publisherSlug;
+        const connectionId = event.data.connectionId;
+        void resolveOAuthProviderForPublisher(publisherSlug)
+          .then((resolution) => {
+            const currentSession = state.sessions[sessionId];
+            if (currentSession?.conversationId !== conversationId) return;
+            setThreadOAuthConnectionId(
+              conversationId,
+              resolution.providerSlug,
+              connectionId,
+            );
+            return refreshAgentOAuthRouting(sessionId, conversationId);
+          })
+          .catch((error) => {
+            console.warn(
+              `[AgentStore] Failed to persist the selected ${publisherSlug} account for this thread:`,
+              error,
+            );
+          });
         break;
       }
 

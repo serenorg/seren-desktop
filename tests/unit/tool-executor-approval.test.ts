@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   callMcpTool: vi.fn(),
   callSerenTool: vi.fn(),
   computeAgentOAuthRouting: vi.fn(),
+  resolveOAuthProviderForPublisher: vi.fn(),
   emit: vi.fn(),
   listen: vi.fn(),
   invoke: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("@/lib/mcp/client", () => ({
 
 vi.mock("@/services/publisher-oauth", () => ({
   computeAgentOAuthRouting: mocks.computeAgentOAuthRouting,
+  resolveOAuthProviderForPublisher: mocks.resolveOAuthProviderForPublisher,
 }));
 
 // The allow-without-handle guard reports through the support pipeline; keep it
@@ -202,6 +204,11 @@ describe("tool executor authorization gate", () => {
       publishers: {},
       ambiguous: {},
       available: true,
+    });
+    mocks.resolveOAuthProviderForPublisher.mockResolvedValue({
+      publisherSlug: "gmail",
+      providerSlug: "google",
+      providerName: "Google",
     });
     mocks.callGatewayTool.mockResolvedValue({ result: "ok", is_error: false });
     mocks.callMcpTool.mockResolvedValue({
@@ -471,6 +478,7 @@ describe("tool executor authorization gate", () => {
           arguments: JSON.stringify({
             publisher: "gmail",
             tool: "post_send",
+            connection_id: "conn-confirmed",
             tool_args: { to: "a@example.com" },
           }),
         },
@@ -490,7 +498,7 @@ describe("tool executor authorization gate", () => {
     expect(mocks.callGatewayTool).toHaveBeenCalledWith(
       "gmail",
       "post_send",
-      { to: "a@example.com" },
+      { to: "a@example.com", connection_id: "conn-confirmed" },
       "handle-allow",
     );
     expect(mocks.callSerenTool).not.toHaveBeenCalled();

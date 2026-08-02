@@ -198,7 +198,69 @@ describe("native Codex Seren MCP OAuth routing", () => {
           connection_id: "conn-explicit",
         }),
       ),
-    ).toMatchObject({ kind: "publisher", connectionId: "conn-explicit" });
+    ).toMatchObject({
+      kind: "publisher",
+      connectionId: "conn-explicit",
+      selectionWasExplicit: true,
+    });
+
+    expect(
+      planSerenMcpRequest(
+        { publishers: { gmail: "conn-auto" }, ambiguous: {} },
+        callPublisher({
+          publisher: "gmail",
+          tool: "get_profile",
+          connection_id: "conn-auto",
+          _seren_auto_connection_id: true,
+        }),
+      ),
+    ).toMatchObject({
+      kind: "publisher",
+      connectionId: "conn-auto",
+      selectionWasExplicit: false,
+    });
+
+    expect(
+      planSerenMcpRequest(
+        { publishers: { gmail: "conn-auto" }, ambiguous: {} },
+        callPublisher({
+          publisher: "gmail",
+          tool: "post_send",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "error",
+      response: { result: { isError: true } },
+    });
+
+    expect(
+      planSerenMcpRequest(
+        { publishers: {}, ambiguous: {}, available: true },
+        callPublisher({
+          publisher: "gmail",
+          tool: "post_send",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "error",
+      response: { result: { isError: true } },
+    });
+
+    expect(
+      planSerenMcpRequest(
+        { publishers: { gmail: "conn-auto" }, ambiguous: {} },
+        callPublisher({
+          publisher: "gmail",
+          method: "POST",
+          path: "/drafts/draft-safe/send?mode=send",
+          connection_id: "conn-confirmed",
+        }),
+      ),
+    ).toMatchObject({
+      kind: "publisher",
+      connectionId: "conn-confirmed",
+      selectionWasExplicit: true,
+    });
 
     expect(
       planSerenMcpRequest(
@@ -229,6 +291,53 @@ describe("native Codex Seren MCP OAuth routing", () => {
       kind: "error",
       response: { result: { isError: true } },
     });
+  });
+
+  it("reports a successful explicit account choice for thread persistence", async () => {
+    const originalFetch = globalThis.fetch;
+    const upstreamFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ emailAddress: "selected@example.test" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    globalThis.fetch = upstreamFetch as typeof fetch;
+    const onConnectionSelected = vi.fn();
+    const proxy = await createSerenMcpOAuthProxy({
+      gatewayUrl: "https://mcp.invalid/mcp",
+      apiUrl: "https://api.invalid",
+      onConnectionSelected,
+    });
+    proxy.setRouting({
+      publishers: { gmail: "conn-default" },
+      ambiguous: {},
+    });
+
+    try {
+      await originalFetch(proxy.url, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer desktop-key",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(
+          callPublisher({
+            publisher: "gmail",
+            tool: "get_profile",
+            connection_id: "conn-selected",
+          }),
+        ),
+      });
+
+      expect(onConnectionSelected).toHaveBeenCalledOnce();
+      expect(onConnectionSelected).toHaveBeenCalledWith({
+        publisher: "gmail",
+        connectionId: "conn-selected",
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await proxy.close();
+    }
   });
 
   it("leaves unrelated and unselected MCP calls unchanged", () => {

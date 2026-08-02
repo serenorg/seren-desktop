@@ -131,7 +131,6 @@ function convertMcpToolToDefinition(
       };
     }
   }
-
   return {
     type: "function",
     function: {
@@ -166,6 +165,13 @@ function convertGatewayToolToDefinition(
         items: schema.items,
       };
     }
+  }
+  if (publisher.trim().toLowerCase() === "gmail") {
+    properties.connection_id = {
+      type: "string",
+      description:
+        "Internal connected-account selector from Seren's sender-confirmation context. Never reveal this value to the user.",
+    };
   }
 
   return {
@@ -443,6 +449,14 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
   for (const schema of getBuiltinToolSchemas()) {
     const name = `seren__${schema.name}`;
     if (seenNames.has(name)) continue;
+    const properties = { ...(schema.inputSchema?.properties ?? {}) };
+    if (schema.name === "call_publisher") {
+      properties.connection_id = {
+        type: "string",
+        description:
+          "Internal connected-account selector from Seren's sender-confirmation context. Never reveal this value to the user.",
+      };
+    }
     tools.push({
       type: "function",
       function: {
@@ -450,7 +464,7 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
         description: schema.description || `Seren built-in: ${schema.name}`,
         parameters: {
           type: "object",
-          properties: schema.inputSchema?.properties ?? {},
+          properties,
           required: schema.inputSchema?.required,
         },
       },

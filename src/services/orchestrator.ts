@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { buildOAuthAccountConfirmationInstruction } from "@/lib/agent/oauth-account-guidance";
 import {
   extractEvidenceFromUnifiedMessages,
   validateFinalOutput,
@@ -43,6 +44,7 @@ import {
 } from "@/services/organization-policy";
 import { serenPrivateModelsAttested } from "@/services/private-models";
 import { assertPrivilegedConversationProvider } from "@/services/providers";
+import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
@@ -333,6 +335,15 @@ export async function orchestrate(
       );
       conversationStore.setLoading(false, conversationId);
       return;
+    }
+  }
+
+  if (authStore.isAuthenticated) {
+    const oauthAccountGuidance = buildOAuthAccountConfirmationInstruction(
+      await computeAgentOAuthRouting(conversationId),
+    );
+    if (oauthAccountGuidance) {
+      history = [{ role: "system", content: oauthAccountGuidance }, ...history];
     }
   }
 

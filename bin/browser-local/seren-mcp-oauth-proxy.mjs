@@ -47,6 +47,28 @@ function toolError(id, message) {
   };
 }
 
+const GMAIL_SEND_TOOLS = new Set([
+  "post_send",
+  "post_messages_send",
+  "post_drafts_by_draft_id_send",
+]);
+
+function isGmailSendRequest(publisher, tool, method, path) {
+  if (publisher.toLowerCase() !== "gmail") return false;
+  if (tool) return GMAIL_SEND_TOOLS.has(tool);
+  if (method.toUpperCase() !== "POST" || !path) return false;
+
+  const normalizedPath = path
+    .split("?", 1)[0]
+    .replace(/^\/+|\/+$/g, "")
+    .toLowerCase();
+  return (
+    normalizedPath === "send" ||
+    normalizedPath === "messages/send" ||
+    /^drafts\/[^/]+\/send$/.test(normalizedPath)
+  );
+}
+
 /**
  * Decide whether a Seren MCP request can pass through unchanged, must fail
  * closed, or should use the first-party publisher proxy with an OAuth selector.
@@ -101,16 +123,35 @@ export function planSerenMcpRequest(routing, payload) {
     };
   }
 
+  const selectionWasExplicit =
+    explicitConnectionId != null && args._seren_auto_connection_id !== true;
+
+  const tool = nonEmptyString(args.tool);
+  const method = nonEmptyString(args.method) ?? "POST";
+  const path = nonEmptyString(args.path);
+  if (
+    !selectionWasExplicit &&
+    isGmailSendRequest(publisher, tool, method, path)
+  ) {
+    return {
+      kind: "error",
+      response: toolError(
+        payload.id,
+        "Gmail send blocked: name the active sender account, ask the user to confirm or choose another account, and wait for a later user reply. After that confirmation, verify gmail/get_profile and retry the send with the confirmed account's top-level connection_id.",
+      ),
+    };
+  }
+
   const connectionId =
     explicitConnectionId ?? nonEmptyString(routing?.publishers?.[publisher]);
   if (!connectionId) return { kind: "passthrough" };
 
-  const tool = nonEmptyString(args.tool);
   if (tool) {
     return {
       kind: "publisher",
       id: payload.id,
       connectionId,
+      selectionWasExplicit,
       publisher,
       request: {
         kind: "tool",
@@ -129,13 +170,12 @@ export function planSerenMcpRequest(routing, payload) {
     };
   }
 
-  const method = nonEmptyString(args.method) ?? "POST";
-  const path = nonEmptyString(args.path);
   if (path) {
     return {
       kind: "publisher",
       id: payload.id,
       connectionId,
+      selectionWasExplicit,
       publisher,
       request: {
         kind: "api",
@@ -463,7 +503,21 @@ function assertRelayableUpstream(url) {
   );
 }
 
-export async function createSerenMcpOAuthProxy({ gatewayUrl, apiUrl } = {}) {
+export function createOAuthSelectionEventEmitter(emit, sessionId) {
+  return ({ publisher, connectionId }) => {
+    emit("provider://oauth-account-selected", {
+      sessionId,
+      publisherSlug: publisher,
+      connectionId,
+    });
+  };
+}
+
+export async function createSerenMcpOAuthProxy({
+  gatewayUrl,
+  apiUrl,
+  onConnectionSelected,
+} = {}) {
   if (!gatewayUrl || !apiUrl) {
     throw new Error(
       "Seren OAuth routing proxy requires brokered gateway and API upstreams",
@@ -513,6 +567,21 @@ export async function createSerenMcpOAuthProxy({ gatewayUrl, apiUrl } = {}) {
             api.toString(),
             controller.signal,
           );
+          if (
+            plan.selectionWasExplicit &&
+            routedResponse?.result?.isError !== true &&
+            typeof onConnectionSelected === "function"
+          ) {
+            try {
+              await onConnectionSelected({
+                publisher: plan.publisher,
+                connectionId: plan.connectionId,
+              });
+            } catch {
+              // The publisher call already succeeded. A renderer sync failure
+              // must not replace its real result with a proxy error.
+            }
+          }
           if (!response.destroyed) {
             sendLocalMcpResponse(response, routedResponse);
           }

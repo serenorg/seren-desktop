@@ -1,6 +1,7 @@
 // ABOUTME: Chat service supporting streaming completions with multi-provider routing.
 // ABOUTME: Routes requests through provider abstraction for Seren, Anthropic, OpenAI, Gemini.
 
+import { buildOAuthAccountConfirmationInstruction } from "@/lib/agent/oauth-account-guidance";
 import {
   extractEvidenceFromToolLoopMessages,
   type FinalOutputValidationReport,
@@ -37,6 +38,7 @@ import {
   processAssistantResponseMemory,
   recallMemoryContext,
 } from "@/services/memory";
+import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
 import { fileTreeState } from "@/stores/fileTree";
@@ -559,6 +561,16 @@ export async function* streamMessageWithTools(
   // operator has walled off.
   const memoryConversationId =
     memorySource?.conversationId ?? conversationStore.activeConversationId;
+
+  if (enableTools && authStore.isAuthenticated) {
+    const oauthAccountGuidance = buildOAuthAccountConfirmationInstruction(
+      await computeAgentOAuthRouting(memoryConversationId),
+    );
+    if (oauthAccountGuidance) {
+      systemContent += `\n\n${oauthAccountGuidance}`;
+    }
+  }
+
   if (
     settingsStore.get("memoryEnabled") &&
     authStore.isAuthenticated &&

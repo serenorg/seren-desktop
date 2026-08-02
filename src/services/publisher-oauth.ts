@@ -22,7 +22,10 @@ import {
 } from "@/services/oauth-callback";
 import type { AgentOAuthRouting } from "@/services/providers";
 import {
+  formatOAuthConnectionLabel,
+  getDefaultOAuthConnection,
   getOAuthConnectionsForProvider,
+  getThreadOAuthConnectionId,
   hasAmbiguousOAuthConnections,
   markOAuthConnectionsChanged,
   type OAuthConnection,
@@ -140,9 +143,11 @@ export async function computeAgentOAuthRouting(
       listPublisherOAuthProviderResolutions(),
       listConnectedPublishers(),
     ]);
+    const accounts: NonNullable<AgentOAuthRouting["accounts"]> = {};
     const routing: AgentOAuthRouting = {
       publishers: {},
       ambiguous: {},
+      accounts,
       available: true,
     };
     for (const resolution of resolutions) {
@@ -151,6 +156,39 @@ export async function computeAgentOAuthRouting(
         resolution.providerSlug,
       );
       if (validConnections.length === 0) continue;
+      const explicitConnectionId = getThreadOAuthConnectionId(
+        threadId,
+        resolution.providerSlug,
+      );
+      const explicitConnection = explicitConnectionId
+        ? (validConnections.find(
+            (connection) => connection.id === explicitConnectionId,
+          ) ?? null)
+        : null;
+      const defaultConnection = getDefaultOAuthConnection(validConnections);
+      const connection = resolveThreadOAuthConnection(
+        threadId,
+        resolution.providerSlug,
+        connections,
+      );
+      const selectionSource = explicitConnection
+        ? "thread"
+        : defaultConnection
+          ? "default"
+          : validConnections.length === 1
+            ? "sole"
+            : "ambiguous";
+      accounts[resolution.publisherSlug] = {
+        providerSlug: resolution.providerSlug,
+        providerName: resolution.providerName,
+        activeConnectionId: connection?.id ?? null,
+        selectionSource,
+        connections: validConnections.map((candidate) => ({
+          connectionId: candidate.id,
+          label: formatOAuthConnectionLabel(candidate),
+          isDefault: Boolean(candidate.is_default),
+        })),
+      };
       if (
         hasAmbiguousOAuthConnections(
           threadId,
@@ -159,14 +197,9 @@ export async function computeAgentOAuthRouting(
         )
       ) {
         routing.ambiguous[resolution.publisherSlug] =
-          `Multiple ${resolution.providerName} accounts are connected. Choose an active account for this chat in the header account switcher before running ${resolution.publisherSlug} tools.`;
+          `Multiple ${resolution.providerName} accounts are connected. Ask the user to choose an account in chat, or use the header account switcher, before running ${resolution.publisherSlug} tools.`;
         continue;
       }
-      const connection = resolveThreadOAuthConnection(
-        threadId,
-        resolution.providerSlug,
-        connections,
-      );
       if (connection)
         routing.publishers[resolution.publisherSlug] = connection.id;
     }

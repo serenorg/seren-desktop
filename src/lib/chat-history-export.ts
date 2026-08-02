@@ -7,6 +7,7 @@ export interface ChatHistoryExportMessage {
 }
 
 const ACTIVE_SKILLS_HEADER = "# Active Skills";
+const OAUTH_ACCOUNT_GUIDANCE_HEADER = "# Seren connected-account confirmation";
 const PUBLISHER_PRIMER_MARKERS = ["list_agent_publishers", "call_publisher"];
 const SKILL_MANIFEST_MARKERS = [
   "Skill runtime directory",
@@ -17,7 +18,10 @@ const SKILL_MANIFEST_MARKERS = [
 export function isGeneratedPromptPrimer(content: string): boolean {
   const trimmed = content.trimStart();
   const hasActiveSkillsHeader = trimmed.includes(ACTIVE_SKILLS_HEADER);
-  if (!hasActiveSkillsHeader) return false;
+  const hasOAuthAccountGuidance = trimmed.includes(
+    OAUTH_ACCOUNT_GUIDANCE_HEADER,
+  );
+  if (!hasActiveSkillsHeader && !hasOAuthAccountGuidance) return false;
 
   const hasPublisherPrimer = PUBLISHER_PRIMER_MARKERS.every((marker) =>
     trimmed.includes(marker),
@@ -26,7 +30,7 @@ export function isGeneratedPromptPrimer(content: string): boolean {
     trimmed.includes(marker),
   );
 
-  return hasPublisherPrimer || hasSkillManifest;
+  return hasPublisherPrimer || hasSkillManifest || hasOAuthAccountGuidance;
 }
 
 function exportableMessageContent(

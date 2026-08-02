@@ -15,7 +15,10 @@ import {
   SEREN_MCP_SERVER_NAME,
   SEREN_MCP_TOOL_PREFIX,
 } from "./mcp-config.mjs";
-import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
+import {
+  createOAuthSelectionEventEmitter,
+  createSerenMcpOAuthProxy,
+} from "./seren-mcp-oauth-proxy.mjs";
 import {
   buildEffortArgs,
   buildEffortConfigOption,
@@ -1301,7 +1304,14 @@ function applySerenMcpOAuthRouting(routing, toolName, toolInput) {
   if (denyMessage) return { input: toolInput, denyMessage };
   const connectionId = routing?.publishers?.[publisher];
   return connectionId
-    ? { input: { ...toolInput, connection_id: connectionId }, denyMessage: null }
+    ? {
+        input: {
+          ...toolInput,
+          connection_id: connectionId,
+          _seren_auto_connection_id: true,
+        },
+        denyMessage: null,
+      }
     : { input: toolInput, denyMessage: null };
 }
 // The remote HTTP gateway's connect + tools/list races in the background and is
@@ -2938,6 +2948,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         serenMcpProxy = await createSerenMcpOAuthProxy({
           gatewayUrl: serenCredential.mcpUrl,
           apiUrl: serenCredential.apiBaseUrl,
+          onConnectionSelected: createOAuthSelectionEventEmitter(
+            emit,
+            sessionId,
+          ),
         });
       }
       mcpConfig = buildProviderMcpConfig({
