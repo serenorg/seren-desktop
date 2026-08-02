@@ -15,6 +15,10 @@ const launchBoxSource = readFileSync(
   resolve("src/components/run/RunLaunchBox.tsx"),
   "utf8",
 );
+const missionControlSource = readFileSync(
+  resolve("src/components/run/MissionControlPanel.tsx"),
+  "utf8",
+);
 
 describe("RunLaunchBox", () => {
   beforeEach(() => {
@@ -33,6 +37,23 @@ describe("RunLaunchBox", () => {
     expect(launchBoxSource).toContain("run-agent-${agentType}");
     expect(launchBoxSource).toContain('data-testid="run-launch-start"');
     expect(launchBoxSource).toContain("await launchMission({");
+  });
+
+  it("keeps the launch form in a visible, stable scroll region", () => {
+    expect(missionControlSource).toContain(
+      'data-testid="mission-launch-scroll-region"',
+    );
+    expect(missionControlSource).toContain("overflow-y-scroll");
+    expect(missionControlSource).toContain("[scrollbar-gutter:stable]");
+    expect(missionControlSource).toContain("[&::-webkit-scrollbar-thumb]");
+    expect(missionControlSource).toContain(
+      'data-testid="mission-launch-scrollbar"',
+    );
+    expect(missionControlSource).toContain(
+      'data-testid="mission-launch-scrollbar-thumb"',
+    );
+    expect(missionControlSource).toContain("new ResizeObserver");
+    expect(missionControlSource).toContain("onScroll={updateLaunchScroll}");
   });
 
   it("sends objective, tasks, agents, and workspace root to the store", async () => {
