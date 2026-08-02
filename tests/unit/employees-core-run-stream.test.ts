@@ -76,7 +76,7 @@ function runtimeApi(frames: unknown[], terminal: EmployeeRunEventLike) {
 }
 
 describe("employees-core sequenced run stream", () => {
-  it("presents readiness acknowledgements as chat prose", () => {
+  it("presents employee runtime envelopes as chat prose", () => {
     const acknowledgement = JSON.stringify({
       skill: "Operations Assistant",
       status: "ready",
@@ -89,13 +89,35 @@ describe("employees-core sequenced run stream", () => {
     expect(employeeAssistantDisplayText(acknowledgement)).toBe(
       "I'm Operations Assistant. I'm ready to help.",
     );
+
+    const successfulAnswer = JSON.stringify({
+      skill: "Operations Assistant",
+      status: "success",
+      scheduled_at: null,
+      artifact_url: null,
+      verification: { status: "not_applicable" },
+      answer: "The requested answer.",
+    });
     expect(
       employeeTextFromConversationMessage({
         role: "assistant",
-        content: acknowledgement,
+        content: successfulAnswer,
         run_summary: { status: "completed" },
       }),
-    ).toBe("I'm Operations Assistant. I'm ready to help.");
+    ).toBe("The requested answer.");
+
+    expect(
+      employeeAssistantDisplayText(
+        JSON.stringify({
+          skill: "Operations Assistant",
+          status: "success",
+          scheduled_at: null,
+          artifact_url: null,
+          verification: { status: "not_applicable" },
+          employee: "I am the operations assistant.",
+        }),
+      ),
+    ).toBe("I am the operations assistant.");
   });
 
   it("preserves JSON that is not the readiness contract", () => {
@@ -751,13 +773,14 @@ describe("employees-core sequenced run stream", () => {
     expect(result.text).toBe("final");
   });
 
-  it("presents a terminal readiness envelope as chat prose", async () => {
+  it("presents a terminal response envelope as chat prose", async () => {
     const acknowledgement = JSON.stringify({
-      employee: "Operations Assistant",
-      status: "ready",
+      skill: "Operations Assistant",
+      status: "complete",
       scheduled_at: null,
       artifact_url: null,
       verification: { status: "not_applicable" },
+      answer: "The terminal answer.",
     });
     const { api } = runtimeApi(
       [control("end")],
@@ -769,9 +792,7 @@ describe("employees-core sequenced run stream", () => {
       "Who are you?",
     );
 
-    expect(result.text).toBe(
-      "I'm Operations Assistant. I'm ready to help.",
-    );
+    expect(result.text).toBe("The terminal answer.");
   });
 
   it("does not append divergent terminal snapshots as text chunks", async () => {
