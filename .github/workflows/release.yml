@@ -2145,6 +2145,28 @@ jobs:
               });
               const existingNames = new Set(existingAssets.data.map((asset) => asset.name));
 
+              // Default-deny. The publish job downloads every artifact any job
+              // produced, including internal diagnostics: the Windows e2e log
+              // bundle carries a real address and test-machine account paths,
+              // and the preflight installer carries a pre-stamp version. Only
+              // the artifacts a user installs or the updater reads belong on a
+              // public release, so a new diagnostic artifact is excluded until
+              // someone deliberately adds it here.
+              const releaseVersion = tagName.replace(/^v/, '');
+              const isPublishableAsset = (fileName) => {
+                if (fileName === 'latest.json') return true;
+                const named = /^SerenDesktop[._-].*\.(dmg|deb|AppImage|exe|msi)$/.test(fileName)
+                  || /^SerenDesktop[._-].*\.(tar\.gz|nsis\.zip)(\.sig)?$/.test(fileName);
+                if (!named) return false;
+                // The e2e preflight installer is built before the tag stamps the
+                // version, so it is named identically apart from carrying the
+                // stale conf version. Anything advertising a version other than
+                // this release's is not this release's artifact.
+                const stamped = fileName.match(/^SerenDesktop[._-](\d+\.\d+\.\d+)[._-]/);
+                if (stamped && stamped[1] !== releaseVersion) return false;
+                return true;
+              };
+
               const uploadAsset = async (filePath, fileName) => {
                 if (existingNames.has(fileName)) {
                   console.log(`Skipping ${fileName} on release ${releaseId} - already exists`);
@@ -2169,9 +2191,11 @@ jobs:
                   const stat = fs.statSync(filePath);
                   if (stat.isDirectory()) {
                     await walkDir(filePath);
-                  } else {
+                  } else if (isPublishableAsset(file)) {
                     console.log(`Uploading to release ${releaseId}: ${filePath}`);
                     await uploadAsset(filePath, file);
+                  } else {
+                    console.log(`Skipping non-published artifact: ${filePath}`);
                   }
                 }
               };
