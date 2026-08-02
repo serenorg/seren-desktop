@@ -30,6 +30,7 @@ function snapshot(): RunSnapshot {
       id: "run-1",
       objective: "Trace the billing mismatch",
       root_path: null,
+      max_attempts: 2,
       status: "running",
       cancel_requested: false,
       interrupted_at: null,
@@ -71,6 +72,7 @@ function snapshot(): RunSnapshot {
     ],
     dependencies: [],
     assignments: [],
+    leases: [],
     attempts: [],
     findings: [
       {

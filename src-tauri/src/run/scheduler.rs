@@ -24,6 +24,7 @@ enum SchedulerCommand {
     CreateRun {
         objective: String,
         root_path: Option<String>,
+        max_attempts: i64,
         reply: oneshot::Sender<Result<Run, String>>,
     },
     AddTask {
@@ -37,6 +38,8 @@ enum SchedulerCommand {
         run_id: String,
         agent_type: String,
         model_id: Option<String>,
+        secondary_model_id: Option<String>,
+        permission_mode: Option<String>,
         role_label: Option<String>,
         reply: oneshot::Sender<Result<AgentAssignment, String>>,
     },
@@ -201,6 +204,7 @@ impl RunEngineState {
         app: &AppHandle,
         objective: String,
         root_path: Option<String>,
+        max_attempts: i64,
     ) -> Result<Run, String> {
         let sender = self.sender(app).await?;
         let (reply, response) = oneshot::channel();
@@ -208,6 +212,7 @@ impl RunEngineState {
             .send(SchedulerCommand::CreateRun {
                 objective,
                 root_path,
+                max_attempts,
                 reply,
             })
             .await
@@ -248,6 +253,8 @@ impl RunEngineState {
         run_id: String,
         agent_type: String,
         model_id: Option<String>,
+        secondary_model_id: Option<String>,
+        permission_mode: Option<String>,
         role_label: Option<String>,
     ) -> Result<AgentAssignment, String> {
         let sender = self.sender(app).await?;
@@ -257,6 +264,8 @@ impl RunEngineState {
                 run_id,
                 agent_type,
                 model_id,
+                secondary_model_id,
+                permission_mode,
                 role_label,
                 reply,
             })
@@ -592,9 +601,10 @@ fn process_command(
         SchedulerCommand::CreateRun {
             objective,
             root_path,
+            max_attempts,
             reply,
         } => {
-            let _ = reply.send(create_run(app, conn, objective, root_path));
+            let _ = reply.send(create_run(app, conn, objective, root_path, max_attempts));
         }
         SchedulerCommand::AddTask {
             run_id,
@@ -609,6 +619,8 @@ fn process_command(
             run_id,
             agent_type,
             model_id,
+            secondary_model_id,
+            permission_mode,
             role_label,
             reply,
         } => {
@@ -618,6 +630,8 @@ fn process_command(
                 run_id,
                 agent_type,
                 model_id,
+                secondary_model_id,
+                permission_mode,
                 role_label,
             ));
         }
@@ -1459,15 +1473,26 @@ fn start_attempt(
     agent_assignment_id: Option<String>,
     agent_session_id: Option<String>,
 ) -> Result<String, String> {
-    let state: String = conn
+    let (state, max_attempts): (String, i64) = conn
         .query_row(
-            "SELECT state FROM run_tasks WHERE id = ?1 AND run_id = ?2",
+            "SELECT t.state, r.max_attempts
+             FROM run_tasks t
+             JOIN runs r ON r.id = t.run_id
+             WHERE t.id = ?1 AND t.run_id = ?2",
             params![task_id, run_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|error| error.to_string())?;
     if TaskState::parse(&state) != Some(TaskState::Ready) {
         return Err(format!("task must be ready before starting an attempt; current state is {state}"));
+    }
+    let attempt_number = store::max_attempt_number(conn, &task_id)
+        .map_err(|error| error.to_string())?
+        + 1;
+    if attempt_number > max_attempts {
+        return Err(format!(
+            "task attempt budget exhausted ({max_attempts} attempts)"
+        ));
     }
     let has_active_lease: bool = conn
         .query_row(
@@ -1495,9 +1520,7 @@ fn start_attempt(
         task_id: task_id.clone(),
         agent_assignment_id,
         agent_session_id,
-        attempt_number: store::max_attempt_number(conn, &task_id)
-            .map_err(|error| error.to_string())?
-            + 1,
+        attempt_number,
         outcome: None,
         started_at: now_ms(),
         ended_at: None,
@@ -1550,12 +1573,12 @@ fn finish_attempt(
     )?;
     // An attempt that did not complete leaves its task failed from whatever
     // stage it reached, so a task whose agent produced nothing usable cannot
-    // rest in review and hold its run open — unless another agent type has not
-    // been tried yet, in which case the task goes back to ready so the next
-    // dispatch reaches for one that has not already failed here.
+    // rest in review and hold its run open. While the user-selected attempt
+    // budget remains, return it to ready; dispatch prefers an untried agent
+    // before reusing the rotation.
     let task_settled = TaskState::parse(&task_state).is_some_and(TaskState::is_terminal);
     if outcome != "completed" && !task_settled {
-        let next_state = if untried_assignment_exists(conn, &run_id, &task_id)? {
+        let next_state = if attempt_budget_remaining(conn, &run_id, &task_id)? {
             TaskState::Ready
         } else {
             TaskState::Failed
@@ -1567,23 +1590,18 @@ fn finish_attempt(
     recompute_ready_and_status(app, conn, &run_id)
 }
 
-/// True when the run has an agent assignment this task has never been attempted
-/// with. An unhealthy agent type otherwise keeps the task, because dispatch
-/// round-robins without consulting what already failed for it.
-fn untried_assignment_exists(
+/// True while another task attempt is both budgeted and dispatchable.
+fn attempt_budget_remaining(
     conn: &Connection,
     run_id: &str,
     task_id: &str,
 ) -> Result<bool, String> {
     conn.query_row(
-        "SELECT EXISTS(
-             SELECT 1 FROM run_agent_assignments g
-             WHERE g.run_id = ?1
-               AND NOT EXISTS (
-                   SELECT 1 FROM run_attempts a
-                   WHERE a.task_id = ?2 AND a.agent_assignment_id = g.id
-               )
-         )",
+        "SELECT
+             (SELECT COUNT(*) FROM run_attempts WHERE task_id = ?2) < r.max_attempts
+             AND EXISTS(SELECT 1 FROM run_agent_assignments WHERE run_id = ?1)
+         FROM runs r
+         WHERE r.id = ?1",
         params![run_id, task_id],
         |row| row.get(0),
     )
@@ -1829,15 +1847,20 @@ fn create_run(
     conn: &Connection,
     objective: String,
     root_path: Option<String>,
+    max_attempts: i64,
 ) -> Result<Run, String> {
     if objective.trim().is_empty() {
         return Err("objective must not be empty".to_string());
+    }
+    if !(1..=3).contains(&max_attempts) {
+        return Err("max_attempts must be between 1 and 3".to_string());
     }
     let timestamp = now_ms();
     let run = Run {
         id: Uuid::new_v4().to_string(),
         objective,
         root_path,
+        max_attempts,
         status: RunStatus::Running,
         cancel_requested: false,
         interrupted_at: None,
@@ -1923,6 +1946,8 @@ fn add_assignment(
     run_id: String,
     agent_type: String,
     model_id: Option<String>,
+    secondary_model_id: Option<String>,
+    permission_mode: Option<String>,
     role_label: Option<String>,
 ) -> Result<AgentAssignment, String> {
     if agent_type.trim().is_empty() {
@@ -1933,6 +1958,8 @@ fn add_assignment(
         run_id: run_id.clone(),
         agent_type,
         model_id,
+        secondary_model_id,
+        permission_mode,
         role_label,
         created_at: now_ms(),
     };
@@ -1950,6 +1977,8 @@ fn add_assignment(
             payload: json!({
                 "agent_type": assignment.agent_type,
                 "model_id": assignment.model_id,
+                "secondary_model_id": assignment.secondary_model_id,
+                "permission_mode": assignment.permission_mode,
                 "role_label": assignment.role_label,
             }),
             provider_event_id: None,
@@ -2223,6 +2252,7 @@ mod tests {
                 id: "run-reconcile".to_string(),
                 objective: "recover after restart".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Running,
                 cancel_requested: false,
                 interrupted_at: None,
@@ -2258,6 +2288,7 @@ mod tests {
                 id: "run-relaunch".to_string(),
                 objective: "relaunch after restart".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Interrupted,
                 cancel_requested: false,
                 interrupted_at: Some(10),
@@ -2321,6 +2352,7 @@ mod tests {
                 id: "run-deps".to_string(),
                 objective: "respect dependencies on relaunch".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Interrupted,
                 cancel_requested: false,
                 interrupted_at: Some(5),
@@ -2379,7 +2411,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_is_only_out_of_agents_once_every_assignment_was_attempted() {
+    fn a_task_retries_only_while_its_attempt_budget_remains() {
         use crate::run::types::{AgentAssignment, Attempt};
         let conn = connection();
         seed_run(&conn, "run-reroute");
@@ -2406,6 +2438,8 @@ mod tests {
                     run_id: "run-reroute".to_string(),
                     agent_type: "codex".to_string(),
                     model_id: None,
+                    secondary_model_id: None,
+                    permission_mode: None,
                     role_label: None,
                     created_at: 1,
                 },
@@ -2413,8 +2447,8 @@ mod tests {
             .unwrap();
         }
 
-        // Nothing attempted yet: both agents are still available.
-        assert!(untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
+        // Nothing attempted yet: the default two-attempt budget is available.
+        assert!(attempt_budget_remaining(&conn, "run-reroute", "task-reroute").unwrap());
 
         store::insert_attempt(
             &conn,
@@ -2430,8 +2464,7 @@ mod tests {
             },
         )
         .unwrap();
-        // One agent burned, one still untried — the task must be retried, not failed.
-        assert!(untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
+        assert!(attempt_budget_remaining(&conn, "run-reroute", "task-reroute").unwrap());
 
         store::insert_attempt(
             &conn,
@@ -2447,8 +2480,8 @@ mod tests {
             },
         )
         .unwrap();
-        // Every agent has now had the task; it has nowhere left to go.
-        assert!(!untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
+        // The configured cap is durable even though another assignment exists.
+        assert!(!attempt_budget_remaining(&conn, "run-reroute", "task-reroute").unwrap());
     }
 
     fn seed_run(conn: &Connection, run_id: &str) {
@@ -2458,6 +2491,7 @@ mod tests {
                 id: run_id.to_string(),
                 objective: "settle status".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Running,
                 cancel_requested: false,
                 interrupted_at: None,
@@ -2559,6 +2593,7 @@ mod tests {
                 id: "run-unapproved".to_string(),
                 objective: "completion gating".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Running,
                 cancel_requested: false,
                 interrupted_at: None,

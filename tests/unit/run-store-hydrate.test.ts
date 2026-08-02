@@ -9,16 +9,25 @@ vi.mock("@/services/run", async () => {
   );
   return {
     ...actual,
+    runAddAgent: vi.fn(),
+    runAddTask: vi.fn(),
+    runCreate: vi.fn(),
     runGetState: vi.fn(),
     runList: vi.fn(),
+    runProvisionWorkspace: vi.fn(),
   };
 });
 
 import {
+  runAddAgent,
+  runAddTask,
+  runCreate,
   runGetState,
   runList,
+  runProvisionWorkspace,
   type Run,
   type RunSnapshot,
+  type Task,
 } from "@/services/run";
 import {
   runState,
@@ -28,6 +37,10 @@ import {
 
 const getStateMock = vi.mocked(runGetState);
 const listMock = vi.mocked(runList);
+const createMock = vi.mocked(runCreate);
+const addAgentMock = vi.mocked(runAddAgent);
+const addTaskMock = vi.mocked(runAddTask);
+const provisionWorkspaceMock = vi.mocked(runProvisionWorkspace);
 
 function run(
   id: string,
@@ -38,6 +51,7 @@ function run(
     id,
     objective: `Objective ${id}`,
     root_path: null,
+    max_attempts: 2,
     status,
     cancel_requested: false,
     interrupted_at: status === "interrupted" ? createdAt + 1 : null,
@@ -53,6 +67,7 @@ function snapshot(runRecord: Run): RunSnapshot {
     tasks: [],
     dependencies: [],
     assignments: [],
+    leases: [],
     attempts: [],
     findings: [],
     checks: [],
@@ -72,6 +87,10 @@ describe("run store startup hydration", () => {
     });
     getStateMock.mockReset();
     listMock.mockReset();
+    createMock.mockReset();
+    addAgentMock.mockReset();
+    addTaskMock.mockReset();
+    provisionWorkspaceMock.mockReset();
   });
 
   it("hydrates the newest non-terminal run", async () => {
@@ -128,5 +147,55 @@ describe("run store startup hydration", () => {
 
     expect(runState.error).toBe("run list unavailable");
     expect(runState.snapshot).toBeNull();
+  });
+
+  it("persists launch policies and provisions the selected task isolation", async () => {
+    const createdRun = run("run-policy", "running", 10);
+    const createdTask: Task = {
+      id: "task-policy",
+      run_id: createdRun.id,
+      title: "Inspect invoices",
+      brief: "Compare totals.",
+      state: "ready",
+      blocked_reason: null,
+      created_at: 11,
+      updated_at: 11,
+    };
+    createMock.mockResolvedValue(createdRun);
+    addAgentMock.mockResolvedValue({} as never);
+    addTaskMock.mockResolvedValue(createdTask);
+    provisionWorkspaceMock.mockResolvedValue({} as never);
+    getStateMock.mockResolvedValue(snapshot(createdRun));
+
+    await runStore.launch({
+      objective: " Reconcile billing ",
+      rootPath: "/project",
+      tasks: [{ title: createdTask.title, brief: createdTask.brief }],
+      agents: [
+        {
+          agentType: "codex",
+          modelId: "gpt-5.4",
+          secondaryModelId: null,
+          permissionMode: "ask",
+        },
+      ],
+      workspaceMode: "worktree",
+      maxAttempts: 3,
+    });
+
+    expect(createMock).toHaveBeenCalledWith("Reconcile billing", "/project", 3);
+    expect(addAgentMock).toHaveBeenCalledWith(
+      createdRun.id,
+      "codex",
+      "gpt-5.4",
+      null,
+      "ask",
+    );
+    expect(provisionWorkspaceMock).toHaveBeenCalledWith(
+      createdRun.id,
+      createdTask.id,
+      "worktree",
+      "/project",
+    );
   });
 });

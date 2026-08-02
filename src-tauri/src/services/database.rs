@@ -1236,6 +1236,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             id TEXT PRIMARY KEY,
             objective TEXT NOT NULL,
             root_path TEXT,
+            max_attempts INTEGER NOT NULL DEFAULT 2,
             status TEXT NOT NULL DEFAULT 'running',
             cancel_requested INTEGER NOT NULL DEFAULT 0,
             interrupted_at INTEGER,
@@ -1246,6 +1247,12 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
     add_column_if_missing(conn, "runs", "interrupted_at", "INTEGER")?;
+    add_column_if_missing(
+        conn,
+        "runs",
+        "max_attempts",
+        "INTEGER NOT NULL DEFAULT 2",
+    )?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS run_tasks (
             id TEXT PRIMARY KEY,
@@ -1276,12 +1283,16 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             run_id TEXT NOT NULL,
             agent_type TEXT NOT NULL,
             model_id TEXT,
+            secondary_model_id TEXT,
+            permission_mode TEXT,
             role_label TEXT,
             created_at INTEGER NOT NULL,
             FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
         )",
         [],
     )?;
+    add_column_if_missing(conn, "run_agent_assignments", "permission_mode", "TEXT")?;
+    add_column_if_missing(conn, "run_agent_assignments", "secondary_model_id", "TEXT")?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS run_attempts (
             id TEXT PRIMARY KEY,

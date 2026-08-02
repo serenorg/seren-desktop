@@ -64,13 +64,14 @@ fn deserialize_json<T: DeserializeOwned>(value: String) -> Result<T> {
 pub fn create_run(conn: &Connection, run: &Run) -> Result<()> {
     conn.execute(
         "INSERT INTO runs
-            (id, objective, root_path, status, cancel_requested, interrupted_at,
+            (id, objective, root_path, max_attempts, status, cancel_requested, interrupted_at,
              created_at, updated_at, completed_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             run.id,
             run.objective,
             run.root_path,
+            run.max_attempts,
             run.status.as_str(),
             i64::from(run.cancel_requested),
             run.interrupted_at,
@@ -122,13 +123,15 @@ pub fn add_dependency(conn: &Connection, dependency: &TaskDependency) -> Result<
 pub fn add_assignment(conn: &Connection, assignment: &AgentAssignment) -> Result<()> {
     conn.execute(
         "INSERT INTO run_agent_assignments
-            (id, run_id, agent_type, model_id, role_label, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (id, run_id, agent_type, model_id, secondary_model_id, permission_mode, role_label, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             assignment.id,
             assignment.run_id,
             assignment.agent_type,
             assignment.model_id,
+            assignment.secondary_model_id,
+            assignment.permission_mode,
             assignment.role_label,
             assignment.created_at,
         ],
@@ -568,7 +571,7 @@ pub fn ready_task_ids(conn: &Connection, run_id: &str) -> Result<Vec<String>> {
 
 pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
     let mut statement = conn.prepare(
-        "SELECT id, objective, root_path, status, cancel_requested, interrupted_at,
+        "SELECT id, objective, root_path, max_attempts, status, cancel_requested, interrupted_at,
                 created_at, updated_at, completed_at
          FROM runs
          ORDER BY created_at ASC, id ASC",
@@ -579,12 +582,13 @@ pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
                 id: row.get(0)?,
                 objective: row.get(1)?,
                 root_path: row.get(2)?,
-                status: parse_run_status(row.get(3)?)?,
-                cancel_requested: row.get::<_, i64>(4)? != 0,
-                interrupted_at: row.get(5)?,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
-                completed_at: row.get(8)?,
+                max_attempts: row.get(3)?,
+                status: parse_run_status(row.get(4)?)?,
+                cancel_requested: row.get::<_, i64>(5)? != 0,
+                interrupted_at: row.get(6)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+                completed_at: row.get(9)?,
             })
         })?
         .collect()
@@ -593,7 +597,7 @@ pub fn list_runs(conn: &Connection) -> Result<Vec<Run>> {
 pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSnapshot>> {
     let run = conn
         .query_row(
-            "SELECT id, objective, root_path, status, cancel_requested, interrupted_at,
+            "SELECT id, objective, root_path, max_attempts, status, cancel_requested, interrupted_at,
                     created_at, updated_at, completed_at
              FROM runs WHERE id = ?1",
             params![run_id],
@@ -602,12 +606,13 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
                     id: row.get(0)?,
                     objective: row.get(1)?,
                     root_path: row.get(2)?,
-                    status: parse_run_status(row.get(3)?)?,
-                    cancel_requested: row.get::<_, i64>(4)? != 0,
-                    interrupted_at: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                    completed_at: row.get(8)?,
+                    max_attempts: row.get(3)?,
+                    status: parse_run_status(row.get(4)?)?,
+                    cancel_requested: row.get::<_, i64>(5)? != 0,
+                    interrupted_at: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                    completed_at: row.get(9)?,
                 })
             },
         )
@@ -652,7 +657,7 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         .collect::<Result<Vec<_>>>()?;
 
     let mut assignment_statement = conn.prepare(
-        "SELECT id, run_id, agent_type, model_id, role_label, created_at
+        "SELECT id, run_id, agent_type, model_id, secondary_model_id, permission_mode, role_label, created_at
          FROM run_agent_assignments WHERE run_id = ?1 ORDER BY created_at ASC, id ASC",
     )?;
     let assignments = assignment_statement
@@ -662,8 +667,10 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
                 run_id: row.get(1)?,
                 agent_type: row.get(2)?,
                 model_id: row.get(3)?,
-                role_label: row.get(4)?,
-                created_at: row.get(5)?,
+                secondary_model_id: row.get(4)?,
+                permission_mode: row.get(5)?,
+                role_label: row.get(6)?,
+                created_at: row.get(7)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -719,6 +726,7 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         .collect::<Result<Vec<_>>>()?;
 
     let checks = list_checks(conn, run_id)?;
+    let leases = list_leases(conn, run_id)?;
     let check_results = list_check_results(conn, run_id)?;
     let coverage_gaps = list_coverage_gaps(conn, run_id)?;
 
@@ -727,6 +735,7 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         tasks,
         dependencies,
         assignments,
+        leases,
         attempts,
         findings,
         checks,
@@ -834,6 +843,7 @@ mod tests {
             id: id.to_string(),
             objective: "Test objective".to_string(),
             root_path: Some("/tmp/run-engine".to_string()),
+            max_attempts: 2,
             status: RunStatus::Running,
             cancel_requested: false,
             interrupted_at: None,
@@ -887,12 +897,22 @@ mod tests {
                 id: "assignment-1".to_string(),
                 run_id: "run-1".to_string(),
                 agent_type: "test-agent".to_string(),
-                model_id: None,
+                model_id: Some("model-pinned".to_string()),
+                secondary_model_id: Some("model-secondary".to_string()),
+                permission_mode: Some("ask".to_string()),
                 role_label: Some("worker".to_string()),
                 created_at: 1,
             },
         )
         .unwrap();
+        let snapshot = load_run_snapshot(&conn, "run-1").unwrap().unwrap();
+        assert_eq!(snapshot.run.max_attempts, 2);
+        assert_eq!(snapshot.assignments[0].model_id.as_deref(), Some("model-pinned"));
+        assert_eq!(
+            snapshot.assignments[0].secondary_model_id.as_deref(),
+            Some("model-secondary")
+        );
+        assert_eq!(snapshot.assignments[0].permission_mode.as_deref(), Some("ask"));
         insert_attempt(
             &conn,
             &Attempt {

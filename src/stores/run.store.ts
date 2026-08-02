@@ -13,6 +13,7 @@ import {
   runCreate,
   runGetState,
   runList,
+  runProvisionWorkspace,
   runRelaunch,
   runUpdateFindingStatus,
   type Task,
@@ -38,11 +39,22 @@ export interface LaunchTaskInput {
   brief: string;
 }
 
+export interface LaunchAgentInput {
+  agentType: string;
+  modelId?: string | null;
+  secondaryModelId?: string | null;
+  permissionMode?: string | null;
+}
+
+export type LaunchWorkspaceMode = "current" | "worktree" | "scratch";
+
 export interface LaunchOptions {
   objective: string;
   rootPath?: string | null;
   tasks: LaunchTaskInput[];
-  agents: string[];
+  agents: LaunchAgentInput[];
+  workspaceMode: LaunchWorkspaceMode;
+  maxAttempts: number;
 }
 
 const INITIAL_STATE: RunStoreState = {
@@ -160,6 +172,7 @@ async function applyEvent(event: RunEvent): Promise<void> {
     event.event_type === "check_declared" ||
     event.event_type === "check_approved" ||
     event.event_type === "check_result_recorded" ||
+    event.event_type === "lease_state_changed" ||
     event.event_type === "run_created" ||
     event.event_type === "task_added" ||
     event.event_type === "assignment_added"
@@ -193,25 +206,66 @@ async function launch(options: LaunchOptions): Promise<void> {
     setState("error", "Tell Seren what to investigate first.");
     return;
   }
+  if (options.agents.length === 0) {
+    setState("error", "Choose at least one agent type.");
+    return;
+  }
+  if (
+    !Number.isInteger(options.maxAttempts) ||
+    options.maxAttempts < 1 ||
+    options.maxAttempts > 3
+  ) {
+    setState("error", "Attempts per task must be between 1 and 3.");
+    return;
+  }
+  if (options.workspaceMode === "worktree" && !options.rootPath) {
+    setState("error", "Choose a project before using worktree isolation.");
+    return;
+  }
   setState({ launchPending: true, error: null });
   try {
-    const run = await runCreate(trimmedObjective, options.rootPath ?? null);
-    for (const agentType of options.agents) {
-      await runAddAgent(run.id, agentType);
+    const run = await runCreate(
+      trimmedObjective,
+      options.rootPath ?? null,
+      options.maxAttempts,
+    );
+    for (const agent of options.agents) {
+      await runAddAgent(
+        run.id,
+        agent.agentType,
+        agent.modelId,
+        agent.secondaryModelId,
+        agent.permissionMode,
+      );
     }
-    let taskCount = 0;
+    const createdTasks: Task[] = [];
     for (const task of options.tasks) {
       const title = task.title.trim();
       if (!title) continue;
-      await runAddTask(run.id, title, task.brief.trim());
-      taskCount += 1;
+      createdTasks.push(await runAddTask(run.id, title, task.brief.trim()));
     }
     // Task slots live behind Advanced controls, so the primary flow is an
     // objective on its own. Without a task there is nothing to dispatch and the
     // run sits at "running" with empty lanes forever, so the objective itself
     // becomes the work.
-    if (taskCount === 0) {
-      await runAddTask(run.id, objectiveTaskTitle(trimmedObjective), trimmedObjective);
+    if (createdTasks.length === 0) {
+      createdTasks.push(
+        await runAddTask(
+          run.id,
+          objectiveTaskTitle(trimmedObjective),
+          trimmedObjective,
+        ),
+      );
+    }
+    if (options.workspaceMode !== "current") {
+      for (const task of createdTasks) {
+        await runProvisionWorkspace(
+          run.id,
+          task.id,
+          options.workspaceMode,
+          options.rootPath,
+        );
+      }
     }
     setState("activeRunId", run.id);
     await hydrate(run.id);

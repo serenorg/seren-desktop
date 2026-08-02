@@ -32,8 +32,11 @@ pub async fn run_create(
     state: State<'_, RunEngineState>,
     objective: String,
     root_path: Option<String>,
+    max_attempts: Option<i64>,
 ) -> Result<Run, String> {
-    state.create_run(&app, objective, root_path).await
+    state
+        .create_run(&app, objective, root_path, max_attempts.unwrap_or(2))
+        .await
 }
 
 #[tauri::command]
@@ -57,10 +60,20 @@ pub async fn run_add_agent(
     run_id: String,
     agent_type: String,
     model_id: Option<String>,
+    secondary_model_id: Option<String>,
+    permission_mode: Option<String>,
     role_label: Option<String>,
 ) -> Result<AgentAssignment, String> {
     state
-        .add_assignment(&app, run_id, agent_type, model_id, role_label)
+        .add_assignment(
+            &app,
+            run_id,
+            agent_type,
+            model_id,
+            secondary_model_id,
+            permission_mode,
+            role_label,
+        )
         .await
 }
 

@@ -67,6 +67,7 @@ export interface Run {
   id: string;
   objective: string;
   root_path: string | null;
+  max_attempts: number;
   status: RunStatus;
   cancel_requested: boolean;
   interrupted_at: number | null;
@@ -96,6 +97,8 @@ export interface AgentAssignment {
   run_id: string;
   agent_type: string;
   model_id: string | null;
+  secondary_model_id: string | null;
+  permission_mode: string | null;
   role_label: string | null;
   created_at: number;
 }
@@ -208,6 +211,7 @@ export interface RunSnapshot {
   tasks: Task[];
   dependencies: TaskDependency[];
   assignments: AgentAssignment[];
+  leases: WorkspaceLease[];
   attempts: Attempt[];
   findings: Finding[];
   checks: RunCheck[];
@@ -218,10 +222,12 @@ export interface RunSnapshot {
 export async function runCreate(
   objective: string,
   rootPath?: string | null,
+  maxAttempts = 2,
 ): Promise<Run> {
   return invoke("run_create", {
     objective,
     rootPath: rootPath ?? null,
+    maxAttempts,
   }) as Promise<Run>;
 }
 
@@ -243,14 +249,33 @@ export async function runAddAgent(
   runId: string,
   agentType: string,
   modelId?: string | null,
+  secondaryModelId?: string | null,
+  permissionMode?: string | null,
   roleLabel?: string | null,
 ): Promise<AgentAssignment> {
   return invoke("run_add_agent", {
     runId,
     agentType,
     modelId: modelId ?? null,
+    secondaryModelId: secondaryModelId ?? null,
+    permissionMode: permissionMode ?? null,
     roleLabel: roleLabel ?? null,
   }) as Promise<AgentAssignment>;
+}
+
+export async function runProvisionWorkspace(
+  runId: string,
+  taskId: string,
+  mode: Extract<LeaseMode, "worktree" | "scratch">,
+  sourcePath?: string | null,
+): Promise<WorkspaceLease> {
+  return invoke("run_provision_workspace", {
+    runId,
+    taskId,
+    mode,
+    sourcePath: sourcePath ?? null,
+    setupScript: null,
+  }) as Promise<WorkspaceLease>;
 }
 
 export async function runCancel(runId: string): Promise<Run> {
