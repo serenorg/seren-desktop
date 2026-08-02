@@ -1903,6 +1903,7 @@ export function createHappyLayer({
           }
         },
       });
+      revokeUnscopedRpc(client, UNSCOPED_SESSION_RPC);
     } catch (error) {
       if (!resumedBinding) await sessionApi.deactivateSession(session.id);
       throw error;
@@ -2164,6 +2165,38 @@ export function createHappyLayer({
     if (event.kind === "permission-request" && api) {
       const notification = composeApprovalNotification();
       api.push().sendToAllDevices(notification.title, notification.body, notification.data);
+    }
+  }
+
+  // The relay client registers these on every client it builds. On the machine
+  // client they carry no path restriction at all, so a paired device could read
+  // or write any absolute path and run arbitrary shell commands — none of it
+  // through the approval flow that governs every other tool call, and none of
+  // it bounded by the advertised roots. Revoked before the socket connects, so
+  // the relay is never told they exist.
+  const UNSCOPED_MACHINE_RPC = [
+    "bash",
+    "readFile",
+    "writeFile",
+    "listDirectory",
+    "getDirectoryTree",
+    "ripgrep",
+  ];
+  // A session's path scoping never applied to a command string, so a
+  // session-scoped shell is still an unscoped shell. Its file handlers stay:
+  // they are confined to the session directory and mobile file browsing uses
+  // them.
+  const UNSCOPED_SESSION_RPC = ["bash"];
+
+  function revokeUnscopedRpc(client, methods) {
+    const manager = client?.rpcHandlerManager;
+    if (!manager?.unregisterHandler) return;
+    for (const method of methods) {
+      try {
+        manager.unregisterHandler(method);
+      } catch (error) {
+        debug(`failed to revoke Happy RPC handler ${method}: ${error}`);
+      }
     }
   }
 
@@ -2574,6 +2607,7 @@ export function createHappyLayer({
       daemonState: { status: "running", pid: process.pid, startedAt: Date.now() },
     });
     machineClient = api.machineSyncClient(machine);
+    revokeUnscopedRpc(machineClient, UNSCOPED_MACHINE_RPC);
     keepAdvertisedCliAvailability(machineClient);
     setupMachineHandlers();
     machineClient.connect();

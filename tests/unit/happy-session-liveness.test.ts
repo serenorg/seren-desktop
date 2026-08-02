@@ -82,6 +82,9 @@ function createClient() {
           rpcHandlers.set(name, handler);
         },
       ),
+      unregisterHandler: vi.fn((name: string) => {
+        rpcHandlers.delete(name);
+      }),
     },
     sendAgentMessage: vi.fn(),
     sendClaudeSessionMessage: vi.fn(),
@@ -90,6 +93,8 @@ function createClient() {
     sendSessionProtocolMessage: vi.fn(),
     suppressNextArchiveSignal: vi.fn(),
     updateMetadata: vi.fn(),
+    // Exposed so tests can observe which RPC handlers survive construction.
+    rpcHandlers,
   };
 }
 
@@ -224,6 +229,17 @@ function createLayerHarness({
   let machineHandlers:
     | { spawnSession(options: Record<string, unknown>): Promise<Record<string, unknown>> }
     | undefined;
+  // The relay SDK auto-registers these on every client it builds; the bridge is
+  // expected to revoke the unscoped ones before the socket connects.
+  const machineRpcHandlers = new Set([
+    "bash",
+    "readFile",
+    "writeFile",
+    "listDirectory",
+    "getDirectoryTree",
+    "ripgrep",
+    "difftastic",
+  ]);
   const machineClient = {
     connect: vi.fn(),
     setRPCHandlers: vi.fn((handlers) => {
@@ -231,6 +247,14 @@ function createLayerHarness({
     }),
     shutdown: vi.fn(),
     updateMachineMetadata: vi.fn(async () => {}),
+    rpcHandlerManager: {
+      registerHandler: vi.fn((name: string) => {
+        machineRpcHandlers.add(name);
+      }),
+      unregisterHandler: vi.fn((name: string) => {
+        machineRpcHandlers.delete(name);
+      }),
+    },
   };
   const api = {
     deactivateSession: vi.fn(async () => true),
@@ -341,6 +365,10 @@ function createLayerHarness({
     // Captured before start() so it survives the layer wrapping the client's
     // metadata writer to keep the bridge authoritative over cliAvailability.
     machineMetadataWrites: machineClient.updateMachineMetadata,
+    machineRpcHandlers,
+    get sessionRpcHandlers() {
+      return client.rpcHandlers;
+    },
     source,
     supervisorCall,
     supervisorNotify,
@@ -406,6 +434,62 @@ describe("Happy session liveness", () => {
       gemini: true,
       openclaw: false,
     });
+
+    await harness.layer.close();
+  });
+
+  it("revokes the relay SDK's unscoped shell and filesystem RPC on the machine", async () => {
+    const harness = createLayerHarness();
+
+    await harness.layer.start();
+
+    // These carry no path restriction on the machine client, so a paired
+    // device could read or write any absolute path and run arbitrary shell
+    // commands outside the approval flow.
+    for (const method of [
+      "bash",
+      "readFile",
+      "writeFile",
+      "listDirectory",
+      "getDirectoryTree",
+      "ripgrep",
+    ]) {
+      expect(
+        harness.machineRpcHandlers.has(method),
+        `machine RPC ${method} was left registered`,
+      ).toBe(false);
+    }
+    // Revoked before the socket is told about them.
+    const revokeCalls =
+      harness.machineClient.rpcHandlerManager.unregisterHandler.mock
+        .invocationCallOrder;
+    const connectCall = harness.machineClient.connect.mock.invocationCallOrder;
+    expect(Math.max(...revokeCalls)).toBeLessThan(connectCall[0]);
+
+    await harness.layer.close();
+  });
+
+  it("revokes the relay SDK's shell RPC on a session client", async () => {
+    const summary = {
+      sessionId: "shell-revocation-session",
+      agentType: "codex",
+      cwd: SYNTHETIC_ROOT,
+      status: "ready",
+    };
+    const harness = createLayerHarness({ initialSessions: [summary] });
+    // The SDK registers this in the session client constructor.
+    harness.sessionRpcHandlers.set("bash", async () => ({ stdout: "" }));
+
+    await harness.layer.start();
+
+    // A session's path scoping never applied to the command string, so a
+    // session-scoped shell is still an unscoped shell.
+    expect(harness.sessionRpcHandlers.has("bash")).toBe(false);
+    // Session-scoped file access stays: mobile file browsing uses it and it is
+    // confined to the session directory.
+    expect(
+      harness.client.rpcHandlerManager.unregisterHandler,
+    ).not.toHaveBeenCalledWith("readFile");
 
     await harness.layer.close();
   });
