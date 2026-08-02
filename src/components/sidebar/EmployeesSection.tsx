@@ -46,6 +46,7 @@ export type EmployeeDetailEventDetail = { employeeId: string };
 
 interface EmployeesSectionProps {
   onCreateEmployee: () => void;
+  onCreateMission: () => void;
   onOpenCatalog?: () => void;
   onOpenInbox?: () => void;
 }
@@ -525,6 +526,42 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                 </div>
                 <div class="thread-list-meta text-muted-foreground/70 truncate">
                   Persistent cloud worker
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              data-testid="sidebar-new-mission"
+              class="thread-list-row group flex items-center gap-2.5 w-full px-2 py-1.5 rounded-md bg-transparent border-none text-left cursor-pointer transition-colors duration-100 hover:bg-cyan-400/5 focus-visible:outline-none focus-visible:bg-cyan-400/5 focus-visible:ring-1 focus-visible:ring-cyan-300/40"
+              onClick={props.onCreateMission}
+              aria-label="New Mission"
+            >
+              <span
+                class="flex items-center justify-center w-[22px] h-[22px] rounded-md border border-cyan-300/25 text-cyan-300/75 transition-colors duration-100 group-hover:border-cyan-300/55 group-hover:text-cyan-200"
+                aria-hidden="true"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.25"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="8" cy="8" r="4.5" />
+                  <circle cx="8" cy="8" r="1.25" />
+                  <path d="M8 1.5V3M8 13v1.5M1.5 8H3M13 8h1.5" />
+                </svg>
+              </span>
+              <div class="flex-1 min-w-0">
+                <div class="thread-list-title text-muted-foreground truncate transition-colors duration-100 group-hover:text-foreground">
+                  New Mission
+                </div>
+                <div class="thread-list-meta text-muted-foreground/70 truncate">
+                  Coordinate an agent team
                 </div>
               </div>
             </button>
