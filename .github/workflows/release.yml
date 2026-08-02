@@ -35,6 +35,14 @@ env:
   HAS_GH_PAT: ${{ secrets.GH_PAT != '' }}
   # SSL.com eSigner cloud signing for Windows EV code signing
   HAS_WINDOWS_SIGNING: ${{ secrets.ES_USERNAME != '' }}
+  # Set the repository variable WINDOWS_SIGNING_UNAVAILABLE to "true" when the
+  # signing service itself cannot be reached — an expired or suspended SSL.com
+  # account, a provider outage — so a tag still publishes through the
+  # transparently unsigned path (#2929) instead of failing the whole release at
+  # the bundler. Windows installers are then unsigned and raise SmartScreen
+  # warnings; the Tauri updater is unaffected because its signature is a
+  # separate key. Remove the variable to restore signing.
+  WINDOWS_SIGNING_UNAVAILABLE: ${{ vars.WINDOWS_SIGNING_UNAVAILABLE }}
   # Fail-closed ceiling for billable SSL.com cloud hash-signing operations in one
   # Windows release job. Normal releases spend roughly 0-10; 100 leaves ample
   # drift while a cold/full cache reseed requires an explicit audited repo override.
@@ -420,7 +428,11 @@ jobs:
           "WINDOWS_SIGN_TELEMETRY_FILE=$telemetry" >> $env:GITHUB_ENV
           "WINDOWS_SIGNING_BLOCK_FILE=$blockFile" >> $env:GITHUB_ENV
           "WINDOWS_SIGNING_MONTHLY_STATE_FILE=$monthlyState" >> $env:GITHUB_ENV
-          "WINDOWS_SIGNING_BLOCKED=false" >> $env:GITHUB_ENV
+          $signingUnavailable = "$env:WINDOWS_SIGNING_UNAVAILABLE" -eq "true"
+          if ($signingUnavailable) {
+            Write-Host "::warning::WINDOWS_SIGNING_UNAVAILABLE is set; this release publishes unsigned Windows artifacts."
+          }
+          "WINDOWS_SIGNING_BLOCKED=$($signingUnavailable.ToString().ToLower())" >> $env:GITHUB_ENV
           "WINDOWS_SIGNING_MONTHLY_BLOCKED=false" >> $env:GITHUB_ENV
           "AWS_ACCESS_KEY_ID=$env:MONTHLY_R2_ACCESS_KEY_ID" >> $env:GITHUB_ENV
           "AWS_SECRET_ACCESS_KEY=$env:MONTHLY_R2_SECRET_ACCESS_KEY" >> $env:GITHUB_ENV
@@ -615,7 +627,7 @@ jobs:
           aws --version
 
       - name: Restore Windows signature cache from R2
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -653,7 +665,7 @@ jobs:
       # signing, so steady-state releases only spend signatures on changed files
       # while the signer keeps its existing Valid-signature skip and telemetry.
       - name: Sign embedded runtime (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           pnpm tsx scripts/print-windows-signables.ts `
@@ -738,7 +750,7 @@ jobs:
       # The cache dir was already restored from R2 above; the save step below
       # pushes any freshly signed plugins back for the next release to reuse.
       - name: Stage signed NSIS toolset (Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         shell: pwsh
         run: |
           ./scripts/stage-signed-nsis-toolset.ps1 `
@@ -811,7 +823,7 @@ jobs:
       # builds never attempt to sign. The wrapper reads WINDOWS_SIGN_THUMBPRINT
       # from the eSigner CKA step via GITHUB_ENV.
       - name: Build Tauri app (budget-aware, Windows)
-        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true'
+        if: matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true'
         env:
           # The embedded runtime was already staged and EV-signed above; skip
           # re-preparation so the build does not overwrite the signed binaries
@@ -833,7 +845,7 @@ jobs:
           Get-Content sign-overlay.json
           pnpm tauri build --target ${{ matrix.target }} --config sign-overlay.json
       - name: Build Tauri app (unsigned, other)
-        if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu') && !(matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true')
+        if: matrix.os != 'macos-latest' && !startsWith(matrix.os, 'ubuntu') && !(matrix.os == 'windows-latest' && env.HAS_WINDOWS_SIGNING == 'true' && env.WINDOWS_SIGNING_BLOCKED != 'true')
         run: pnpm tauri build --target ${{ matrix.target }}
       - name: Build Tauri app (unsigned, macOS without signing)
         if: matrix.os == 'macos-latest' && env.HAS_APPLE_SIGNING != 'true'
