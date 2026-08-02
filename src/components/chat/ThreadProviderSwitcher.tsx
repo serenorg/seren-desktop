@@ -18,6 +18,7 @@ import {
   switchChatProvider,
 } from "@/services/provider-bindings";
 import type { AgentType } from "@/services/providers";
+import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { conversationStore } from "@/stores/conversation.store";
@@ -130,6 +131,19 @@ export const ThreadProviderSwitcher: Component<Props> = (props) => {
           (policyDefault &&
             models.find((model) => model.id === policyDefault)?.id) ||
           models[0]?.id;
+      } catch (error) {
+        reportSwitchFailure(error);
+        return;
+      }
+    } else if (providerId === "seren") {
+      // The Seren inference catalog is runtime-owned and starts empty, and
+      // agent threads mount no surface that hydrates it — reading the sync
+      // store here refused every cold switch. Fetch the live catalog like
+      // the seren-private branch above.
+      try {
+        const models = await getLiveSerenModelCatalog();
+        providerStore.setProviderModels(providerId, models);
+        fallbackModel = models[0]?.id;
       } catch (error) {
         reportSwitchFailure(error);
         return;

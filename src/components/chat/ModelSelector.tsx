@@ -200,9 +200,10 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
             const models = await getLiveSerenModelCatalog();
             providerStore.setProviderModels("seren", models);
           } catch (error) {
-            // Fail closed instead of putting retired local model IDs back in
-            // the no-query picker when authoritative discovery is unavailable.
-            providerStore.setProviderModels("seren", []);
+            // Fail closed only before the first successful discovery: the
+            // empty default keeps retired local model IDs out of the picker,
+            // while models already hydrated from the live catalog stay usable
+            // across a transient discovery failure.
             console.warn(
               "[ModelSelector] SerenModels curated catalog unavailable:",
               error,

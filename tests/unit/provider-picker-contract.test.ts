@@ -30,7 +30,10 @@ describe("provider picker switch contract", () => {
     expect(catalogLoading).toContain(
       'providerStore.setProviderModels("seren", models)',
     );
-    expect(catalogLoading).toContain(
+    // A transient discovery failure must not wipe models already hydrated
+    // from the live catalog; the empty startup default alone keeps retired
+    // static ids out of the picker. #3614
+    expect(catalogLoading).not.toContain(
       'providerStore.setProviderModels("seren", [])',
     );
     expect(catalogLoading).toContain("modelsService.getAvailable()");
@@ -95,6 +98,11 @@ describe("provider picker switch contract", () => {
     expect(selectChatProvider).toContain(
       "privateModelsService.listAvailable()",
     );
+    // The Seren branch must hydrate the runtime-owned catalog the same way —
+    // agent threads mount no ModelSelector, so nothing else populates it and
+    // the sync store read refused every cold switch. #3614
+    expect(selectChatProvider).toContain('providerId === "seren"');
+    expect(selectChatProvider).toContain("getLiveSerenModelCatalog()");
     expect(selectChatProvider).toContain(
       "switchChatProvider(props.threadId, providerId, fallbackModel)",
     );
