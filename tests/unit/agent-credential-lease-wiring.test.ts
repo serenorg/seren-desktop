@@ -43,7 +43,7 @@ describe("agent session credential leases (#3194, #3504)", () => {
     // providerService.spawnAgent takes the brokered credential in the slot the
     // raw key used to occupy.
     expect(bodyAfter("async spawnSession(", 30_000)).toMatch(
-      /agentSandboxMode,\s*\n\s*serenCredential,/,
+      /agentSandboxMode\),\s*\n\s*serenCredential,/,
     );
   });
 
