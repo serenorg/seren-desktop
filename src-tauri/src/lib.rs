@@ -16,6 +16,7 @@ pub mod commands {
     pub mod conversation_search;
     pub mod credential_lease;
     pub mod employees_archive;
+    pub mod folder_access;
     pub mod gateway_http;
     pub mod happy_bridge;
     pub mod history_sync;
@@ -1143,6 +1144,9 @@ pub fn run() {
             commands::recording::recording_check_permissions,
             commands::recording::recording_request_permission,
             commands::recording::recording_open_permission_settings,
+            commands::folder_access::folder_access_check_permissions,
+            commands::folder_access::folder_access_request_permission,
+            commands::folder_access::folder_access_open_permission_settings,
             commands::recording::recording_start,
             commands::recording::recording_stop,
             commands::recording::recording_add_marker,

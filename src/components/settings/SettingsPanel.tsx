@@ -66,6 +66,7 @@ import { claimDaily, walletState } from "@/stores/wallet.store";
 import { SendTransferModal } from "../wallet/SendTransferModal";
 import { ApiAccessSettings } from "./ApiAccessSettings";
 import { ConnectorSettings } from "./ConnectorSettings";
+import { FolderAccessSettings } from "./FolderAccessSettings";
 import { HappyRemoteSettings } from "./HappyRemoteSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { KeysSettings } from "./KeysSettings";
@@ -1737,6 +1738,8 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                 </div>
               </label>
             </div>
+
+            <FolderAccessSettings />
 
             <StandingPoliciesSettings />
           </section>
