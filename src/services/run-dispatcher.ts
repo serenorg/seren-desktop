@@ -11,6 +11,7 @@ import {
 import type { AgentType } from "@/services/providers";
 import {
   type AgentAssignment,
+  type Attempt,
   type CoverageGap,
   type Evidence,
   type EvidenceKind,
@@ -49,6 +50,12 @@ const CONFIDENCES = new Set<FindingConfidence>([
   "refuted",
 ]);
 const ARTIFACT_KINDS = new Set(["diff", "document", "email", "comment"]);
+// The CLIs that can raise an action-required state, and the agent types each
+// one blocks. claude-codex drives both, so either blocks it.
+const AGENTS_BLOCKED_BY_CLI: Record<"claude" | "codex", AgentType[]> = {
+  claude: ["claude-code", "claude-codex"],
+  codex: ["codex", "claude-codex"],
+};
 const NATIVE_AGENT_TYPES = new Set<AgentType>([
   "claude-code",
   "codex",
@@ -280,12 +287,32 @@ export function selectDispatchPlan(
   inFlight: ReadonlySet<string>,
   cap = MAX_CONCURRENT_TASKS,
   assignmentOffset = 0,
+  attempts: readonly Attempt[] = [],
 ): DispatchPlan[] {
   if (assignments.length === 0) return [];
-  return selectReadyTasks(tasks, inFlight, cap).map((task, index) => ({
-    task,
-    assignment: assignments[(assignmentOffset + index) % assignments.length],
-  }));
+  const attemptedByTask = new Map<string, Set<string>>();
+  for (const attempt of attempts) {
+    if (!attempt.agent_assignment_id) continue;
+    const attempted =
+      attemptedByTask.get(attempt.task_id) ?? new Set<string>();
+    attempted.add(attempt.agent_assignment_id);
+    attemptedByTask.set(attempt.task_id, attempted);
+  }
+
+  return selectReadyTasks(tasks, inFlight, cap).map((task, index) => {
+    const attempted = attemptedByTask.get(task.id);
+    // Round-robin picks the next agent in rotation, which for a retry can be
+    // the one that just failed this task. Prefer any agent it has not been
+    // through yet, so an unhealthy agent type cannot keep the task.
+    const untried = attempted
+      ? assignments.filter((candidate) => !attempted.has(candidate.id))
+      : assignments;
+    const pool = untried.length > 0 ? untried : assignments;
+    return {
+      task,
+      assignment: pool[(assignmentOffset + index) % pool.length],
+    };
+  });
 }
 
 function toFinding(
@@ -354,6 +381,19 @@ async function waitForTurn(sessionId: string): Promise<void> {
     const session = agentStore.sessions[sessionId];
     if (!session)
       throw new Error("agent session disappeared before completion");
+    // A runtime whose CLI needs repair or installation will never produce a
+    // turn, so waiting out the full timeout only delays the reroute.
+    const blocked = agentStore.cliUpdateActionRequired;
+    if (
+      blocked &&
+      AGENTS_BLOCKED_BY_CLI[blocked.bareCommand]?.includes(
+        session.info.agentType,
+      )
+    ) {
+      throw new Error(
+        `${session.info.agentType} cannot run until its CLI is repaired (${blocked.reason})`,
+      );
+    }
     const threadId = session.conversationId;
     const active =
       agentStore.isTurnInFlight(threadId) ||
@@ -619,6 +659,7 @@ export function startRunDispatcher(): void {
         inFlightTasks,
         MAX_CONCURRENT_TASKS,
         assignmentCursor,
+        snapshot.attempts,
       );
       assignmentCursor += plans.length;
       for (const plan of plans) {

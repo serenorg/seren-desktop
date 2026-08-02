@@ -1549,15 +1549,45 @@ fn finish_attempt(
         ),
     )?;
     // An attempt that did not complete leaves its task failed from whatever
-    // stage it reached. Without this a task whose agent produced nothing usable
-    // rests in review forever and its run never reaches a terminal state.
+    // stage it reached, so a task whose agent produced nothing usable cannot
+    // rest in review and hold its run open — unless another agent type has not
+    // been tried yet, in which case the task goes back to ready so the next
+    // dispatch reaches for one that has not already failed here.
     let task_settled = TaskState::parse(&task_state).is_some_and(TaskState::is_terminal);
     if outcome != "completed" && !task_settled {
-        store::transition_task(conn, &task_id, TaskState::Failed, None)
+        let next_state = if untried_assignment_exists(conn, &run_id, &task_id)? {
+            TaskState::Ready
+        } else {
+            TaskState::Failed
+        };
+        store::transition_task(conn, &task_id, next_state, None)
             .map_err(|error| error.to_string())?;
-        append_and_emit(app, conn, task_state_event(&run_id, &task_id, TaskState::Failed))?;
+        append_and_emit(app, conn, task_state_event(&run_id, &task_id, next_state))?;
     }
     recompute_ready_and_status(app, conn, &run_id)
+}
+
+/// True when the run has an agent assignment this task has never been attempted
+/// with. An unhealthy agent type otherwise keeps the task, because dispatch
+/// round-robins without consulting what already failed for it.
+fn untried_assignment_exists(
+    conn: &Connection,
+    run_id: &str,
+    task_id: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(
+             SELECT 1 FROM run_agent_assignments g
+             WHERE g.run_id = ?1
+               AND NOT EXISTS (
+                   SELECT 1 FROM run_attempts a
+                   WHERE a.task_id = ?2 AND a.agent_assignment_id = g.id
+               )
+         )",
+        params![run_id, task_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn reconcile_interrupted(conn: &Connection) -> Result<Vec<NewRunEvent>, String> {
@@ -2346,6 +2376,79 @@ mod tests {
         };
         assert_eq!(state_of("task-first"), TaskState::Ready);
         assert_eq!(state_of("task-second"), TaskState::Pending);
+    }
+
+    #[test]
+    fn a_task_is_only_out_of_agents_once_every_assignment_was_attempted() {
+        use crate::run::types::{AgentAssignment, Attempt};
+        let conn = connection();
+        seed_run(&conn, "run-reroute");
+        store::add_task(
+            &conn,
+            &Task {
+                id: "task-reroute".to_string(),
+                run_id: "run-reroute".to_string(),
+                title: "task-reroute".to_string(),
+                brief: "needs a healthy agent".to_string(),
+                state: TaskState::Ready,
+                blocked_reason: None,
+                created_at: 1,
+                updated_at: 1,
+            },
+            &[],
+        )
+        .unwrap();
+        for id in ["assignment-a", "assignment-b"] {
+            store::add_assignment(
+                &conn,
+                &AgentAssignment {
+                    id: id.to_string(),
+                    run_id: "run-reroute".to_string(),
+                    agent_type: "codex".to_string(),
+                    model_id: None,
+                    role_label: None,
+                    created_at: 1,
+                },
+            )
+            .unwrap();
+        }
+
+        // Nothing attempted yet: both agents are still available.
+        assert!(untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
+
+        store::insert_attempt(
+            &conn,
+            &Attempt {
+                id: "attempt-a".to_string(),
+                task_id: "task-reroute".to_string(),
+                agent_assignment_id: Some("assignment-a".to_string()),
+                agent_session_id: None,
+                attempt_number: 1,
+                outcome: Some("failed".to_string()),
+                started_at: 1,
+                ended_at: Some(2),
+            },
+        )
+        .unwrap();
+        // One agent burned, one still untried — the task must be retried, not failed.
+        assert!(untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
+
+        store::insert_attempt(
+            &conn,
+            &Attempt {
+                id: "attempt-b".to_string(),
+                task_id: "task-reroute".to_string(),
+                agent_assignment_id: Some("assignment-b".to_string()),
+                agent_session_id: None,
+                attempt_number: 2,
+                outcome: Some("failed".to_string()),
+                started_at: 3,
+                ended_at: Some(4),
+            },
+        )
+        .unwrap();
+        // Every agent has now had the task; it has nowhere left to go.
+        assert!(!untried_assignment_exists(&conn, "run-reroute", "task-reroute").unwrap());
     }
 
     fn seed_run(conn: &Connection, run_id: &str) {
