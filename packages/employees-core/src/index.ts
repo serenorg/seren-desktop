@@ -1032,7 +1032,8 @@ export function textFromOutputEvents(value: unknown): string {
     .trim();
 }
 
-const EMPLOYEE_READINESS_KEYS = new Set([
+const EMPLOYEE_RESPONSE_KEYS = new Set([
+  "answer",
   "artifact_url",
   "employee",
   "scheduled_at",
@@ -1040,9 +1041,15 @@ const EMPLOYEE_READINESS_KEYS = new Set([
   "status",
   "verification",
 ]);
+const EMPLOYEE_RESPONSE_STATUSES = new Set([
+  "complete",
+  "completed",
+  "ready",
+  "success",
+]);
 
 /**
- * Converts the employee runtime's readiness acknowledgement into chat prose.
+ * Extracts user-facing text from the employee runtime's response envelope.
  * The key allowlist keeps arbitrary JSON answers byte-for-byte unchanged.
  */
 export function employeeAssistantDisplayText(value: string): string {
@@ -1061,9 +1068,11 @@ export function employeeAssistantDisplayText(value: string): string {
 
   const acknowledgement = parsed as Record<string, unknown>;
   const keys = Object.keys(acknowledgement);
+  const status = stringValue(acknowledgement.status)?.toLowerCase();
   if (
-    acknowledgement.status !== "ready" ||
-    !keys.every((key) => EMPLOYEE_READINESS_KEYS.has(key)) ||
+    !status ||
+    !EMPLOYEE_RESPONSE_STATUSES.has(status) ||
+    !keys.every((key) => EMPLOYEE_RESPONSE_KEYS.has(key)) ||
     !keys.some((key) =>
       ["artifact_url", "scheduled_at", "verification"].includes(key),
     )
@@ -1071,8 +1080,14 @@ export function employeeAssistantDisplayText(value: string): string {
     return value;
   }
 
-  const rawName =
-    stringValue(acknowledgement.employee) ?? stringValue(acknowledgement.skill);
+  if (Object.hasOwn(acknowledgement, "answer")) {
+    return stringValue(acknowledgement.answer) ?? value;
+  }
+
+  const employee = stringValue(acknowledgement.employee);
+  if (status !== "ready" && employee) return employee;
+
+  const rawName = employee ?? stringValue(acknowledgement.skill);
   if (!rawName) return value;
   const name = rawName.replace(/\s+/g, " ").trim();
   if (!name || name.length > 120) return value;
