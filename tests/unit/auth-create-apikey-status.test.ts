@@ -62,7 +62,12 @@ describe("createApiKey HTTP status (#2497 Defect 1)", () => {
         name: "Seren Desktop",
         key_type: undefined,
         agent_identity_id: undefined,
-        scopes: ["publisher:*", "managed-deployment:update"],
+        scopes: [
+          "publisher:*",
+          "managed-deployment:update",
+          "managed-deployment:stop",
+          "managed-deployment:delete",
+        ],
       },
       throwOnError: false,
     });

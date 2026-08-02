@@ -23,10 +23,15 @@ const LEASE_RENEWAL_WINDOW_SECONDS: i64 = 6 * 60 * 60;
 // A general agent session cannot predict its publisher set at spawn because
 // the Seren MCP catalog is dynamic, so it retains the existing publisher
 // wildcard. Managed deployment mutations are a separate Core capability and
-// must be granted explicitly. Keep this at the narrow update operation needed
-// by managed update/rollback/reconciliation workflows; do not broaden it to
-// `managed-deployment:*`. See #3194 and #3489.
-const VERIFIED_LEASE_SCOPES: &[&str] = &["publisher:*", "managed-deployment:update"];
+// must be granted explicitly. Keep this at the narrow lifecycle operations
+// exposed to automation; do not broaden it to `managed-deployment:*`. See
+// #3194, #3489, and #3606.
+const VERIFIED_LEASE_SCOPES: &[&str] = &[
+    "publisher:*",
+    "managed-deployment:update",
+    "managed-deployment:stop",
+    "managed-deployment:delete",
+];
 
 /// What the renderer and provider runtime are allowed to see. The real key is
 /// deliberately absent: only the loopback broker holds it, and the capability
@@ -804,10 +809,15 @@ mod tests {
     };
 
     #[test]
-    fn credential_lease_requests_exact_managed_update_capability() {
+    fn credential_lease_requests_exact_managed_lifecycle_capabilities() {
         assert_eq!(
             VERIFIED_LEASE_SCOPES,
-            ["publisher:*", "managed-deployment:update"]
+            [
+                "publisher:*",
+                "managed-deployment:update",
+                "managed-deployment:stop",
+                "managed-deployment:delete",
+            ]
         );
         assert!(!VERIFIED_LEASE_SCOPES.contains(&"managed-deployment:*"));
     }
