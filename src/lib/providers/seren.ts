@@ -100,40 +100,6 @@ interface GatewayResponse<T> {
 }
 
 /**
- * Default models available through Seren Gateway.
- */
-const DEFAULT_MODELS: ProviderModel[] = [
-  // OpenAI
-  { id: "openai/gpt-5.5", name: "OpenAI GPT 5.5", contextWindow: 1050000 },
-  // Anthropic
-  {
-    id: "anthropic/claude-opus-4.6",
-    name: "Claude Opus 4.6",
-    contextWindow: 1000000,
-  },
-  {
-    id: "anthropic/claude-opus-4.5",
-    name: "Claude Opus 4.5",
-    contextWindow: 200000,
-  },
-  {
-    id: "anthropic/claude-sonnet-4.6",
-    name: "Claude Sonnet 4.6",
-    contextWindow: 1000000,
-  },
-  // Z.ai (formerly THUDM)
-  { id: "z-ai/glm-5.1", name: "GLM 5.1", contextWindow: 202752 },
-  // MoonshotAI
-  { id: "moonshotai/kimi-k2.5", name: "Kimi K2.5", contextWindow: 262144 },
-  // Arcee AI
-  {
-    id: "arcee-ai/trinity-large-thinking",
-    name: "Arcee-AI Trinity Large Thinking",
-    contextWindow: 262144,
-  },
-];
-
-/**
  * Fetch the authoritative SerenModels catalog without substituting local
  * defaults. Callers that must only send advertised IDs can treat failures or
  * an empty response as "no model" and use their own safe fallback.
@@ -477,12 +443,7 @@ export const serenProvider: ProviderAdapter = {
   },
 
   async getModels(_apiKey: string): Promise<ProviderModel[]> {
-    // Try to fetch from Seren's models endpoint
-    try {
-      return await fetchSerenModelCatalog();
-    } catch {
-      return DEFAULT_MODELS;
-    }
+    return fetchSerenModelCatalog();
   },
 };
 
