@@ -97,6 +97,7 @@ export interface AgentAssignment {
   run_id: string;
   agent_type: string;
   model_id: string | null;
+  secondary_model_id: string | null;
   permission_mode: string | null;
   role_label: string | null;
   created_at: number;
@@ -248,6 +249,7 @@ export async function runAddAgent(
   runId: string,
   agentType: string,
   modelId?: string | null,
+  secondaryModelId?: string | null,
   permissionMode?: string | null,
   roleLabel?: string | null,
 ): Promise<AgentAssignment> {
@@ -255,6 +257,7 @@ export async function runAddAgent(
     runId,
     agentType,
     modelId: modelId ?? null,
+    secondaryModelId: secondaryModelId ?? null,
     permissionMode: permissionMode ?? null,
     roleLabel: roleLabel ?? null,
   }) as Promise<AgentAssignment>;

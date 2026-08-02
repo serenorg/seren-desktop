@@ -34,10 +34,14 @@ describe("RunLaunchBox", () => {
     expect(launchBoxSource).toContain("It will not");
     expect(launchBoxSource).toContain("run-task-title-${slot}");
     expect(launchBoxSource).toContain("run-task-brief-${slot}");
-    expect(launchBoxSource).toContain("run-agent-${agentType}");
+    expect(launchBoxSource).toContain("run-agent-${definition.id}");
     expect(launchBoxSource).toContain('data-testid="run-isolation-mode"');
     expect(launchBoxSource).toContain('data-testid="run-max-attempts"');
     expect(launchBoxSource).toContain("run-model-${agentType}");
+    expect(launchBoxSource).toContain('<option value="">System default</option>');
+    expect(launchBoxSource).toContain("run-model-claude-codex-planner");
+    expect(launchBoxSource).toContain("run-model-claude-codex-executor");
+    expect(launchBoxSource).not.toContain("Pin an exact runtime model ID");
     expect(launchBoxSource).toContain("run-permission-${agentType}");
     expect(launchBoxSource).toContain('data-testid="run-launch-start"');
     expect(launchBoxSource).toContain("await launchMission({");
@@ -71,9 +75,15 @@ describe("RunLaunchBox", () => {
         {
           agentType: "codex",
           modelId: "gpt-5.4",
+          secondaryModelId: null,
           permissionMode: "ask",
         },
-        { agentType: "seren", modelId: null, permissionMode: null },
+        {
+          agentType: "seren",
+          modelId: null,
+          secondaryModelId: null,
+          permissionMode: null,
+        },
       ],
       workspaceMode: "worktree",
       maxAttempts: 2,
@@ -87,9 +97,15 @@ describe("RunLaunchBox", () => {
         {
           agentType: "codex",
           modelId: "gpt-5.4",
+          secondaryModelId: null,
           permissionMode: "ask",
         },
-        { agentType: "seren", modelId: null, permissionMode: null },
+        {
+          agentType: "seren",
+          modelId: null,
+          secondaryModelId: null,
+          permissionMode: null,
+        },
       ],
       workspaceMode: "worktree",
       maxAttempts: 2,

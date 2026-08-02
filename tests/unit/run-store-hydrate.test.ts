@@ -175,6 +175,7 @@ describe("run store startup hydration", () => {
         {
           agentType: "codex",
           modelId: "gpt-5.4",
+          secondaryModelId: null,
           permissionMode: "ask",
         },
       ],
@@ -187,6 +188,7 @@ describe("run store startup hydration", () => {
       createdRun.id,
       "codex",
       "gpt-5.4",
+      null,
       "ask",
     );
     expect(provisionWorkspaceMock).toHaveBeenCalledWith(

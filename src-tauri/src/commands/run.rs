@@ -60,6 +60,7 @@ pub async fn run_add_agent(
     run_id: String,
     agent_type: String,
     model_id: Option<String>,
+    secondary_model_id: Option<String>,
     permission_mode: Option<String>,
     role_label: Option<String>,
 ) -> Result<AgentAssignment, String> {
@@ -69,6 +70,7 @@ pub async fn run_add_agent(
             run_id,
             agent_type,
             model_id,
+            secondary_model_id,
             permission_mode,
             role_label,
         )

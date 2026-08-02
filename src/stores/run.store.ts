@@ -42,6 +42,7 @@ export interface LaunchTaskInput {
 export interface LaunchAgentInput {
   agentType: string;
   modelId?: string | null;
+  secondaryModelId?: string | null;
   permissionMode?: string | null;
 }
 
@@ -233,6 +234,7 @@ async function launch(options: LaunchOptions): Promise<void> {
         run.id,
         agent.agentType,
         agent.modelId,
+        agent.secondaryModelId,
         agent.permissionMode,
       );
     }

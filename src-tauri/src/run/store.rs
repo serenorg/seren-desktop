@@ -123,13 +123,14 @@ pub fn add_dependency(conn: &Connection, dependency: &TaskDependency) -> Result<
 pub fn add_assignment(conn: &Connection, assignment: &AgentAssignment) -> Result<()> {
     conn.execute(
         "INSERT INTO run_agent_assignments
-            (id, run_id, agent_type, model_id, permission_mode, role_label, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (id, run_id, agent_type, model_id, secondary_model_id, permission_mode, role_label, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             assignment.id,
             assignment.run_id,
             assignment.agent_type,
             assignment.model_id,
+            assignment.secondary_model_id,
             assignment.permission_mode,
             assignment.role_label,
             assignment.created_at,
@@ -656,7 +657,7 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
         .collect::<Result<Vec<_>>>()?;
 
     let mut assignment_statement = conn.prepare(
-        "SELECT id, run_id, agent_type, model_id, permission_mode, role_label, created_at
+        "SELECT id, run_id, agent_type, model_id, secondary_model_id, permission_mode, role_label, created_at
          FROM run_agent_assignments WHERE run_id = ?1 ORDER BY created_at ASC, id ASC",
     )?;
     let assignments = assignment_statement
@@ -666,9 +667,10 @@ pub fn load_run_snapshot(conn: &Connection, run_id: &str) -> Result<Option<RunSn
                 run_id: row.get(1)?,
                 agent_type: row.get(2)?,
                 model_id: row.get(3)?,
-                permission_mode: row.get(4)?,
-                role_label: row.get(5)?,
-                created_at: row.get(6)?,
+                secondary_model_id: row.get(4)?,
+                permission_mode: row.get(5)?,
+                role_label: row.get(6)?,
+                created_at: row.get(7)?,
             })
         })?
         .collect::<Result<Vec<_>>>()?;
@@ -896,6 +898,7 @@ mod tests {
                 run_id: "run-1".to_string(),
                 agent_type: "test-agent".to_string(),
                 model_id: Some("model-pinned".to_string()),
+                secondary_model_id: Some("model-secondary".to_string()),
                 permission_mode: Some("ask".to_string()),
                 role_label: Some("worker".to_string()),
                 created_at: 1,
@@ -905,6 +908,10 @@ mod tests {
         let snapshot = load_run_snapshot(&conn, "run-1").unwrap().unwrap();
         assert_eq!(snapshot.run.max_attempts, 2);
         assert_eq!(snapshot.assignments[0].model_id.as_deref(), Some("model-pinned"));
+        assert_eq!(
+            snapshot.assignments[0].secondary_model_id.as_deref(),
+            Some("model-secondary")
+        );
         assert_eq!(snapshot.assignments[0].permission_mode.as_deref(), Some("ask"));
         insert_attempt(
             &conn,

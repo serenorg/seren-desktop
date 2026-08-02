@@ -410,6 +410,7 @@ pub struct AgentAssignment {
     pub run_id: String,
     pub agent_type: String,
     pub model_id: Option<String>,
+    pub secondary_model_id: Option<String>,
     pub permission_mode: Option<String>,
     pub role_label: Option<String>,
     pub created_at: i64,

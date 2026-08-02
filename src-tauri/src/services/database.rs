@@ -1283,6 +1283,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             run_id TEXT NOT NULL,
             agent_type TEXT NOT NULL,
             model_id TEXT,
+            secondary_model_id TEXT,
             permission_mode TEXT,
             role_label TEXT,
             created_at INTEGER NOT NULL,
@@ -1291,6 +1292,7 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
         [],
     )?;
     add_column_if_missing(conn, "run_agent_assignments", "permission_mode", "TEXT")?;
+    add_column_if_missing(conn, "run_agent_assignments", "secondary_model_id", "TEXT")?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS run_attempts (
             id TEXT PRIMARY KEY,

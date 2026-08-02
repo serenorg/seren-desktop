@@ -2,12 +2,14 @@
 // ABOUTME: It turns agent replies into durable findings, coverage gaps, and attempt results.
 
 import { createEffect, createRoot } from "solid-js";
+import { sendProviderMessage } from "@/lib/providers";
 import { reportError } from "@/lib/support/hook";
 import {
   continueToolIteration,
   getActiveModel,
   streamMessageWithTools,
 } from "@/services/chat";
+import { privateModelsService } from "@/services/private-models";
 import type { AgentType } from "@/services/providers";
 import {
   type AgentAssignment,
@@ -483,6 +485,24 @@ async function runSerenChatTask(
   throw new Error("Seren chat task did not produce a final response");
 }
 
+async function runSerenPrivateTask(
+  objective: string,
+  task: Task,
+  pinnedModelId?: string | null,
+): Promise<string> {
+  const model =
+    pinnedModelId?.trim() ||
+    (await privateModelsService.listAvailable())[0]?.id;
+  if (!model) {
+    throw new Error("No Seren Private model is enabled for this organization");
+  }
+  return sendProviderMessage("seren-private", {
+    model,
+    messages: [{ role: "user", content: buildTaskPrompt(objective, task) }],
+    stream: false,
+  });
+}
+
 export function taskWorkspaceRoot(
   snapshot: RunSnapshot,
   taskId: string,
@@ -506,12 +526,25 @@ export function assignmentSessionOptions(
   localSessionId: string,
   conversationTitle: string,
 ) {
-  return {
+  const base = {
     localSessionId,
     conversationTitle,
-    initialModelId: assignment.model_id ?? undefined,
     initialPermissionMode: assignment.permission_mode ?? undefined,
   };
+  if (assignment.agent_type === "claude-codex") {
+    return {
+      ...base,
+      paired: {
+        ...(assignment.model_id
+          ? { planner: { modelId: assignment.model_id } }
+          : {}),
+        ...(assignment.secondary_model_id
+          ? { executor: { modelId: assignment.secondary_model_id } }
+          : {}),
+      },
+    };
+  }
+  return { ...base, initialModelId: assignment.model_id ?? undefined };
 }
 
 async function dispatchTask(
@@ -534,7 +567,19 @@ async function dispatchTask(
     let response: string | null = null;
     let fallbackDetail: string | null = null;
 
-    if (!isNativeAgentType(assignment.agent_type)) {
+    if (assignment.agent_type === "seren") {
+      response = await runSerenChatTask(
+        snapshot.run.objective,
+        task,
+        assignment.model_id,
+      );
+    } else if (assignment.agent_type === "seren-private") {
+      response = await runSerenPrivateTask(
+        snapshot.run.objective,
+        task,
+        assignment.model_id,
+      );
+    } else if (!isNativeAgentType(assignment.agent_type)) {
       fallbackDetail = `assignment ${assignment.agent_type} uses the signed-in Seren chat model because no local runtime supports that label`;
       response = await runSerenChatTask(
         snapshot.run.objective,

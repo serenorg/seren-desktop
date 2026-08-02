@@ -37,6 +37,7 @@ function assignment(id: string): AgentAssignment {
     run_id: "run-1",
     agent_type: "codex",
     model_id: null,
+    secondary_model_id: null,
     permission_mode: null,
     role_label: id,
     created_at: 1,
@@ -179,6 +180,28 @@ describe("run dispatcher selection", () => {
       conversationTitle: "Inspect records",
       initialModelId: "model-pinned",
       initialPermissionMode: "ask",
+    });
+  });
+
+  it("passes separate planner and executor model choices to the paired runtime", () => {
+    const configured = {
+      ...assignment("paired"),
+      agent_type: "claude-codex",
+      model_id: "claude-opus-4-8[1m]",
+      secondary_model_id: "gpt-5.6-luna",
+      permission_mode: "ask",
+    };
+
+    expect(
+      assignmentSessionOptions(configured, "session-2", "Inspect records"),
+    ).toEqual({
+      localSessionId: "session-2",
+      conversationTitle: "Inspect records",
+      initialPermissionMode: "ask",
+      paired: {
+        planner: { modelId: "claude-opus-4-8[1m]" },
+        executor: { modelId: "gpt-5.6-luna" },
+      },
     });
   });
 });
