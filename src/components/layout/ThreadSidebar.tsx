@@ -54,6 +54,7 @@ import { type WorkspaceWindow, workspaceStore } from "@/stores/workspace.store";
 interface ThreadSidebarProps {
   collapsed: boolean;
   onToggle?: () => void;
+  onCreateMission: () => void;
   onOpenCatalog?: () => void;
   onOpenInbox?: () => void;
 }
@@ -930,6 +931,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
         >
           <EmployeesSection
             onCreateEmployee={handleNewEmployee}
+            onCreateMission={props.onCreateMission}
             onOpenCatalog={props.onOpenCatalog}
             onOpenInbox={props.onOpenInbox}
           />

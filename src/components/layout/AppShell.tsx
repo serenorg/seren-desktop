@@ -603,6 +603,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
     setSlidePanel((v) => (v === "missioncontrol" ? null : "missioncontrol"));
   };
 
+  const handleOpenMissionControl = () => {
+    setSlidePanel("missioncontrol");
+  };
+
   const handleToggleSkills = () => {
     setSlidePanel((v) => (v === "skills" ? null : "skills"));
   };
@@ -1074,6 +1078,7 @@ export const AppShell: Component<AppShellProps> = (props) => {
           <ThreadSidebar
             collapsed={sidebarCollapsed()}
             onToggle={() => setSidebarCollapsed((v) => !v)}
+            onCreateMission={handleOpenMissionControl}
             onOpenCatalog={handleOpenCatalog}
             onOpenInbox={handleOpenInbox}
           />
