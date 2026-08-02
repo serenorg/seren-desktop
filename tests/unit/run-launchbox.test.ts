@@ -35,6 +35,10 @@ describe("RunLaunchBox", () => {
     expect(launchBoxSource).toContain("run-task-title-${slot}");
     expect(launchBoxSource).toContain("run-task-brief-${slot}");
     expect(launchBoxSource).toContain("run-agent-${agentType}");
+    expect(launchBoxSource).toContain('data-testid="run-isolation-mode"');
+    expect(launchBoxSource).toContain('data-testid="run-max-attempts"');
+    expect(launchBoxSource).toContain("run-model-${agentType}");
+    expect(launchBoxSource).toContain("run-permission-${agentType}");
     expect(launchBoxSource).toContain('data-testid="run-launch-start"');
     expect(launchBoxSource).toContain("await launchMission({");
   });
@@ -56,21 +60,39 @@ describe("RunLaunchBox", () => {
     expect(missionControlSource).toContain("onScroll={updateLaunchScroll}");
   });
 
-  it("sends objective, tasks, agents, and workspace root to the store", async () => {
+  it("sends every editable launch policy to the store", async () => {
     const launch = vi.spyOn(runStore, "launch").mockResolvedValue(undefined);
 
     await launchMission({
       objective: "  Reconcile the billing records  ",
       rootPath: "/tmp/project",
       tasks: [{ title: "Inspect invoices", brief: "Compare totals." }],
-      agents: ["codex", "seren"],
+      agents: [
+        {
+          agentType: "codex",
+          modelId: "gpt-5.4",
+          permissionMode: "ask",
+        },
+        { agentType: "seren", modelId: null, permissionMode: null },
+      ],
+      workspaceMode: "worktree",
+      maxAttempts: 2,
     });
 
     expect(launch).toHaveBeenCalledWith({
       objective: "  Reconcile the billing records  ",
       rootPath: "/tmp/project",
       tasks: [{ title: "Inspect invoices", brief: "Compare totals." }],
-      agents: ["codex", "seren"],
+      agents: [
+        {
+          agentType: "codex",
+          modelId: "gpt-5.4",
+          permissionMode: "ask",
+        },
+        { agentType: "seren", modelId: null, permissionMode: null },
+      ],
+      workspaceMode: "worktree",
+      maxAttempts: 2,
     });
   });
 });

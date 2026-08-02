@@ -663,6 +663,7 @@ mod tests {
             id: "run-1".to_string(),
             objective: "workspace test".to_string(),
             root_path: None,
+            max_attempts: 2,
             status: RunStatus::Running,
             cancel_requested: false,
             interrupted_at: None,

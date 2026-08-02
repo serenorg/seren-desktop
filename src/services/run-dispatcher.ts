@@ -293,8 +293,7 @@ export function selectDispatchPlan(
   const attemptedByTask = new Map<string, Set<string>>();
   for (const attempt of attempts) {
     if (!attempt.agent_assignment_id) continue;
-    const attempted =
-      attemptedByTask.get(attempt.task_id) ?? new Set<string>();
+    const attempted = attemptedByTask.get(attempt.task_id) ?? new Set<string>();
     attempted.add(attempt.agent_assignment_id);
     attemptedByTask.set(attempt.task_id, attempted);
   }
@@ -450,9 +449,10 @@ function isNativeAgentType(agentType: string): agentType is AgentType {
 async function runSerenChatTask(
   objective: string,
   task: Task,
+  pinnedModelId?: string | null,
 ): Promise<string> {
   let continuation: Parameters<typeof continueToolIteration>[0] | null = null;
-  const activeModel = getActiveModel();
+  const activeModel = pinnedModelId?.trim() || getActiveModel();
   const model =
     activeModel !== "auto"
       ? activeModel
@@ -483,6 +483,37 @@ async function runSerenChatTask(
   throw new Error("Seren chat task did not produce a final response");
 }
 
+export function taskWorkspaceRoot(
+  snapshot: RunSnapshot,
+  taskId: string,
+  fallbackRoot: string | null,
+): string {
+  const activeLease = [...(snapshot.leases ?? [])]
+    .reverse()
+    .find(
+      (lease) =>
+        lease.task_id === taskId &&
+        lease.state === "active" &&
+        Boolean(lease.root_path),
+    );
+  return (
+    activeLease?.root_path ?? snapshot.run.root_path ?? fallbackRoot ?? "."
+  );
+}
+
+export function assignmentSessionOptions(
+  assignment: AgentAssignment,
+  localSessionId: string,
+  conversationTitle: string,
+) {
+  return {
+    localSessionId,
+    conversationTitle,
+    initialModelId: assignment.model_id ?? undefined,
+    initialPermissionMode: assignment.permission_mode ?? undefined,
+  };
+}
+
 async function dispatchTask(
   snapshot: RunSnapshot,
   task: Task,
@@ -505,13 +536,17 @@ async function dispatchTask(
 
     if (!isNativeAgentType(assignment.agent_type)) {
       fallbackDetail = `assignment ${assignment.agent_type} uses the signed-in Seren chat model because no local runtime supports that label`;
-      response = await runSerenChatTask(snapshot.run.objective, task);
+      response = await runSerenChatTask(
+        snapshot.run.objective,
+        task,
+        assignment.model_id,
+      );
     } else {
       try {
         const sessionId = await agentStore.spawnSession(
-          snapshot.run.root_path ?? fileTreeState.rootPath ?? ".",
+          taskWorkspaceRoot(snapshot, task.id, fileTreeState.rootPath),
           assignment.agent_type,
-          { localSessionId, conversationTitle: task.title },
+          assignmentSessionOptions(assignment, localSessionId, task.title),
         );
         if (!sessionId) throw new Error("agent session failed to start");
         spawnedSessionId = sessionId;
@@ -648,6 +683,7 @@ export function startRunDispatcher(): void {
       if (
         !snapshot ||
         !runId ||
+        runState.launchPending ||
         snapshot.run.status === "interrupted" ||
         isTerminalRun(snapshot)
       ) {

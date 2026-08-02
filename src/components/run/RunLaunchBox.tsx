@@ -14,6 +14,29 @@ const TASK_SLOTS = [0, 1, 2] as const;
 const AGENT_TYPES = ["claude-code", "codex", "seren"] as const;
 type AgentType = (typeof AGENT_TYPES)[number];
 
+const AGENT_LABELS: Record<AgentType, string> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  seren: "Seren",
+};
+
+const PERMISSION_OPTIONS: Record<
+  AgentType,
+  ReadonlyArray<{ value: string; label: string }>
+> = {
+  "claude-code": [
+    { value: "", label: "Runtime default" },
+    { value: "plan", label: "Plan only" },
+    { value: "acceptEdits", label: "Allow workspace edits" },
+  ],
+  codex: [
+    { value: "", label: "Runtime default" },
+    { value: "ask", label: "Ask before actions" },
+    { value: "auto", label: "Allow workspace edits" },
+  ],
+  seren: [{ value: "", label: "Review first (fixed)" }],
+};
+
 interface LaunchTaskDraft {
   title: string;
   brief: string;
@@ -29,6 +52,23 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
     codex: true,
     seren: true,
   });
+  const [models, setModels] = createStore<Record<AgentType, string>>({
+    "claude-code": "",
+    codex: "",
+    seren: "",
+  });
+  const [permissions, setPermissions] = createStore<Record<AgentType, string>>({
+    "claude-code": "",
+    codex: "",
+    seren: "",
+  });
+  const [workspaceMode, setWorkspaceMode] = createSignal<
+    "current" | "worktree" | "scratch"
+  >("current");
+  const [maxAttempts, setMaxAttempts] = createSignal(2);
+
+  const selectedAgentTypes = () =>
+    AGENT_TYPES.filter((agentType) => agents[agentType]);
 
   const start = async () => {
     const value = objective().trim();
@@ -42,7 +82,13 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
           title: task.title.trim(),
           brief: task.brief.trim(),
         })),
-      agents: AGENT_TYPES.filter((agentType) => agents[agentType]),
+      agents: selectedAgentTypes().map((agentType) => ({
+        agentType,
+        modelId: models[agentType].trim() || null,
+        permissionMode: permissions[agentType] || null,
+      })),
+      workspaceMode: workspaceMode(),
+      maxAttempts: maxAttempts(),
     });
     props.onStarted?.();
   };
@@ -112,21 +158,125 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
           <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
             Advanced controls
           </summary>
-          <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            <div class="rounded-lg border border-border/50 bg-slate-950/25 px-3 py-2 text-xs text-muted-foreground">
-              Models <span class="float-right text-foreground/70">Auto</span>
-            </div>
-            <div class="rounded-lg border border-border/50 bg-slate-950/25 px-3 py-2 text-xs text-muted-foreground">
-              Isolation{" "}
-              <span class="float-right text-foreground/70">Workspace</span>
-            </div>
-            <div class="rounded-lg border border-border/50 bg-slate-950/25 px-3 py-2 text-xs text-muted-foreground">
-              Budget <span class="float-right text-foreground/70">Guarded</span>
-            </div>
-            <div class="rounded-lg border border-border/50 bg-slate-950/25 px-3 py-2 text-xs text-muted-foreground">
-              Permissions{" "}
-              <span class="float-right text-foreground/70">Review first</span>
-            </div>
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <label class="grid gap-2 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+              <span class="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Isolation
+              </span>
+              <select
+                data-testid="run-isolation-mode"
+                value={workspaceMode()}
+                onChange={(event) =>
+                  setWorkspaceMode(
+                    event.currentTarget.value as
+                      | "current"
+                      | "worktree"
+                      | "scratch",
+                  )
+                }
+                class="rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
+              >
+                <option value="current">Current project</option>
+                <option value="worktree">Worktree per task</option>
+                <option value="scratch">Scratch directory per task</option>
+              </select>
+              <span class="text-[11px] leading-4 text-muted-foreground/75">
+                {workspaceMode() === "worktree"
+                  ? "Each task gets an isolated Git branch and worktree."
+                  : workspaceMode() === "scratch"
+                    ? "Each task starts in a separate empty workspace."
+                    : "Agents share the currently open project."}
+              </span>
+            </label>
+
+            <label class="grid gap-2 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+              <span class="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Attempt budget
+              </span>
+              <select
+                data-testid="run-max-attempts"
+                value={maxAttempts()}
+                onChange={(event) =>
+                  setMaxAttempts(Number(event.currentTarget.value))
+                }
+                class="rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
+              >
+                <option value="1">1 attempt per task</option>
+                <option value="2">2 attempts per task</option>
+                <option value="3">3 attempts per task</option>
+              </select>
+              <span class="text-[11px] leading-4 text-muted-foreground/75">
+                Failed tasks rotate across selected agents until this cap.
+              </span>
+            </label>
+          </div>
+
+          <div class="mt-3 grid gap-3 sm:grid-cols-2">
+            <fieldset class="min-w-0 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+              <legend class="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Models
+              </legend>
+              <p class="mt-1 text-[11px] leading-4 text-muted-foreground/75">
+                Pin an exact runtime model ID or leave blank for its default.
+              </p>
+              <div class="mt-3 grid gap-2">
+                <For each={selectedAgentTypes()}>
+                  {(agentType) => (
+                    <label class="grid gap-1.5">
+                      <span class="text-[10px] font-medium text-muted-foreground">
+                        {AGENT_LABELS[agentType]}
+                      </span>
+                      <input
+                        data-testid={`run-model-${agentType}`}
+                        type="text"
+                        value={models[agentType]}
+                        onInput={(event) =>
+                          setModels(agentType, event.currentTarget.value)
+                        }
+                        placeholder="Runtime default"
+                        spellcheck={false}
+                        class="min-w-0 rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 font-mono text-[11px] text-foreground outline-none transition placeholder:font-sans focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
+                      />
+                    </label>
+                  )}
+                </For>
+              </div>
+            </fieldset>
+
+            <fieldset class="min-w-0 rounded-xl border border-border/50 bg-slate-950/20 p-3">
+              <legend class="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Permissions
+              </legend>
+              <p class="mt-1 text-[11px] leading-4 text-muted-foreground/75">
+                Choose how each local runtime handles workspace actions.
+              </p>
+              <div class="mt-3 grid gap-2">
+                <For each={selectedAgentTypes()}>
+                  {(agentType) => (
+                    <label class="grid gap-1.5">
+                      <span class="text-[10px] font-medium text-muted-foreground">
+                        {AGENT_LABELS[agentType]}
+                      </span>
+                      <select
+                        data-testid={`run-permission-${agentType}`}
+                        value={permissions[agentType]}
+                        disabled={agentType === "seren"}
+                        onChange={(event) =>
+                          setPermissions(agentType, event.currentTarget.value)
+                        }
+                        class="min-w-0 rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-55"
+                      >
+                        <For each={PERMISSION_OPTIONS[agentType]}>
+                          {(option) => (
+                            <option value={option.value}>{option.label}</option>
+                          )}
+                        </For>
+                      </select>
+                    </label>
+                  )}
+                </For>
+              </div>
+            </fieldset>
           </div>
 
           <div class="mt-4 rounded-xl border border-border/50 bg-slate-950/20 p-3">
@@ -212,7 +362,11 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
             type="button"
             data-testid="run-launch-start"
             onClick={() => void start()}
-            disabled={!objective().trim() || runStore.launchPending}
+            disabled={
+              !objective().trim() ||
+              selectedAgentTypes().length === 0 ||
+              runStore.launchPending
+            }
             class="rounded-lg bg-cyan-300 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {runStore.launchPending ? "Starting…" : "Start mission"}

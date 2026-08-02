@@ -138,6 +138,7 @@ mod tests {
                 id: "run-checks".to_string(),
                 objective: "check objective".to_string(),
                 root_path: None,
+                max_attempts: 2,
                 status: RunStatus::Running,
                 cancel_requested: false,
                 interrupted_at: None,
