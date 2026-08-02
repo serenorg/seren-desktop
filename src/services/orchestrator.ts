@@ -1338,15 +1338,25 @@ function handleReroute(
   // B's selected model. Persist the rerouted thread's own selectedProvider so
   // the runtime row stays paired with the new model instead of inheriting the
   // global picker's provider.
-  if (conversationId === chatStore.activeConversationId) {
-    providerStore.setActiveModel(event.to_model);
-    chatStore.setModel(event.to_model);
+  //
+  // A thread routed by Auto stays on Auto: the fallback model applies to the
+  // current attempt only (activeStreams above already labels it), and the
+  // next task must re-run Auto selection. Persisting the fallback here pinned
+  // the thread and the visible picker to the last attempted model (#3602).
+  const threadIsAuto =
+    (reroutedConv?.selectedModel ?? providerStore.activeModel) ===
+    AUTO_MODEL_ID;
+  if (!threadIsAuto) {
+    if (conversationId === chatStore.activeConversationId) {
+      providerStore.setActiveModel(event.to_model);
+      chatStore.setModel(event.to_model);
+    }
+    void conversationStore.updateConversationSelection(
+      conversationId,
+      event.to_model,
+      reroutedProvider,
+    );
   }
-  void conversationStore.updateConversationSelection(
-    conversationId,
-    event.to_model,
-    reroutedProvider,
-  );
 
   // Add a reroute announcement message to the conversation
   const rerouteMessage: UnifiedMessage = {
