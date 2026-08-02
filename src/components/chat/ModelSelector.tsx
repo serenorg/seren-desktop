@@ -36,6 +36,7 @@ import {
   type AgentType,
   isConfidentialSafeProvider,
 } from "@/services/providers";
+import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentDisplayName, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import type { Conversation as ChatConversation } from "@/stores/chat.store";
@@ -143,7 +144,8 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     return out;
   });
 
-  // Default models from provider store (curated list)
+  // Provider models from the store. Seren is hydrated from its live curated
+  // catalog below; the other providers retain their local defaults.
   const defaultModels = () => providerStore.getModels(currentProvider());
 
   // Load full model list from the Seren catalog or private models catalog.
@@ -193,8 +195,23 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
           return;
         }
 
-        const models = await modelsService.getAvailable();
-        setCatalogModels(models);
+        if (currentProvider() === "seren") {
+          try {
+            const models = await getLiveSerenModelCatalog();
+            providerStore.setProviderModels("seren", models);
+          } catch (error) {
+            // Fail closed instead of putting retired local model IDs back in
+            // the no-query picker when authoritative discovery is unavailable.
+            providerStore.setProviderModels("seren", []);
+            console.warn(
+              "[ModelSelector] SerenModels curated catalog unavailable:",
+              error,
+            );
+          }
+        }
+
+        const searchableModels = await modelsService.getAvailable();
+        setCatalogModels(searchableModels);
       } catch (err) {
         console.error("Failed to load available models:", err);
       } finally {

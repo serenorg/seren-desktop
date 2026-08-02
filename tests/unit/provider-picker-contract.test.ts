@@ -5,6 +5,8 @@ import { readSource } from "./source-text";
 import { describe, expect, it } from "vitest";
 
 const modelSelectorSource = readSource("src/components/chat/ModelSelector.tsx");
+const providerStoreSource = readSource("src/stores/provider.store.ts");
+const serenProviderSource = readSource("src/lib/providers/seren.ts");
 const threadProviderSwitcherSource = readSource("src/components/chat/ThreadProviderSwitcher.tsx");
 const chatContentSource = readSource("src/components/chat/ChatContent.tsx");
 
@@ -17,6 +19,26 @@ function sourceBetween(source: string, startNeedle: string, endNeedle: string) {
 }
 
 describe("provider picker switch contract", () => {
+  it("hydrates the empty Seren picker from the live curated catalog", () => {
+    const catalogLoading = sourceBetween(
+      modelSelectorSource,
+      "// Load full model list from the Seren catalog or private models catalog.",
+      "// Filter models: show defaults when no search, search full catalog when typing",
+    );
+
+    expect(catalogLoading).toContain("getLiveSerenModelCatalog()");
+    expect(catalogLoading).toContain(
+      'providerStore.setProviderModels("seren", models)',
+    );
+    expect(catalogLoading).toContain(
+      'providerStore.setProviderModels("seren", [])',
+    );
+    expect(catalogLoading).toContain("modelsService.getAvailable()");
+    expect(providerStoreSource).toMatch(/seren:\s*\[\]/);
+    expect(serenProviderSource).not.toContain("const DEFAULT_MODELS");
+    expect(serenProviderSource).toContain("return fetchSerenModelCatalog()");
+  });
+
   it("keeps ModelSelector provider chips as draft filters until a model commits", () => {
     const selectProvider = sourceBetween(
       modelSelectorSource,

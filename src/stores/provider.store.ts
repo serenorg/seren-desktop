@@ -76,36 +76,9 @@ interface ProviderState {
  * Default models for each provider (used before fetching or as fallback).
  */
 const DEFAULT_MODELS: Record<ProviderId, ProviderModel[]> = {
-  seren: [
-    // OpenAI
-    { id: "openai/gpt-5.5", name: "OpenAI GPT 5.5", contextWindow: 1050000 },
-    // Anthropic
-    {
-      id: "anthropic/claude-opus-4.6",
-      name: "Claude Opus 4.6",
-      contextWindow: 1000000,
-    },
-    {
-      id: "anthropic/claude-opus-4.5",
-      name: "Claude Opus 4.5",
-      contextWindow: 200000,
-    },
-    {
-      id: "anthropic/claude-sonnet-4.6",
-      name: "Claude Sonnet 4.6",
-      contextWindow: 1000000,
-    },
-    // Z.ai (formerly THUDM)
-    { id: "z-ai/glm-5.1", name: "GLM 5.1", contextWindow: 202752 },
-    // MoonshotAI
-    { id: "moonshotai/kimi-k2.5", name: "Kimi K2.5", contextWindow: 262144 },
-    // Arcee AI
-    {
-      id: "arcee-ai/trinity-large-thinking",
-      name: "Arcee-AI Trinity Large Thinking",
-      contextWindow: 262144,
-    },
-  ],
+  // Seren's inference catalog is runtime-owned and must be hydrated from the
+  // publisher before it is shown or used as a concrete-model fallback.
+  seren: [],
   "seren-private": [],
   anthropic: [
     {
