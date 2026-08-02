@@ -189,6 +189,72 @@ const EmployeeRow: Component<{
   );
 };
 
+const EmployeeThreadRow: Component<{
+  thread: Thread;
+  archived?: boolean;
+  onSelect: (thread: Thread) => void;
+}> = (props) => {
+  const active = () => threadStore.activeThreadId === props.thread.id;
+
+  return (
+    <div
+      class="thread-list-subrow group flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
+      classList={{
+        "!bg-surface-2/80 !border-l-primary": active(),
+        "opacity-70": props.archived,
+        "!opacity-90": props.archived && active(),
+      }}
+      role="button"
+      tabIndex={0}
+      aria-current={active() ? "page" : undefined}
+      aria-label={`Open thread ${props.thread.title}`}
+      onClick={() => props.onSelect(props.thread)}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        props.onSelect(props.thread);
+      }}
+      title={props.thread.title}
+    >
+      <span
+        class="thread-list-meta flex-1 min-w-0 text-muted-foreground truncate"
+        classList={{
+          "!text-foreground": active(),
+          "text-muted-foreground/80": props.archived,
+        }}
+      >
+        {props.thread.title}
+      </span>
+      <button
+        type="button"
+        class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 hover:!opacity-100 ml-1 shrink-0 w-4 h-4 flex items-center justify-center rounded hover:bg-surface-3 text-muted-foreground hover:text-foreground transition-all"
+        onClick={async (event) => {
+          event.stopPropagation();
+          await threadStore.archiveThread(props.thread.id, props.thread.kind);
+        }}
+        title="Close thread"
+        aria-label={`Close thread ${props.thread.title}`}
+      >
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M4 4l8 8M12 4l-8 8"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+    </div>
+  );
+};
+
 export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
   const [activeId, setActiveId] = createSignal<string | null>(null);
   const [collapsed, setCollapsed] = createSignal(false);
@@ -279,6 +345,12 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
 
   const handleCloseEmployeeDetail = () => {
     setActiveId(null);
+  };
+
+  const handleSelectThread = (thread: Thread) => {
+    threadStore.selectThread(thread.id, thread.kind);
+    setActiveId(null);
+    window.dispatchEvent(new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT));
   };
 
   let interval: ReturnType<typeof setInterval> | null = null;
@@ -398,38 +470,10 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                     />
                     <For each={threads()}>
                       {(thread) => (
-                        <button
-                          type="button"
-                          class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
-                          classList={{
-                            "!bg-surface-2/80 !border-l-primary":
-                              threadStore.activeThreadId === thread.id,
-                          }}
-                          aria-current={
-                            threadStore.activeThreadId === thread.id
-                              ? "page"
-                              : undefined
-                          }
-                          onClick={() => {
-                            threadStore.selectThread(thread.id, thread.kind);
-                            setActiveId(null);
-                            window.dispatchEvent(
-                              new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
-                            );
-                          }}
-                          title={thread.title}
-                          aria-label={`Open thread ${thread.title}`}
-                        >
-                          <span
-                            class="thread-list-meta text-muted-foreground truncate"
-                            classList={{
-                              "!text-foreground":
-                                threadStore.activeThreadId === thread.id,
-                            }}
-                          >
-                            {thread.title}
-                          </span>
-                        </button>
+                        <EmployeeThreadRow
+                          thread={thread}
+                          onSelect={handleSelectThread}
+                        />
                       )}
                     </For>
                   </div>
@@ -456,38 +500,11 @@ export const EmployeesSection: Component<EmployeesSectionProps> = (props) => {
                       />
                       <For each={archivedThreads()}>
                         {(thread) => (
-                          <button
-                            type="button"
-                            class="thread-list-subrow flex items-center w-full pl-9 pr-2 py-1 rounded-md bg-transparent border-none border-l-2 border-l-transparent text-left cursor-pointer transition-colors duration-100 hover:bg-surface-2 opacity-70 focus-visible:outline-none focus-visible:bg-surface-2 focus-visible:ring-1 focus-visible:ring-primary/60"
-                            classList={{
-                              "!bg-surface-2/80 !border-l-primary !opacity-90":
-                                threadStore.activeThreadId === thread.id,
-                            }}
-                            aria-current={
-                              threadStore.activeThreadId === thread.id
-                                ? "page"
-                                : undefined
-                            }
-                            onClick={() => {
-                              threadStore.selectThread(thread.id, thread.kind);
-                              setActiveId(null);
-                              window.dispatchEvent(
-                                new CustomEvent(CLOSE_EMPLOYEE_DETAIL_EVENT),
-                              );
-                            }}
-                            title={thread.title}
-                            aria-label={`Open thread ${thread.title}`}
-                          >
-                            <span
-                              class="thread-list-meta text-muted-foreground/80 truncate"
-                              classList={{
-                                "!text-foreground":
-                                  threadStore.activeThreadId === thread.id,
-                              }}
-                            >
-                              {thread.title}
-                            </span>
-                          </button>
+                          <EmployeeThreadRow
+                            thread={thread}
+                            archived={true}
+                            onSelect={handleSelectThread}
+                          />
                         )}
                       </For>
                     </div>
