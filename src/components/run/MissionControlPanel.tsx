@@ -21,12 +21,52 @@ import {
 } from "@/services/run-dispatcher";
 import { runStore } from "@/stores/run.store";
 
+interface LaunchScrollMetrics {
+  visible: boolean;
+  thumbHeight: number;
+  thumbTop: number;
+}
+
+const EMPTY_LAUNCH_SCROLL_METRICS: LaunchScrollMetrics = {
+  visible: false,
+  thumbHeight: 0,
+  thumbTop: 0,
+};
+
 export const MissionControlPanel: Component = () => {
   const [tab, setTab] = createSignal<"overview" | "findings">("overview");
   const [reviewFinding, setReviewFinding] = createSignal<Finding | null>(null);
   const [selectedTask, setSelectedTask] = createSignal<Task | null>(null);
+  const [launchScroll, setLaunchScroll] = createSignal<LaunchScrollMetrics>(
+    EMPTY_LAUNCH_SCROLL_METRICS,
+  );
+  let launchScrollRegion: HTMLDivElement | undefined;
+  let launchResizeObserver: ResizeObserver | null = null;
   let unlisten: UnlistenFn | null = null;
   let disposed = false;
+
+  const updateLaunchScroll = () => {
+    const region = launchScrollRegion;
+    if (!region) return;
+
+    const maxScrollTop = Math.max(region.scrollHeight - region.clientHeight, 0);
+    if (maxScrollTop === 0) {
+      setLaunchScroll(EMPTY_LAUNCH_SCROLL_METRICS);
+      return;
+    }
+
+    const trackHeight = Math.max(region.clientHeight - 32, 0);
+    const thumbHeight = Math.min(
+      trackHeight,
+      Math.max(64, (region.clientHeight / region.scrollHeight) * trackHeight),
+    );
+    const availableTravel = Math.max(trackHeight - thumbHeight, 0);
+    setLaunchScroll({
+      visible: true,
+      thumbHeight,
+      thumbTop: (region.scrollTop / maxScrollTop) * availableTravel,
+    });
+  };
 
   onMount(() => {
     void runStore.hydrateLatest();
@@ -38,11 +78,22 @@ export const MissionControlPanel: Component = () => {
       if (disposed) cleanup();
       else unlisten = cleanup;
     });
+
+    queueMicrotask(() => {
+      const region = launchScrollRegion;
+      if (!region || disposed) return;
+      updateLaunchScroll();
+      launchResizeObserver = new ResizeObserver(updateLaunchScroll);
+      launchResizeObserver.observe(region);
+      const content = region.firstElementChild;
+      if (content) launchResizeObserver.observe(content);
+    });
   });
 
   onCleanup(() => {
     disposed = true;
     unlisten?.();
+    launchResizeObserver?.disconnect();
     stopRunDispatcher();
   });
 
@@ -55,11 +106,36 @@ export const MissionControlPanel: Component = () => {
       <Show
         when={runStore.snapshot}
         fallback={
-          <div
-            data-testid="mission-launch-scroll-region"
-            class="h-full min-h-0 overflow-y-scroll overscroll-contain [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-slate-950/20 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-cyan-200/30 [&::-webkit-scrollbar-thumb:hover]:bg-cyan-200/45"
-          >
-            <RunLaunchBox />
+          <div class="relative h-full min-h-0">
+            <div
+              ref={launchScrollRegion}
+              data-testid="mission-launch-scroll-region"
+              data-scrollable={launchScroll().visible ? "true" : "false"}
+              tabindex="0"
+              aria-label="Mission launch form"
+              onScroll={updateLaunchScroll}
+              class="h-full min-h-0 overflow-y-scroll overscroll-contain [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-cyan-300/35 [&::-webkit-scrollbar-thumb]:bg-clip-padding [&::-webkit-scrollbar-thumb:hover]:bg-cyan-200/50"
+            >
+              <RunLaunchBox />
+            </div>
+            <div
+              data-testid="mission-launch-scrollbar"
+              aria-hidden="true"
+              class="pointer-events-none absolute bottom-4 right-1.5 top-4 z-20 w-1.5 rounded-full border border-cyan-200/15 bg-slate-950/35 transition-opacity"
+              classList={{
+                "opacity-100": launchScroll().visible,
+                "opacity-0": !launchScroll().visible,
+              }}
+            >
+              <div
+                data-testid="mission-launch-scrollbar-thumb"
+                class="absolute left-1/2 w-1 -translate-x-1/2 rounded-full bg-cyan-200/45"
+                style={{
+                  height: `${launchScroll().thumbHeight}px`,
+                  top: `${launchScroll().thumbTop}px`,
+                }}
+              />
+            </div>
           </div>
         }
       >

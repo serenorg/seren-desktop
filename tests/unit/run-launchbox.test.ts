@@ -46,6 +46,14 @@ describe("RunLaunchBox", () => {
     expect(missionControlSource).toContain("overflow-y-scroll");
     expect(missionControlSource).toContain("[scrollbar-gutter:stable]");
     expect(missionControlSource).toContain("[&::-webkit-scrollbar-thumb]");
+    expect(missionControlSource).toContain(
+      'data-testid="mission-launch-scrollbar"',
+    );
+    expect(missionControlSource).toContain(
+      'data-testid="mission-launch-scrollbar-thumb"',
+    );
+    expect(missionControlSource).toContain("new ResizeObserver");
+    expect(missionControlSource).toContain("onScroll={updateLaunchScroll}");
   });
 
   it("sends objective, tasks, agents, and workspace root to the store", async () => {
