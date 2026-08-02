@@ -72,6 +72,15 @@ pub enum WorkerEvent {
     Error {
         message: String,
     },
+    /// A worker failure with an authoritative retry classification. The
+    /// single-task orchestrator holds this event until recovery is exhausted,
+    /// so a retryable intermediate attempt never renders as terminal.
+    Failure {
+        message: String,
+        retryable: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cost: Option<f64>,
+    },
     /// Emitted when a request is rerouted to a different model after a transient error.
     Reroute {
         from_model: String,
@@ -414,6 +423,16 @@ mod tests {
         assert_eq!(json["type"], "error");
         assert_eq!(json["message"], "oops");
 
+        let failure = WorkerEvent::Failure {
+            message: "upstream_error: upstream request failed".to_string(),
+            retryable: true,
+            cost: Some(0.002),
+        };
+        let json = serde_json::to_value(&failure).unwrap();
+        assert_eq!(json["type"], "failure");
+        assert_eq!(json["retryable"], true);
+        assert_eq!(json["cost"], 0.002);
+
         let reroute = WorkerEvent::Reroute {
             from_model: "moonshotai/kimi-k2.5".to_string(),
             to_model: "anthropic/claude-sonnet-4".to_string(),
@@ -440,6 +459,21 @@ mod tests {
         match event {
             WorkerEvent::Error { message } => assert_eq!(message, "something failed"),
             _ => panic!("Expected Error variant"),
+        }
+
+        let json = r#"{"type":"failure","message":"upstream_error","retryable":true,"cost":0.002}"#;
+        let event: WorkerEvent = serde_json::from_str(json).unwrap();
+        match event {
+            WorkerEvent::Failure {
+                message,
+                retryable,
+                cost,
+            } => {
+                assert_eq!(message, "upstream_error");
+                assert!(retryable);
+                assert_eq!(cost, Some(0.002));
+            }
+            _ => panic!("Expected Failure variant"),
         }
     }
 

@@ -208,9 +208,8 @@ enum StreamOutcome {
         accumulated_cost: f64,
     },
     /// Stream terminated with an upstream error (HTTP 4xx/5xx wrapped by the
-    /// gateway). The error event has already been forwarded to the UI; this
-    /// variant lets the orchestrator distinguish failure from empty completion
-    /// so it does not lie about the conversation being completed successfully.
+    /// gateway). This variant lets the worker attach structured retryability
+    /// and cost before orchestration decides whether the failure is terminal.
     Failed {
         error: String,
         cost: f64,
@@ -252,6 +251,24 @@ fn embedded_stream_error_is_retryable(code: Option<&serde_json::Value>) -> bool 
             | "server_error"
             | "service_unavailable"
     )
+}
+
+/// Preserve the provider's retry classification for orchestration, but never
+/// retry a whole model attempt after a tool has executed. Replaying that
+/// attempt could repeat an external side effect.
+fn stream_failure_event(
+    message: String,
+    retryable: bool,
+    cost: Option<f64>,
+    tool_call_count: usize,
+) -> WorkerEvent {
+    let retryable = tool_call_count == 0
+        && (retryable || super::router::is_context_overflow_error(&message));
+    WorkerEvent::Failure {
+        message,
+        retryable,
+        cost,
+    }
 }
 
 /// Extract only stable code/message fields from an embedded provider error.
@@ -769,9 +786,6 @@ created if missing.",
                     .and_then(|v| v.as_str())
                     .unwrap_or("Gateway API error");
                 let message = format!("HTTP {}: {}", status, error_msg);
-                result.events.push(WorkerEvent::Error {
-                    message: message.clone(),
-                });
                 result.stream_error = Some(ParsedStreamError {
                     message,
                     retryable: gateway_status_is_retryable(status),
@@ -783,9 +797,6 @@ created if missing.",
         let effective = unwrap_publisher_body(&parsed);
 
         if let Some(stream_error) = parse_embedded_stream_error(effective) {
-            result.events.push(WorkerEvent::Error {
-                message: stream_error.message.clone(),
-            });
             result.stream_error = Some(stream_error);
             return result;
         }
@@ -991,8 +1002,8 @@ created if missing.",
             *last_finish_reason = Some(reason.clone());
         }
 
-        // Forward per-chunk events (Content, Thinking, Error) to the
-        // frontend. ToolCall events are deferred to stream end — see
+        // Forward per-chunk content and thinking events to the frontend.
+        // ToolCall events are deferred to stream end — see
         // emit_accumulated_tool_calls.
         for event in &result.events {
             match event {
@@ -1181,12 +1192,6 @@ created if missing.",
                             full_error,
                             retryable,
                         );
-                        event_tx
-                            .send(WorkerEvent::Error {
-                                message: full_error.clone(),
-                            })
-                            .await
-                            .map_err(|e| format!("Failed to send error event: {}", e))?;
                         return Ok(StreamOutcome::Failed {
                             error: full_error,
                             cost: accumulated_cost,
@@ -2015,10 +2020,18 @@ impl Worker for ChatModelWorker {
                 }
                 log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
                 let display_message = summarize_gateway_error(status, &body_text);
+                let failure_event = stream_failure_event(
+                    display_message.clone(),
+                    gateway_status_is_retryable(status.as_u16().into()),
+                    if total_cost > 0.0 {
+                        Some(total_cost)
+                    } else {
+                        None
+                    },
+                    tool_call_count,
+                );
                 if let Err(e) = event_tx
-                    .send(WorkerEvent::Error {
-                        message: display_message.clone(),
-                    })
+                    .send(failure_event)
                     .await
                 {
                     // Channel closed — likely cancelled while sending
@@ -2376,9 +2389,21 @@ impl Worker for ChatModelWorker {
                         "[ChatModelWorker] Execution failed, returning error (retryable={})",
                         retryable
                     );
-                    // stream_response already forwarded WorkerEvent::Error.
+                    let failure_event = stream_failure_event(
+                        error.clone(),
+                        retryable,
+                        total,
+                        tool_call_count,
+                    );
+                    if event_tx.send(failure_event).await.is_err() {
+                        log::debug!(
+                            "[ChatModelWorker] Channel closed, cannot send stream failure"
+                        );
+                        return Ok(());
+                    }
                     // Returning an error keeps the orchestrator from treating
-                    // this failed turn as a successful empty completion.
+                    // this failed turn as a successful empty completion. The
+                    // structured event above retains retryability and cost.
                     return Err(error);
                 }
             }
@@ -2788,14 +2813,13 @@ mod tests {
         let data =
             r#"{"status":402,"body":{"error":{"message":"Insufficient credits"}},"cost":"0"}"#;
         let result = ChatModelWorker::parse_sse_data(data);
-        assert_eq!(result.events.len(), 1);
-        match &result.events[0] {
-            WorkerEvent::Error { message } => {
-                assert!(message.contains("402"));
-                assert!(message.contains("Insufficient credits"));
-            }
-            _ => panic!("Expected Error event"),
-        }
+        assert!(result.events.is_empty());
+        let failure = result
+            .stream_error
+            .expect("gateway error should terminate the stream");
+        assert!(failure.message.contains("402"));
+        assert!(failure.message.contains("Insufficient credits"));
+        assert!(!failure.retryable);
     }
 
     #[tokio::test]
@@ -2835,13 +2859,43 @@ mod tests {
             other => panic!("Expected Failed outcome, got: {:?}", other),
         }
 
-        match rx.recv().await {
-            Some(WorkerEvent::Error { message }) => {
-                assert_eq!(message, "upstream_error: upstream request failed");
-                assert!(!message.contains("live/model"));
+        assert!(
+            rx.try_recv().is_err(),
+            "stream parsing must not render a failure before orchestration decides whether to recover"
+        );
+    }
+
+    #[test]
+    fn retryable_stream_failure_becomes_terminal_after_any_tool_executes() {
+        let retryable = stream_failure_event(
+            "upstream_error: upstream request failed".to_string(),
+            true,
+            Some(0.002),
+            0,
+        );
+        assert!(matches!(
+            retryable,
+            WorkerEvent::Failure {
+                retryable: true,
+                cost: Some(0.002),
+                ..
             }
-            other => panic!("Expected sanitized Error event, got: {:?}", other),
-        }
+        ));
+
+        let after_tool = stream_failure_event(
+            "upstream_error: upstream request failed".to_string(),
+            true,
+            Some(0.003),
+            1,
+        );
+        assert!(matches!(
+            after_tool,
+            WorkerEvent::Failure {
+                retryable: false,
+                cost: Some(0.003),
+                ..
+            }
+        ));
     }
 
     #[test]

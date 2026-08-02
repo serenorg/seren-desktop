@@ -4,11 +4,11 @@
 use log;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{Mutex, mpsc, watch};
+use tokio::sync::{mpsc, watch, Mutex};
 use uuid::Uuid;
 
 use super::chat_model_worker::ChatModelWorker;
@@ -19,7 +19,7 @@ use super::mcp_publisher_worker::McpPublisherWorker;
 use super::rlm;
 use super::router;
 use super::subtask_context::{
-    MAX_CONTEXT_SUBTASKS, MAX_SUBTASK_RESULT_BYTES, inject_dependency_results,
+    inject_dependency_results, MAX_CONTEXT_SUBTASKS, MAX_SUBTASK_RESULT_BYTES,
 };
 use super::tool_bridge::ToolResultBridge;
 use super::trust;
@@ -29,7 +29,7 @@ use super::types::{
 };
 use super::worker::Worker;
 use crate::services::database::{
-    DbPool, PersistedMessage, resolve_conversation_provider, save_message_record,
+    resolve_conversation_provider, save_message_record, DbPool, PersistedMessage,
 };
 
 const COMMUNITY_PRIOR_TIMEOUT_MS: u64 = 200;
@@ -725,6 +725,80 @@ pub async fn orchestrate(
 // Single-Task Execution (Fast Path)
 // =============================================================================
 
+#[derive(Debug, Clone, PartialEq)]
+struct AttemptFailure {
+    message: String,
+    /// `Some` is an authoritative worker classification. `None` preserves the
+    /// legacy message-based policy for workers that only emit `Error`.
+    retryable: Option<bool>,
+    cost: f64,
+}
+
+fn attempt_failure_from_event(event: &WorkerEvent) -> Option<AttemptFailure> {
+    match event {
+        WorkerEvent::Error { message } => Some(AttemptFailure {
+            message: message.clone(),
+            retryable: None,
+            cost: 0.0,
+        }),
+        WorkerEvent::Failure {
+            message,
+            retryable,
+            cost,
+        } => Some(AttemptFailure {
+            message: message.clone(),
+            retryable: Some(*retryable),
+            cost: cost.unwrap_or(0.0),
+        }),
+        _ => None,
+    }
+}
+
+fn attempt_is_reroutable(failure: &AttemptFailure) -> bool {
+    failure
+        .retryable
+        .unwrap_or_else(|| router::is_reroutable_error(&failure.message))
+}
+
+fn add_prior_attempt_cost(event: WorkerEvent, prior_attempt_cost: f64) -> WorkerEvent {
+    if prior_attempt_cost <= 0.0 {
+        return event;
+    }
+
+    match event {
+        WorkerEvent::Complete {
+            final_content,
+            thinking,
+            cost,
+            rlm_steps,
+        } => WorkerEvent::Complete {
+            final_content,
+            thinking,
+            cost: Some(prior_attempt_cost + cost.unwrap_or(0.0)),
+            rlm_steps,
+        },
+        event => event,
+    }
+}
+
+fn emit_terminal_failure(
+    app: &AppHandle,
+    conversation_id: &str,
+    message: &str,
+    total_failed_cost: f64,
+) {
+    let event = OrchestratorEvent {
+        conversation_id: conversation_id.to_string(),
+        worker_event: WorkerEvent::Failure {
+            message: message.to_string(),
+            retryable: false,
+            cost: (total_failed_cost > 0.0).then_some(total_failed_cost),
+        },
+        subtask_id: None,
+    };
+    let _ = app.emit("orchestrator://event", &event);
+}
+
 /// Execute a single subtask with automatic reroute on transient errors.
 ///
 /// When a worker hits a 408/429/5xx, the orchestrator queries eval_signals
@@ -788,6 +862,7 @@ async fn execute_single_task(
     let mut same_model_retry_count: usize = 0;
     const MAX_SAME_MODEL_RETRIES: usize = 1;
     let mut network_retry_count: usize = 0;
+    let mut failed_attempt_cost: f64 = 0.0;
 
     loop {
         // Bail out if cancellation arrived between iterations (e.g. during
@@ -847,12 +922,14 @@ async fn execute_single_task(
         let model_id_for_events = routing.model_id.clone();
         let task_type_for_events = subtask.classification.task_type.clone();
         let started_at_for_events = started_at_ms;
+        let prior_attempt_cost = failed_attempt_cost;
         let mut cancel_rx_forward = cancel_rx.clone();
 
-        // Returns (was_cancelled, captured_error).
-        let mut reroutable_error: Option<String> = None;
+        // Returns (was_cancelled, captured_failure). Worker failures are held
+        // here until the retry/reroute policy decides they are terminal.
+        let mut attempt_failure: Option<AttemptFailure> = None;
         let forward_handle = tokio::spawn(async move {
-            let mut captured_error: Option<String> = None;
+            let mut captured_failure: Option<AttemptFailure> = None;
             let mut cancelled = *cancel_rx_forward.borrow();
             let mut streamed_content = String::new();
             while !cancelled {
@@ -863,8 +940,9 @@ async fn execute_single_task(
                                 if let WorkerEvent::Content { text } = &worker_event {
                                     streamed_content.push_str(text);
                                 }
-                                if let WorkerEvent::Error { ref message } = worker_event {
-                                    captured_error = Some(message.clone());
+                                if let Some(failure) = attempt_failure_from_event(&worker_event) {
+                                    captured_failure = Some(failure);
+                                    continue;
                                 }
                                 // A worker that goes on to complete has
                                 // recovered: some forward intermediate errors
@@ -872,8 +950,10 @@ async fn execute_single_task(
                                 // would reject a turn that produced a real
                                 // answer, blanking it in the conversation.
                                 if matches!(worker_event, WorkerEvent::Complete { .. }) {
-                                    captured_error = None;
+                                    captured_failure = None;
                                 }
+                                let worker_event =
+                                    add_prior_attempt_cost(worker_event, prior_attempt_cost);
                                 let worker_event =
                                     guard_completion(&app_for_events, &conv_id, worker_event);
                                 if matches!(worker_event, WorkerEvent::Complete { .. }) {
@@ -912,13 +992,13 @@ async fn execute_single_task(
                     }
                 }
             }
-            (cancelled, captured_error)
+            (cancelled, captured_failure)
         });
 
         let forward_result = forward_handle.await;
         let was_cancelled = forward_result.as_ref().map(|(c, _)| *c).unwrap_or(false);
-        if let Ok((_, Some(ref error_msg))) = forward_result {
-            reroutable_error = Some(error_msg.clone());
+        if let Ok((_, Some(ref failure))) = forward_result {
+            attempt_failure = Some(failure.clone());
         }
 
         // If the forward loop exited due to cancellation, signal the worker
@@ -942,40 +1022,34 @@ async fn execute_single_task(
             }
             Ok(Err(e)) => {
                 log::error!("[Orchestrator] Worker error: {}", e);
-                if reroutable_error.is_none() {
-                    let error_message = e;
-                    let error_event = OrchestratorEvent {
-                        conversation_id: conversation_id.to_string(),
-                        worker_event: WorkerEvent::Error {
-                            message: error_message.clone(),
-                        },
-                        subtask_id: None,
-                    };
-                    let _ = app.emit("orchestrator://event", &error_event);
-                    reroutable_error = Some(error_message);
+                if attempt_failure.is_none() {
+                    attempt_failure = Some(AttemptFailure {
+                        message: e,
+                        retryable: None,
+                        cost: 0.0,
+                    });
                 }
             }
             Err(e) => {
                 log::error!("[Orchestrator] Worker task panicked: {}", e);
-                let error_message = "Internal error: worker task failed".to_string();
-                let error_event = OrchestratorEvent {
-                    conversation_id: conversation_id.to_string(),
-                    worker_event: WorkerEvent::Error {
-                        message: error_message.clone(),
-                    },
-                    subtask_id: None,
-                };
-                let _ = app.emit("orchestrator://event", &error_event);
-                reroutable_error = Some(error_message);
+                attempt_failure = Some(AttemptFailure {
+                    message: "Internal error: worker task failed".to_string(),
+                    retryable: Some(false),
+                    cost: 0.0,
+                });
             }
+        }
+
+        if let Some(failure) = &attempt_failure {
+            failed_attempt_cost += failure.cost;
         }
 
         // Network transport errors (connection refused, DNS, etc.) should be
         // retried on the same model with exponential backoff — rerouting to a
         // different model won't help since all models share the same gateway.
-        let is_network_error = reroutable_error
+        let is_network_error = attempt_failure
             .as_ref()
-            .is_some_and(|msg| router::is_network_transport_error(msg));
+            .is_some_and(|failure| router::is_network_transport_error(&failure.message));
 
         if is_network_error {
             network_retry_count += 1;
@@ -986,7 +1060,10 @@ async fn execute_single_task(
                     network_retry_count,
                     router::MAX_NETWORK_RETRIES,
                     backoff_secs,
-                    reroutable_error.as_deref().unwrap_or("unknown"),
+                    attempt_failure
+                        .as_ref()
+                        .map(|failure| failure.message.as_str())
+                        .unwrap_or("unknown"),
                 );
                 let mut cancel_sleep = cancel_rx.clone();
                 if !sleep_or_cancel(
@@ -1006,29 +1083,35 @@ async fn execute_single_task(
             log::error!(
                 "[Orchestrator] Network error persists after {} retries, giving up: {}",
                 router::MAX_NETWORK_RETRIES,
-                reroutable_error.as_deref().unwrap_or("unknown"),
+                attempt_failure
+                    .as_ref()
+                    .map(|failure| failure.message.as_str())
+                    .unwrap_or("unknown"),
             );
-            return Err(
-                reroutable_error.unwrap_or_else(|| "Network request failed".to_string()),
-            );
+            let message = attempt_failure
+                .map(|failure| failure.message)
+                .unwrap_or_else(|| "Network request failed".to_string());
+            emit_terminal_failure(app, conversation_id, &message, failed_attempt_cost);
+            return Err(message);
         }
 
         // Reset network retry counter on non-network outcomes (success or other errors)
         network_retry_count = 0;
 
         // Check if we got a transient error eligible for retry/reroute
-        let is_transient = reroutable_error
-            .as_ref()
-            .is_some_and(|msg| router::is_reroutable_error(msg));
+        let is_transient = attempt_failure.as_ref().is_some_and(attempt_is_reroutable);
 
         if !is_transient {
-            if let Some(error_message) = reroutable_error {
-                return Err(error_message);
+            if let Some(failure) = attempt_failure {
+                emit_terminal_failure(app, conversation_id, &failure.message, failed_attempt_cost);
+                return Err(failure.message);
             }
             break;
         }
 
-        let error_msg = reroutable_error.unwrap();
+        let error_msg = attempt_failure
+            .expect("transient failure must exist")
+            .message;
 
         // Context-overflow errors get special handling: reroute to a 1M-context
         // model regardless of whether the user explicitly selected a model.
@@ -1071,6 +1154,7 @@ async fn execute_single_task(
             }
             // All large-context models exhausted — fall through to give up
             log::warn!("[Orchestrator] Context overflow but all large-context fallbacks exhausted");
+            emit_terminal_failure(app, conversation_id, &error_msg, failed_attempt_cost);
             return Err(error_msg);
         }
 
@@ -1131,6 +1215,7 @@ async fn execute_single_task(
                     same_model_retry_count,
                     error_msg,
                 );
+                emit_terminal_failure(app, conversation_id, &error_msg, failed_attempt_cost);
                 return Err(error_msg);
             }
 
@@ -1161,6 +1246,7 @@ async fn execute_single_task(
                 "[Orchestrator] Giving up after {} reroute attempts",
                 reroute_count
             );
+            emit_terminal_failure(app, conversation_id, &error_msg, failed_attempt_cost);
             return Err(error_msg);
         }
 
@@ -1227,6 +1313,7 @@ async fn execute_single_task(
                     "[Orchestrator] No fallback model available, giving up after {} reroute attempts",
                     reroute_count
                 );
+                emit_terminal_failure(app, conversation_id, &error_msg, failed_attempt_cost);
                 return Err(error_msg);
             }
         }
@@ -1845,6 +1932,52 @@ pub fn strip_frontmatter(content: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // =========================================================================
+    // Structured worker failure recovery (GH #3599)
+    // =========================================================================
+
+    #[test]
+    fn structured_upstream_failure_enters_reroute_policy() {
+        let event = WorkerEvent::Failure {
+            message: "upstream_error: upstream request failed".to_string(),
+            retryable: true,
+            cost: Some(0.002),
+        };
+        let failure = attempt_failure_from_event(&event).expect("failure should be captured");
+
+        assert!(attempt_is_reroutable(&failure));
+        assert_eq!(failure.cost, 0.002);
+    }
+
+    #[test]
+    fn structured_nonretryable_failure_overrides_status_message_heuristic() {
+        let failure = AttemptFailure {
+            message: "HTTP 503 after a publisher tool executed".to_string(),
+            retryable: Some(false),
+            cost: 0.003,
+        };
+
+        assert!(!attempt_is_reroutable(&failure));
+    }
+
+    #[test]
+    fn successful_recovery_includes_failed_attempt_cost() {
+        let complete = WorkerEvent::Complete {
+            final_content: "Recovered".to_string(),
+            thinking: None,
+            cost: Some(0.004),
+            rlm_steps: None,
+        };
+
+        let event = add_prior_attempt_cost(complete, 0.002);
+        match event {
+            WorkerEvent::Complete {
+                cost: Some(cost), ..
+            } => assert!((cost - 0.006).abs() < f64::EPSILON),
+            other => panic!("Expected Complete event, got {other:?}"),
+        }
+    }
 
     // =========================================================================
     // Frontmatter Stripping

@@ -9,18 +9,20 @@ describe("#3493 terminal orchestrator error handoff", () => {
     const source = readSource("src-tauri/src/orchestrator/service.rs");
 
     expect(source).toContain(
-      "if let Some(error_message) = reroutable_error {\n                return Err(error_message);",
+      "emit_terminal_failure(app, conversation_id, &failure.message, failed_attempt_cost);",
     );
+    expect(source).toContain("return Err(failure.message);");
   });
 
   it("updates an existing assistant row instead of duplicating the error", () => {
     const source = readSource("src/services/orchestrator.ts");
 
     expect(source).toContain(
-      ".some((existing) => existing.id === stream.messageId);",
+      ".find((message) => message.id === stream.messageId);",
     );
     expect(source).toContain(
       "conversationStore.updateMessage(\n        stream.messageId,\n        errorMessage,\n        conversationId,",
     );
+    expect(source).toContain("cost: cost ?? existing?.cost,");
   });
 });
