@@ -86,4 +86,61 @@ describe("run dispatcher selection", () => {
       )[0].assignment.id,
     ).toBe("b");
   });
+
+  function attempt(
+    taskId: string,
+    assignmentId: string | null,
+    outcome: string | null = "failed",
+  ) {
+    return {
+      id: `attempt-${taskId}-${assignmentId}`,
+      task_id: taskId,
+      agent_assignment_id: assignmentId,
+      agent_session_id: null,
+      attempt_number: 1,
+      outcome,
+      started_at: 1,
+      ended_at: 2,
+    };
+  }
+
+  it("routes a retry to an agent the task has not already been through", () => {
+    const plans = selectDispatchPlan(
+      [task("one")],
+      [assignment("a"), assignment("b")],
+      new Set(),
+      3,
+      0,
+      [attempt("one", "a")],
+    );
+    // Round-robin would hand it back to "a"; the failed agent is skipped.
+    expect(plans[0].assignment.id).toBe("b");
+  });
+
+  it("falls back to the full rotation once every agent has been tried", () => {
+    const plans = selectDispatchPlan(
+      [task("one")],
+      [assignment("a"), assignment("b")],
+      new Set(),
+      3,
+      0,
+      [attempt("one", "a"), attempt("one", "b")],
+    );
+    expect(["a", "b"]).toContain(plans[0].assignment.id);
+  });
+
+  it("keeps one task's history from steering another task", () => {
+    const plans = selectDispatchPlan(
+      [task("one"), task("two")],
+      [assignment("a"), assignment("b")],
+      new Set(),
+      3,
+      0,
+      [attempt("one", "a")],
+    );
+    const byTask = new Map(plans.map((plan) => [plan.task.id, plan.assignment.id]));
+    expect(byTask.get("one")).toBe("b");
+    // "two" has no history, so it keeps its place in the rotation.
+    expect(byTask.get("two")).toBe("b");
+  });
 });
