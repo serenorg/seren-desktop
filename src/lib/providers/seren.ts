@@ -104,11 +104,16 @@ interface GatewayResponse<T> {
  * defaults. Callers that must only send advertised IDs can treat failures or
  * an empty response as "no model" and use their own safe fallback.
  */
+/** Catalog discovery gates Auto sends, so a stalled connection must become a
+ * rejection the callers' existing failure handling can act on. */
+const CATALOG_TIMEOUT_MS = 15_000;
+
 export async function fetchSerenModelCatalog(): Promise<ProviderModel[]> {
   const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/models`;
   const response = await appFetch(url, {
     method: "GET",
     headers: await getGatewayHeaders(url),
+    signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
   });
 
   if (!response.ok) {
