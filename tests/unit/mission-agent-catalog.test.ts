@@ -204,6 +204,15 @@ describe("Mission Control agent catalog", () => {
     );
   });
 
+  it("uses Antigravity's product name when its model catalog is unavailable", async () => {
+    getAgentModelCatalog.mockRejectedValueOnce(new Error("signed out"));
+
+    await expect(loadMissionModelCatalog("gemini", "/workspace")).resolves.toEqual({
+      models: [],
+      note: "The installed Antigravity CLI model catalog could not be loaded. System default remains available.",
+    });
+  });
+
   it("keeps each runtime catalog isolated while live choices load", () => {
     const catalogs = createEmptyMissionModelCatalogs();
 

@@ -242,6 +242,21 @@ function localAgentForTarget(
   }
 }
 
+function localAgentDisplayName(
+  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+): string {
+  switch (agentType) {
+    case "claude-code":
+      return "Claude Code";
+    case "codex":
+      return "Codex";
+    case "gemini":
+      return "Antigravity";
+    case "grok":
+      return "Grok";
+  }
+}
+
 const localCatalogLoads = new Map<string, Promise<AgentModelCatalogEntry[]>>();
 
 function loadLocalCatalog(
@@ -391,6 +406,7 @@ export async function loadMissionModelCatalog(
 
   const localAgent = localAgentForTarget(target);
   if (localAgent) {
+    const localAgentName = localAgentDisplayName(localAgent);
     try {
       const models = (await loadLocalCatalog(localAgent, cwd)).map(
         toMissionModel,
@@ -400,12 +416,12 @@ export async function loadMissionModelCatalog(
         note:
           models.length > 0
             ? null
-            : `The installed ${localAgent} CLI reported no selectable models. System default remains available.`,
+            : `The installed ${localAgentName} CLI reported no selectable models. System default remains available.`,
       };
     } catch {
       return {
         models: [],
-        note: `The installed ${localAgent} CLI model catalog could not be loaded. System default remains available.`,
+        note: `The installed ${localAgentName} CLI model catalog could not be loaded. System default remains available.`,
       };
     }
   }
