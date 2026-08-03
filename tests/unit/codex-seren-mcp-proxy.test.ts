@@ -371,7 +371,7 @@ describe("native Codex Seren MCP OAuth routing", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            data: { emailAddress: "selected@example.test" },
+            data: { body: { emailAddress: "selected@example.test" } },
           }),
           {
             status: 200,

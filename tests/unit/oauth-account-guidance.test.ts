@@ -82,7 +82,7 @@ describe("OAuth account confirmation guidance (#3589)", () => {
           {
             type: "text",
             text: JSON.stringify({
-              data: { emailAddress: "primary@example.test" },
+              data: { body: { emailAddress: "primary@example.test" } },
             }),
           },
         ],

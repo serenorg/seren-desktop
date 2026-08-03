@@ -54,7 +54,7 @@ function extractGmailProfileEmailAtDepth(
   if (typeof candidate === "string" && candidate.trim()) {
     return candidate.trim();
   }
-  for (const envelope of ["data", "result", "content"] as const) {
+  for (const envelope of ["data", "body", "result", "content"] as const) {
     if (!(envelope in record)) continue;
     const email = extractGmailProfileEmailAtDepth(record[envelope], depth + 1);
     if (email) return email;

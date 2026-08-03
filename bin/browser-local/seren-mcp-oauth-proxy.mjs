@@ -77,20 +77,42 @@ function isGmailProfileRequest(publisher, tool, method, path) {
     "profile";
 }
 
-function gmailProfileEmail(response) {
-  const text = response?.result?.content?.find(
-    (item) => item?.type === "text" && typeof item.text === "string",
-  )?.text;
-  if (!text) return null;
-  try {
-    const parsed = JSON.parse(text);
-    const candidate = parsed?.emailAddress ?? parsed?.data?.emailAddress;
-    return typeof candidate === "string" && candidate.trim()
-      ? candidate.trim()
-      : null;
-  } catch {
+function gmailProfileEmailAtDepth(value, depth = 0) {
+  if (depth > 8) return null;
+  if (typeof value === "string") {
+    try {
+      return gmailProfileEmailAtDepth(JSON.parse(value), depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const email = gmailProfileEmailAtDepth(item, depth + 1);
+      if (email) return email;
+    }
     return null;
   }
+  if (!value || typeof value !== "object") return null;
+
+  const candidate = value.emailAddress;
+  if (typeof candidate === "string" && candidate.trim()) {
+    return candidate.trim();
+  }
+  if (value.type === "text" && typeof value.text === "string") {
+    const email = gmailProfileEmailAtDepth(value.text, depth + 1);
+    if (email) return email;
+  }
+  for (const envelope of ["data", "body", "result", "content"]) {
+    if (!(envelope in value)) continue;
+    const email = gmailProfileEmailAtDepth(value[envelope], depth + 1);
+    if (email) return email;
+  }
+  return null;
+}
+
+function gmailProfileEmail(response) {
+  return gmailProfileEmailAtDepth(response);
 }
 
 function gmailProfileMatchesRouting(routing, connectionId, emailAddress) {
