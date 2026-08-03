@@ -863,6 +863,7 @@ async fn execute_single_task(
     const MAX_SAME_MODEL_RETRIES: usize = 1;
     let mut network_retry_count: usize = 0;
     let mut failed_attempt_cost: f64 = 0.0;
+    let mut initial_transition_emitted = false;
 
     loop {
         // Bail out if cancellation arrived between iterations (e.g. during
@@ -878,14 +879,20 @@ async fn execute_single_task(
         // Load skills
         let skill_content = load_skill_content(&routing.selected_skills)?;
 
-        // Emit transition
-        let transition = TransitionEvent {
-            conversation_id: conversation_id.to_string(),
-            model_name: routing.model_id.clone(),
-            task_description: routing.reason.clone(),
-        };
-        app.emit("orchestrator://transition", &transition)
-            .map_err(|e| format!("Failed to emit transition event: {}", e))?;
+        // Announce the initial routing choice exactly once. Retry and
+        // reroute iterations re-enter this loop, and every later model
+        // switch is already announced by its WorkerEvent::Reroute — a
+        // second transition here rendered the same reason twice (#3603).
+        if !initial_transition_emitted {
+            let transition = TransitionEvent {
+                conversation_id: conversation_id.to_string(),
+                model_name: routing.model_id.clone(),
+                task_description: routing.reason.clone(),
+            };
+            app.emit("orchestrator://transition", &transition)
+                .map_err(|e| format!("Failed to emit transition event: {}", e))?;
+            initial_transition_emitted = true;
+        }
 
         // Create channel and spawn worker
         let (event_tx, mut event_rx) = mpsc::channel::<WorkerEvent>(256);
