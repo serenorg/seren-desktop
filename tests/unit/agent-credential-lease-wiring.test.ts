@@ -26,7 +26,7 @@ function directTerminationContext(sessionExpression: string): string {
   return agentStoreSource.slice(Math.max(0, index - 1_200), index + 400);
 }
 
-describe("agent session credential leases (#3194, #3504)", () => {
+describe("agent session credential leases (#3194, #3657)", () => {
   it("creates a per-session lease instead of reading the persistent desktop key", () => {
     const spawnBody = bodyAfter("async spawnSession(");
     expect(spawnBody).toContain("await createCredentialLease(localSessionId)");
@@ -47,15 +47,14 @@ describe("agent session credential leases (#3194, #3504)", () => {
     );
   });
 
-  it("surfaces sign-in when publisher tools are omitted except for local LM Studio", () => {
+  it("keeps every local agent usable when signed out", () => {
     const spawnBody = bodyAfter("async spawnSession(", 30_000);
     const authGate = spawnBody.slice(
       spawnBody.indexOf("if (authStore.isAuthenticated)"),
       spawnBody.indexOf("const enabledMcpServers"),
     );
     expect(authGate).toContain("await createCredentialLease(localSessionId)");
-    expect(authGate).toContain('else if (resolvedAgentType !== "lmstudio")');
-    expect(authGate).toContain("requestSignInModal()");
+    expect(authGate).not.toContain("requestSignInModal()");
 
     const degradedBody = bodyAfter('case "mcpDegraded":', 5_000);
     expect(degradedBody).toContain("!authStore.isAuthenticated");

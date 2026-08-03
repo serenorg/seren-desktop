@@ -3448,14 +3448,11 @@ export const agentStore = {
             apiBaseUrl: lease.apiBaseUrl,
           };
           credentialLeaseCreated = true;
-        } else if (resolvedAgentType !== "lmstudio") {
-          // A signed-out spawn can still run the local provider, but it cannot
-          // receive publisher tools. Reuse the existing session-expired modal
-          // so this degraded mode is explicit and immediately actionable.
-          // LM Studio is deliberately local-only when signed out, so it must
-          // remain usable without presenting Seren authentication. #3504
-          requestSignInModal();
         }
+        // Every AgentType is a local runtime. Signed-out sessions deliberately
+        // start without a broker capability or publisher tools; they must not
+        // be blocked by, or interrupt the user with, Seren authentication.
+        // Upstream CLI authentication remains provider-owned. #3657
         const enabledMcpServers = getEnabledMcpServers();
 
         // No inactivity timeout — agent sessions wait indefinitely.
