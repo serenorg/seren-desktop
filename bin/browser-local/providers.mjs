@@ -1592,8 +1592,17 @@ function attachProcessListeners(
         ? "Codex binary not found. Install codex or fix the spawn path."
         : `Codex spawn error: ${err?.message ?? String(err)}`;
     console.warn(`${logPrefix} ${message}`);
-    sessions.delete(session.id);
+    // A terminated Codex child can report its final event after tail relief
+    // has already reused the stable local session id. Only the exact child
+    // that still owns the map entry may remove it. #3654
+    const wasTracked = sessions.get(session.id) === session;
+    if (wasTracked) {
+      sessions.delete(session.id);
+    }
     void session.serenMcpProxy?.close();
+    if (!wasTracked) {
+      return;
+    }
     if (session.currentPrompt) {
       rejectCurrentPrompt(session, new Error(message));
     }
@@ -1627,7 +1636,13 @@ function attachProcessListeners(
   });
 
   session.process.on("exit", () => {
-    const wasTracked = sessions.delete(session.id);
+    // terminateSession returns after killing the old child, before Node is
+    // required to deliver its exit event. Tail relief can register a same-id
+    // replacement in that window, so cleanup must be object-specific. #3654
+    const wasTracked = sessions.get(session.id) === session;
+    if (wasTracked) {
+      sessions.delete(session.id);
+    }
     void session.serenMcpProxy?.close();
     if (!wasTracked) {
       return;
