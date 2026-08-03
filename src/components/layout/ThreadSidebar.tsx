@@ -14,6 +14,7 @@ import {
 } from "solid-js";
 import { CliUpdateActionCard } from "@/components/agents/CliUpdateActionCard";
 import { providerGlyph } from "@/components/chat/ProviderIcon";
+import { getNativeAgentLaunchers } from "@/components/layout/native-agent-launchers";
 import { BountiesSection } from "@/components/sidebar/BountiesSection";
 import { CreateEmployeeModal } from "@/components/sidebar/CreateEmployeeModal";
 import {
@@ -30,11 +31,6 @@ import {
   THREAD_DRAG_MIME,
 } from "@/lib/thread-drag";
 import {
-  allowsClaudeAgent,
-  allowsCodexAgent,
-  allowsGeminiAgent,
-  allowsGrokAgent,
-  allowsLmStudioAgent,
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
 } from "@/services/organization-policy";
@@ -437,27 +433,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const showSerenPrivate = createMemo(() =>
     allowsSerenPrivateAgent(authStore.privateChatPolicy),
   );
-  const showClaudeAgent = createMemo(() =>
-    allowsClaudeAgent(authStore.privateChatPolicy),
-  );
-  const showCodexAgent = createMemo(() =>
-    allowsCodexAgent(authStore.privateChatPolicy),
-  );
-  const showGeminiAgent = createMemo(() =>
-    allowsGeminiAgent(authStore.privateChatPolicy),
-  );
-  const showGrokAgent = createMemo(() =>
-    allowsGrokAgent(authStore.privateChatPolicy),
-  );
-  const showLmStudioAgent = createMemo(() =>
-    allowsLmStudioAgent(authStore.privateChatPolicy),
-  );
-  // Paired Claude + Codex needs both CLIs' org-policy gates; CLI install and
-  // login flow through the existing subscription setup toasts on spawn.
-  const showPairedAgent = createMemo(
-    () =>
-      allowsClaudeAgent(authStore.privateChatPolicy) &&
-      allowsCodexAgent(authStore.privateChatPolicy),
+  const nativeAgentLaunchers = createMemo(() =>
+    getNativeAgentLaunchers(
+      agentStore.availableAgents,
+      authStore.privateChatPolicy,
+    ),
   );
   const showCliLaunchers = createMemo(
     () => !authStore.privateChatPolicy?.disable_local_agents,
@@ -465,15 +445,7 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
   const hasChatSection = createMemo(
     () => showSerenChat() || showSerenPrivate(),
   );
-  const hasAgentSection = createMemo(
-    () =>
-      showClaudeAgent() ||
-      showCodexAgent() ||
-      showPairedAgent() ||
-      showGeminiAgent() ||
-      showGrokAgent() ||
-      showLmStudioAgent(),
-  );
+  const hasAgentSection = createMemo(() => nativeAgentLaunchers().length > 0);
   const hasCliSection = createMemo(() => showCliLaunchers());
 
   return (
@@ -696,130 +668,29 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
               <Show when={hasAgentSection()}>
                 <SectionLabel>Coding agents</SectionLabel>
               </Show>
-              <Show when={showClaudeAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-claude-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("claude-code")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    {"\u{1F916}"}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Claude Code</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Anthropic · chat-style coding agent
+              <For each={nativeAgentLaunchers()}>
+                {(launcher) => (
+                  <button
+                    type="button"
+                    data-testid={launcher.testId}
+                    class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
+                    onClick={() => void handleNewAgent(launcher.type)}
+                  >
+                    <span class="text-[14px] w-[22px] text-center shrink-0">
+                      {launcher.glyph}
+                    </span>
+                    <div class="flex-1 min-w-0">
+                      <div class="font-medium">{launcher.label}</div>
+                      <div class="text-[11px] text-muted-foreground">
+                        {launcher.description}
+                      </div>
                     </div>
-                  </div>
-                  <LauncherChip variant="subscription">
-                    Subscription
-                  </LauncherChip>
-                </button>
-              </Show>
-              <Show when={showCodexAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-codex-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("codex")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    {"\u26A1"}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Codex</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      OpenAI · chat-style coding agent
-                    </div>
-                  </div>
-                  <LauncherChip variant="subscription">
-                    Subscription
-                  </LauncherChip>
-                </button>
-              </Show>
-              <Show when={showPairedAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-claude-codex-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("claude-codex")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    {"\u{1F91D}"}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Claude + Codex</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Anthropic + OpenAI · paired coding agents
-                    </div>
-                  </div>
-                  <LauncherChip variant="subscription">
-                    Subscription
-                  </LauncherChip>
-                </button>
-              </Show>
-              <Show when={showGeminiAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-gemini-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("gemini")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    {"\u2728"}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Antigravity</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Google · Antigravity coding agent
-                    </div>
-                  </div>
-                  <LauncherChip variant="subscription">
-                    Subscription
-                  </LauncherChip>
-                </button>
-              </Show>
-              <Show when={showGrokAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-grok-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("grok")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    𝕏
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">Grok</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      xAI · chat-style coding agent
-                    </div>
-                  </div>
-                  <LauncherChip variant="subscription">
-                    Subscription / API key
-                  </LauncherChip>
-                </button>
-              </Show>
-              <Show when={showLmStudioAgent()}>
-                <button
-                  type="button"
-                  data-testid="new-lmstudio-agent"
-                  class="flex items-center gap-2.5 w-full py-2 px-3 bg-transparent border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:bg-surface-3 text-left"
-                  onClick={() => void handleNewAgent("lmstudio")}
-                >
-                  <span class="text-[14px] w-[22px] text-center shrink-0">
-                    {"\u{1F5A5}\uFE0F"}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="font-medium">LM Studio Agent</div>
-                    <div class="text-[11px] text-muted-foreground">
-                      Local models · OpenAI-compatible HTTP
-                    </div>
-                  </div>
-                  <LauncherChip variant="local">Local</LauncherChip>
-                </button>
-              </Show>
+                    <LauncherChip variant={launcher.chip.variant}>
+                      {launcher.chip.label}
+                    </LauncherChip>
+                  </button>
+                )}
+              </For>
 
               {/* ---------- Command line ---------- */}
               <Show

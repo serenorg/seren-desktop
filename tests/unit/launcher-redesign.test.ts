@@ -4,6 +4,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  getNativeAgentLaunchers,
+  NATIVE_AGENT_LAUNCHER_METADATA,
+} from "@/components/layout/native-agent-launchers";
+import type { OrganizationPrivateModelsPolicy } from "@/services/organization-policy";
+import type { AgentInfo, AgentType } from "@/services/providers";
 
 const sidebarTsx = readFileSync(
   resolve("src/components/layout/ThreadSidebar.tsx"),
@@ -13,6 +19,23 @@ const tabBarTsx = readFileSync(
   resolve("src/components/layout/ThreadTabBar.tsx"),
   "utf-8",
 );
+
+const runtimeAgentTypes: AgentType[] = [
+  "codex",
+  "claude-code",
+  "claude-codex",
+  "gemini",
+  "grok",
+  "lmstudio",
+];
+
+const runtimeAgents = runtimeAgentTypes.map<AgentInfo>((type) => ({
+  type,
+  name: type,
+  description: type,
+  command: type,
+  available: true,
+}));
 
 describe("ThreadSidebar — launcher sections (#1832)", () => {
   it("renders the four section labels", () => {
@@ -31,23 +54,26 @@ describe("ThreadSidebar — terminal YOLO state stays out of the thread list", (
 });
 
 describe("ThreadSidebar — stable testids on every row (#1832)", () => {
-  const testids = [
+  const staticTestids = [
     "new-seren-chat",
     "new-seren-private-agent",
-    "new-claude-agent",
-    "new-codex-agent",
-    "new-gemini-agent",
-    "new-grok-agent",
-    "new-lmstudio-agent",
     "new-claude-cli",
     "new-codex-cli",
     "new-terminal",
   ];
-  for (const id of testids) {
+  for (const id of staticTestids) {
     it(`row has data-testid="${id}"`, () => {
       expect(sidebarTsx).toContain(`data-testid="${id}"`);
     });
   }
+
+  it("keeps a unique test id for every runtime agent", () => {
+    const testIds = Object.values(NATIVE_AGENT_LAUNCHER_METADATA).map(
+      (metadata) => metadata.testId,
+    );
+    expect(new Set(testIds).size).toBe(runtimeAgentTypes.length);
+    expect(testIds).toContain("new-lmstudio-agent");
+  });
 });
 
 describe("ThreadSidebar — chip vocabulary (#1832)", () => {
@@ -59,16 +85,22 @@ describe("ThreadSidebar — chip vocabulary (#1832)", () => {
   });
 
   it("uses 'Subscription' for Claude / Codex / Gemini / Grok coding-agent rows", () => {
-    const chips = sidebarTsx.match(/>\s*Subscription\s*</g) ?? [];
-    expect(chips.length).toBeGreaterThanOrEqual(3);
+    const hosted = Object.values(NATIVE_AGENT_LAUNCHER_METADATA).filter(
+      (metadata) => metadata.chip.variant === "subscription",
+    );
+    expect(hosted).toHaveLength(5);
+    expect(
+      hosted.every((metadata) =>
+        metadata.chip.label.startsWith("Subscription"),
+      ),
+    ).toBe(true);
   });
 
   it("uses 'Local' for LM Studio", () => {
-    const lmStudioRow = sidebarTsx.slice(
-      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"'),
-      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"') + 1200,
-    );
-    expect(lmStudioRow).toMatch(/>\s*Local\s*</);
+    expect(NATIVE_AGENT_LAUNCHER_METADATA.lmstudio.chip).toEqual({
+      label: "Local",
+      variant: "local",
+    });
   });
 
   it("uses 'CLI' chip for the two CLI rows", () => {
@@ -90,14 +122,9 @@ describe("ThreadSidebar — Seren Private subtitle clarifies AWS Bedrock & Azure
 });
 
 describe("ThreadSidebar — gating preserved (#1832)", () => {
-  it("retains all org-policy gates", () => {
+  it("retains the Seren chat org-policy gates", () => {
     expect(sidebarTsx).toContain("allowsSerenPublicModels(authStore.privateChatPolicy)");
     expect(sidebarTsx).toContain("allowsSerenPrivateAgent(authStore.privateChatPolicy)");
-    expect(sidebarTsx).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
-    expect(sidebarTsx).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
-    expect(sidebarTsx).toContain("allowsGeminiAgent(authStore.privateChatPolicy)");
-    expect(sidebarTsx).toContain("allowsGrokAgent(authStore.privateChatPolicy)");
-    expect(sidebarTsx).toContain("allowsLmStudioAgent(authStore.privateChatPolicy)");
   });
 });
 
@@ -120,12 +147,8 @@ describe("ThreadSidebar — dispatch preserved (#1832)", () => {
     );
   });
 
-  it("each coding agent row routes through handleNewAgent with the right type", () => {
-    expect(sidebarTsx).toContain('handleNewAgent("claude-code")');
-    expect(sidebarTsx).toContain('handleNewAgent("codex")');
-    expect(sidebarTsx).toContain('handleNewAgent("gemini")');
-    expect(sidebarTsx).toContain('handleNewAgent("grok")');
-    expect(sidebarTsx).toContain('handleNewAgent("lmstudio")');
+  it("runtime coding-agent rows dispatch their authoritative type", () => {
+    expect(sidebarTsx).toContain("handleNewAgent(launcher.type)");
   });
 
   it("CLI rows dispatch via createTerminalThread without hardcoding launch mode", () => {
@@ -194,35 +217,37 @@ describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#236
   });
 
   it("renders Claude + Codex in the Coding agents section with Subscription", () => {
-    expect(sidebarTsx).toContain('data-testid="new-claude-codex-agent"');
-    const row = sidebarTsx.slice(
-      sidebarTsx.indexOf('data-testid="new-claude-codex-agent"'),
-      sidebarTsx.indexOf('data-testid="new-claude-codex-agent"') + 1200,
-    );
-    expect(row).toContain("Claude + Codex");
-    expect(row).toContain("Anthropic + OpenAI · paired coding agents");
-    expect(row).toMatch(/>\s*Subscription\s*</);
+    expect(NATIVE_AGENT_LAUNCHER_METADATA["claude-codex"]).toMatchObject({
+      label: "Claude + Codex",
+      description: "Anthropic + OpenAI · paired coding agents",
+      testId: "new-claude-codex-agent",
+      chip: { label: "Subscription", variant: "subscription" },
+    });
     // Inside the Coding agents section (after its label, before Command line).
     const codingIdx = sidebarTsx.indexOf(">Coding agents<");
     const cliIdx = sidebarTsx.indexOf(">Command line<");
-    const rowIdx = sidebarTsx.indexOf('data-testid="new-claude-codex-agent"');
+    const rowIdx = sidebarTsx.indexOf("<For each={nativeAgentLaunchers()}>");
     expect(rowIdx).toBeGreaterThan(codingIdx);
     expect(rowIdx).toBeLessThan(cliIdx);
   });
 
   it("Claude + Codex routes through the native coding-agent path", () => {
-    expect(sidebarTsx).toContain('handleNewAgent("claude-codex")');
+    expect(sidebarTsx).toContain("handleNewAgent(launcher.type)");
   });
 
-  it("Claude + Codex gates on BOTH Claude and Codex org policies without hiding on probe lag", () => {
-    const gate = sidebarTsx.slice(
-      sidebarTsx.indexOf("const showPairedAgent"),
-      sidebarTsx.indexOf("const showPairedAgent") + 400,
-    );
-    expect(gate).toContain("allowsClaudeAgent(authStore.privateChatPolicy)");
-    expect(gate).toContain("allowsCodexAgent(authStore.privateChatPolicy)");
-    expect(gate).not.toContain("claudeAvailable()");
-    expect(gate).not.toContain("codexAvailable()");
+  it("Claude + Codex requires both organization policy gates", () => {
+    for (const denied of ["allow_claude_agent", "allow_codex_agent"] as const) {
+      const policy = {
+        allow_claude_agent: true,
+        allow_codex_agent: true,
+      } as OrganizationPrivateModelsPolicy;
+      policy[denied] = false;
+      expect(
+        getNativeAgentLaunchers(runtimeAgents, policy).map(
+          (launcher) => launcher.type,
+        ),
+      ).not.toContain("claude-codex");
+    }
   });
 
   it("Seren Agent still creates a chat thread (no agent_type stamp)", () => {
@@ -257,25 +282,23 @@ describe("ThreadSidebar — Seren Agent clarification + Claude + Codex row (#236
   });
 });
 
-describe("ThreadSidebar — launcher rows are policy-gated, not probe-gated", () => {
-  it("does not hide coding-agent rows when the availability probe is empty or late", () => {
-    for (const name of [
-      "const showClaudeAgent",
-      "const showCodexAgent",
-      "const showGeminiAgent",
-      "const showGrokAgent",
-      "const showLmStudioAgent",
-    ]) {
-      const gate = sidebarTsx.slice(
-        sidebarTsx.indexOf(name),
-        sidebarTsx.indexOf(name) + 180,
-      );
-      expect(gate).not.toContain("Available()");
-      expect(gate).not.toContain("availableAgents");
-    }
+describe("ThreadSidebar — runtime-derived native launcher inventory (#3656)", () => {
+  it("preserves runtime order and removes unavailable or policy-blocked agents", () => {
+    const agents = runtimeAgents.map((agent) =>
+      agent.type === "gemini" ? { ...agent, available: false } : agent,
+    );
+    const policy = {
+      allow_codex_agent: false,
+      allow_lmstudio_agent: false,
+    } as OrganizationPrivateModelsPolicy;
+    expect(
+      getNativeAgentLaunchers(agents, policy).map(
+        (launcher) => launcher.type,
+      ),
+    ).toEqual(["claude-code", "grok"]);
   });
 
-  it("does not hide CLI terminal rows when the availability probe is empty or late", () => {
+  it("keeps CLI terminal rows separate from runtime availability", () => {
     const section = sidebarTsx.slice(
       sidebarTsx.indexOf("const showCliLaunchers"),
       sidebarTsx.indexOf("const showCliLaunchers") + 220,
@@ -309,19 +332,18 @@ describe("Coding-agent launch failures (#3089)", () => {
 
 describe("ThreadSidebar — LM Studio local agent row (#2444)", () => {
   it("renders LM Studio in Coding agents with local copy and dispatch", () => {
-    expect(sidebarTsx).toContain('data-testid="new-lmstudio-agent"');
-    const row = sidebarTsx.slice(
-      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"'),
-      sidebarTsx.indexOf('data-testid="new-lmstudio-agent"') + 1200,
-    );
-    expect(row).toContain("LM Studio Agent");
-    expect(row).toContain("Local models · OpenAI-compatible HTTP");
-    expect(row).toContain('handleNewAgent("lmstudio")');
+    expect(NATIVE_AGENT_LAUNCHER_METADATA.lmstudio).toMatchObject({
+      label: "LM Studio Agent",
+      description: "Local models · OpenAI-compatible HTTP",
+      testId: "new-lmstudio-agent",
+      chip: { label: "Local", variant: "local" },
+    });
     const codingIdx = sidebarTsx.indexOf(">Coding agents<");
     const cliIdx = sidebarTsx.indexOf(">Command line<");
-    const rowIdx = sidebarTsx.indexOf('data-testid="new-lmstudio-agent"');
+    const rowIdx = sidebarTsx.indexOf("<For each={nativeAgentLaunchers()}>");
     expect(rowIdx).toBeGreaterThan(codingIdx);
     expect(rowIdx).toBeLessThan(cliIdx);
+    expect(sidebarTsx).toContain("handleNewAgent(launcher.type)");
   });
 });
 
