@@ -149,7 +149,12 @@ function enqueueEvent(event: RunEvent): Promise<void> {
   return applyQueue;
 }
 
+// Runs cancelled because their launch failed. Their late cancel events must
+// not re-open the run overview over the launch form that shows the error.
+const dismissedRunIds = new Set<string>();
+
 async function applyEvent(event: RunEvent): Promise<void> {
+  if (dismissedRunIds.has(event.run_id)) return;
   if (state.activeRunId && event.run_id !== state.activeRunId) return;
   if (event.sequence <= state.lastSequence) return;
 
@@ -223,12 +228,14 @@ async function launch(options: LaunchOptions): Promise<void> {
     return;
   }
   setState({ launchPending: true, error: null });
+  let createdRunId: string | null = null;
   try {
     const run = await runCreate(
       trimmedObjective,
       options.rootPath ?? null,
       options.maxAttempts,
     );
+    createdRunId = run.id;
     for (const agent of options.agents) {
       await runAddAgent(
         run.id,
@@ -270,6 +277,21 @@ async function launch(options: LaunchOptions): Promise<void> {
     setState("activeRunId", run.id);
     await hydrate(run.id);
   } catch (error) {
+    // A run that failed to finish launching must not keep running: its
+    // run_created/task_added events already hydrated a snapshot, which swaps
+    // the panel to the run overview and unmounts the only surface showing
+    // runStore.error — and with no lease the dispatcher would quietly run
+    // the tasks in the real project root instead of the requested isolation.
+    // Cancel the partial run and return to the launch form with the error.
+    if (createdRunId) {
+      dismissedRunIds.add(createdRunId);
+      try {
+        await runCancel(createdRunId);
+      } catch {
+        // Preserve the original launch failure over a cancel failure.
+      }
+      setState({ activeRunId: null, snapshot: null, lastSequence: 0 });
+    }
     setState("error", errorMessage(error));
   } finally {
     setState("launchPending", false);
