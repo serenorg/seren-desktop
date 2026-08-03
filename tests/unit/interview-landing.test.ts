@@ -3,11 +3,13 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   catalogAssetUrl,
+  INTAKE_PERSISTENCE_RETRY_MESSAGE,
   nextInterviewSelection,
   resolveInterviewEmployeeSlug,
+  runPersistedIntakeHandoff,
 } from "@/components/interview/interviewLandingModel";
 
 const catalog = Array.from({ length: 15 }, (_, index) => ({
@@ -47,6 +49,62 @@ describe("InterviewLanding", () => {
     expect(nextInterviewSelection(null, catalog, "cfo")).toBe("cfo");
     expect(nextInterviewSelection("removed-role", catalog, "cfo")).toBe("cfo");
     expect(nextInterviewSelection("removed-role", catalog, null)).toBeNull();
+  });
+
+  it("opens scheduling only after intake persistence succeeds", async () => {
+    const order: string[] = [];
+
+    await expect(
+      runPersistedIntakeHandoff(
+        async () => {
+          order.push("persisted");
+        },
+        () => order.push("complete"),
+        async () => {
+          order.push("scheduling-opened");
+        },
+      ),
+    ).resolves.toBe("scheduling-opened");
+
+    expect(order).toEqual(["persisted", "complete", "scheduling-opened"]);
+  });
+
+  it("does not complete or open scheduling when persistence fails", async () => {
+    const persistenceError = new Error("backend detail that must not be shown");
+    const onPersisted = vi.fn();
+    const openScheduling = vi.fn();
+
+    await expect(
+      runPersistedIntakeHandoff(
+        async () => {
+          throw persistenceError;
+        },
+        onPersisted,
+        openScheduling,
+      ),
+    ).rejects.toBe(persistenceError);
+
+    expect(onPersisted).not.toHaveBeenCalled();
+    expect(openScheduling).not.toHaveBeenCalled();
+    expect(INTAKE_PERSISTENCE_RETRY_MESSAGE).not.toContain(
+      persistenceError.message,
+    );
+  });
+
+  it("keeps a persisted intake complete when automatic scheduling fails", async () => {
+    const onPersisted = vi.fn();
+
+    await expect(
+      runPersistedIntakeHandoff(
+        async () => undefined,
+        onPersisted,
+        async () => {
+          throw new Error("opener failed");
+        },
+      ),
+    ).resolves.toBe("scheduling-open-failed");
+
+    expect(onPersisted).toHaveBeenCalledOnce();
   });
 });
 

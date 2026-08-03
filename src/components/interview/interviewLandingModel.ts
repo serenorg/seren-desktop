@@ -5,6 +5,32 @@ import type { EmployeeCatalogItem } from "@/api/employee-catalog";
 
 const CATALOG_ASSET_ORIGIN = "https://serendb.com";
 
+export const INTAKE_PERSISTENCE_RETRY_MESSAGE =
+  "We couldn't save your intake. Your answers are still here. Please try Send and Schedule again.";
+
+export const INTAKE_SCHEDULING_RETRY_MESSAGE =
+  "Your intake was saved, but Calendly didn't open. Use Open Calendly below.";
+
+export type PersistedIntakeHandoffResult =
+  | "scheduling-opened"
+  | "scheduling-open-failed";
+
+export async function runPersistedIntakeHandoff(
+  persist: () => Promise<void>,
+  onPersisted: () => void,
+  openScheduling: () => Promise<void>,
+): Promise<PersistedIntakeHandoffResult> {
+  await persist();
+  onPersisted();
+
+  try {
+    await openScheduling();
+    return "scheduling-opened";
+  } catch {
+    return "scheduling-open-failed";
+  }
+}
+
 export function catalogAssetUrl(path: string): string {
   if (/^https?:\/\//.test(path)) return path;
   return `${CATALOG_ASSET_ORIGIN}${path.startsWith("/") ? path : `/${path}`}`;
