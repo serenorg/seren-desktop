@@ -22,6 +22,22 @@ vi.mock("@/lib/tauri-bridge", () => ({
   storeSerenApiKey: mocks.storeSerenApiKey,
 }));
 
+const expectedDesktopScopes = [
+  "publisher:*",
+  "managed-deployment:update",
+  "managed-deployment:stop",
+  "managed-deployment:delete",
+  "organization:read",
+  "publisher-definition:read",
+  "publisher-definition:create",
+  "publisher-definition:update",
+  "publisher-pricing:update",
+  "oauth-provider:read",
+  "oauth-provider:create",
+  "oauth-provider:update",
+  "oauth-connection:read",
+];
+
 import {
   getDesktopApiKeyStatus,
   repairDesktopApiKey,
@@ -50,12 +66,7 @@ const replacementRecord = {
   key_type: "user" as const,
   name: "Seren Desktop",
   organization_id: "00000000-0000-4000-8000-000000000010",
-  scopes: [
-    "publisher:*",
-    "managed-deployment:update",
-    "managed-deployment:stop",
-    "managed-deployment:delete",
-  ],
+  scopes: [...expectedDesktopScopes],
 };
 
 describe("Desktop API access reconciliation (#3520)", () => {
@@ -80,13 +91,22 @@ describe("Desktop API access reconciliation (#3520)", () => {
     });
   });
 
-  it("detects a pre-#3606 key, replaces it, and returns a green scope state", async () => {
+  it("detects a pre-#3652 key, replaces it, and returns a green scope state", async () => {
     const stale = await getDesktopApiKeyStatus();
 
     expect(stale.state).toBe("outdated");
     expect(stale.missingScopes).toEqual([
       "managed-deployment:stop",
       "managed-deployment:delete",
+      "organization:read",
+      "publisher-definition:read",
+      "publisher-definition:create",
+      "publisher-definition:update",
+      "publisher-pricing:update",
+      "oauth-provider:read",
+      "oauth-provider:create",
+      "oauth-provider:update",
+      "oauth-connection:read",
     ]);
     expect(stale.unexpectedScopes).toEqual([]);
     expect(stale.maskedValue).toBe("seren_legacy_••••••••");
@@ -102,12 +122,7 @@ describe("Desktop API access reconciliation (#3520)", () => {
         name: "Seren Desktop",
         key_type: undefined,
         agent_identity_id: undefined,
-        scopes: [
-          "publisher:*",
-          "managed-deployment:update",
-          "managed-deployment:stop",
-          "managed-deployment:delete",
-        ],
+        scopes: expectedDesktopScopes,
       },
       throwOnError: false,
     });
@@ -129,13 +144,7 @@ describe("Desktop API access reconciliation (#3520)", () => {
         data: [
           {
             ...staleRecord,
-            scopes: [
-              "publisher:*",
-              "managed-deployment:update",
-              "managed-deployment:stop",
-              "managed-deployment:delete",
-              "managed-deployment:*",
-            ],
+            scopes: [...expectedDesktopScopes, "managed-deployment:*"],
           },
         ],
       },

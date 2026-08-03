@@ -8038,7 +8038,7 @@ dependencies = [
 [[package]]
 name = "seren-secrets-crypto"
 version = "0.4.0"
-source = "git+https://github.com/serenorg/seren-secrets.git?tag=v0.4.0#8492f489e0a3addfbf29eaf2302e87f6d5de253e"
+source = "git+https://github.com/serenorg/seren-secrets.git#8d1b94a3e1bf30650798b3c68905933a3579fad8"
 dependencies = [
  "aes",
  "argon2",
@@ -8073,7 +8073,7 @@ dependencies = [
 [[package]]
 name = "seren-secrets-macros"
 version = "0.4.0"
-source = "git+https://github.com/serenorg/seren-secrets.git?tag=v0.4.0#8492f489e0a3addfbf29eaf2302e87f6d5de253e"
+source = "git+https://github.com/serenorg/seren-secrets.git#8d1b94a3e1bf30650798b3c68905933a3579fad8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -9407,7 +9407,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.1",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.59.0",

@@ -359,6 +359,36 @@ struct ApprovalRequirement {
 
 const APPROVAL_REQUIREMENTS: &[ApprovalRequirement] = &[
     ApprovalRequirement {
+        publisher_slug: "seren",
+        tool_pattern: "create_publisher",
+        description: "Create a publisher definition",
+        is_destructive: false,
+    },
+    ApprovalRequirement {
+        publisher_slug: "seren",
+        tool_pattern: "update_publisher",
+        description: "Update a publisher definition",
+        is_destructive: false,
+    },
+    ApprovalRequirement {
+        publisher_slug: "seren",
+        tool_pattern: "update_publisher_pricing",
+        description: "Update publisher pricing",
+        is_destructive: false,
+    },
+    ApprovalRequirement {
+        publisher_slug: "seren",
+        tool_pattern: "create_org_oauth_provider",
+        description: "Create an organization OAuth provider",
+        is_destructive: false,
+    },
+    ApprovalRequirement {
+        publisher_slug: "seren",
+        tool_pattern: "update_org_oauth_provider",
+        description: "Update an organization OAuth provider",
+        is_destructive: false,
+    },
+    ApprovalRequirement {
         publisher_slug: "gmail",
         tool_pattern: "delete_messages_by_message_id",
         description: "Permanently delete email",
@@ -406,7 +436,13 @@ const TRUSTED_READ_OPERATIONS: &[(&str, &str)] = &[
     // at connect time. They ride the same enforced MCP transport as model
     // dispatch, so they authorize through the gate like everything else.
     ("seren", "list_agent_publishers"),
+    ("seren", "get_agent_publisher"),
     ("seren", "list_mcp_tools"),
+    ("seren", "list_organizations"),
+    ("seren", "list_user_oauth_providers"),
+    ("seren", "list_user_oauth_connections"),
+    ("seren", "list_org_oauth_providers"),
+    ("seren", "get_org_oauth_provider"),
 ];
 
 /// Leading verb tokens that denote a side-effect-free read.
@@ -3175,7 +3211,38 @@ mod tests {
 
     #[test]
     fn seren_builtin_reads_stay_trusted() {
-        assert_eq!(classify_operation("seren", "list_projects"), OperationClass::TrustedRead);
+        for tool in [
+            "list_projects",
+            "get_agent_publisher",
+            "list_organizations",
+            "list_user_oauth_providers",
+            "list_user_oauth_connections",
+            "list_org_oauth_providers",
+            "get_org_oauth_provider",
+        ] {
+            assert_eq!(
+                classify_operation("seren", tool),
+                OperationClass::TrustedRead,
+                "{tool} is a read-only Seren operation"
+            );
+        }
+    }
+
+    #[test]
+    fn seren_publisher_administration_mutations_are_high_risk() {
+        for tool in [
+            "create_publisher",
+            "update_publisher",
+            "update_publisher_pricing",
+            "create_org_oauth_provider",
+            "update_org_oauth_provider",
+        ] {
+            assert_eq!(
+                classify_operation("seren", tool),
+                OperationClass::HighRisk,
+                "{tool} must require explicit approval"
+            );
+        }
     }
 
     // ---- route-aware behavior -------------------------------------------

@@ -17,6 +17,15 @@ export const DESKTOP_API_KEY_SCOPES = [
   "managed-deployment:update",
   "managed-deployment:stop",
   "managed-deployment:delete",
+  "organization:read",
+  "publisher-definition:read",
+  "publisher-definition:create",
+  "publisher-definition:update",
+  "publisher-pricing:update",
+  "oauth-provider:read",
+  "oauth-provider:create",
+  "oauth-provider:update",
+  "oauth-connection:read",
 ] as const;
 
 export interface CreateApiKeyOptions {

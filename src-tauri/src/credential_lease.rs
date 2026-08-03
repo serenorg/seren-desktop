@@ -25,12 +25,22 @@ const LEASE_RENEWAL_WINDOW_SECONDS: i64 = 6 * 60 * 60;
 // wildcard. Managed deployment mutations are a separate Core capability and
 // must be granted explicitly. Keep this at the narrow lifecycle operations
 // exposed to automation; do not broaden it to `managed-deployment:*`. See
-// #3194, #3489, and #3606.
+// #3194, #3489, #3606, and #3652. Publisher administration remains split
+// into exact read/create/update capabilities with no delete wildcard.
 const VERIFIED_LEASE_SCOPES: &[&str] = &[
     "publisher:*",
     "managed-deployment:update",
     "managed-deployment:stop",
     "managed-deployment:delete",
+    "organization:read",
+    "publisher-definition:read",
+    "publisher-definition:create",
+    "publisher-definition:update",
+    "publisher-pricing:update",
+    "oauth-provider:read",
+    "oauth-provider:create",
+    "oauth-provider:update",
+    "oauth-connection:read",
 ];
 
 /// What the renderer and provider runtime are allowed to see. The real key is
@@ -809,7 +819,7 @@ mod tests {
     };
 
     #[test]
-    fn credential_lease_requests_exact_managed_lifecycle_capabilities() {
+    fn credential_lease_requests_exact_managed_and_publisher_admin_capabilities() {
         assert_eq!(
             VERIFIED_LEASE_SCOPES,
             [
@@ -817,9 +827,20 @@ mod tests {
                 "managed-deployment:update",
                 "managed-deployment:stop",
                 "managed-deployment:delete",
+                "organization:read",
+                "publisher-definition:read",
+                "publisher-definition:create",
+                "publisher-definition:update",
+                "publisher-pricing:update",
+                "oauth-provider:read",
+                "oauth-provider:create",
+                "oauth-provider:update",
+                "oauth-connection:read",
             ]
         );
         assert!(!VERIFIED_LEASE_SCOPES.contains(&"managed-deployment:*"));
+        assert!(!VERIFIED_LEASE_SCOPES.contains(&"publisher-definition:delete"));
+        assert!(!VERIFIED_LEASE_SCOPES.contains(&"oauth-provider:delete"));
     }
 
     /// The renderer reads these exact names. A rename here silently leaves a
@@ -841,7 +862,14 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["apiBaseUrl", "capability", "expiresAt", "keyId", "mcpUrl", "sessionId"]
+            [
+                "apiBaseUrl",
+                "capability",
+                "expiresAt",
+                "keyId",
+                "mcpUrl",
+                "sessionId"
+            ]
         );
         assert!(object.get("apiKey").is_none());
         assert!(object.get("api_key").is_none());

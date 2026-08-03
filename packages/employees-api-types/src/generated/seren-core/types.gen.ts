@@ -24,6 +24,7 @@ export type OpenapiOrganizationEmployeeCollaborationAssignment = {
     organization_id: string;
     organization_knowledge_read: boolean;
     organization_skill_use: boolean;
+    revoked_at?: string | null;
     updated_at: string;
 };
 
@@ -46,6 +47,11 @@ export type OpenapiOrganizationEmployeeCollaborationPolicy = {
 
 export type OpenapiUpdateOrganizationEmployeeCollaborationPolicyRequest = {
     enabled: boolean;
+    /**
+     * Revision returned by the last policy read. Use `baseline` when no
+     * organization-specific policy row exists yet.
+     */
+    expected_policy_revision: string;
     organization_artifact_write?: boolean;
     organization_credential_use?: boolean;
     organization_knowledge_read?: boolean;
@@ -54,6 +60,11 @@ export type OpenapiUpdateOrganizationEmployeeCollaborationPolicyRequest = {
 
 export type OpenapiUpsertOrganizationEmployeeCollaborationAssignmentRequest = {
     allowed_task_labels?: Array<string>;
+    /**
+     * Generation returned by the last assignment read. Omit only when
+     * creating an assignment that does not yet exist.
+     */
+    expected_assignment_generation?: number | null;
     organization_artifact_write?: boolean;
     organization_credential_use?: boolean;
     organization_knowledge_read?: boolean;
