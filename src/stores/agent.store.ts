@@ -1943,6 +1943,19 @@ async function awaitAgentOAuthRoutingForPrompt(
   );
 }
 
+async function setAgentOAuthUserTurn(
+  providerSessionId: string,
+  userTurnId: string | null | undefined,
+): Promise<void> {
+  const turn = userTurnId?.trim();
+  const routing = agentOAuthRoutingSnapshots.get(providerSessionId);
+  if (!turn || !routing) return;
+  await providerService.setOAuthRouting(providerSessionId, {
+    ...routing,
+    userTurnId: turn,
+  });
+}
+
 createRoot(() => {
   createEffect(() => {
     oauthConnectionsRevision();
@@ -2698,6 +2711,7 @@ export const agentStore = {
       }
 
       try {
+        await setAgentOAuthUserTurn(newSessionId, replay?.currentUserMessageId);
         const { merged: retryContext, newSignature } =
           await this.buildPromptContext(
             newSessionId,
@@ -2734,6 +2748,7 @@ export const agentStore = {
             context: promptContext,
             displayContent: replay?.displayContent,
             docNames: replay?.docNames,
+            currentUserMessageId: replay?.currentUserMessageId,
           });
         }
 
@@ -6580,6 +6595,7 @@ export const agentStore = {
       "[AgentStore] Calling providerService.sendPrompt...",
     );
     try {
+      await setAgentOAuthUserTurn(session.info.id, userMessage.id);
       const { merged, newSignature } = await this.buildPromptContext(
         sessionId,
         context,

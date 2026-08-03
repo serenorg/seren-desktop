@@ -69,11 +69,86 @@ function isGmailSendRequest(publisher, tool, method, path) {
   );
 }
 
+function isGmailProfileRequest(publisher, tool, method, path) {
+  if (publisher.toLowerCase() !== "gmail") return false;
+  if (tool) return tool.toLowerCase() === "get_profile";
+  if (method.toUpperCase() !== "GET" || !path) return false;
+  return path.split("?", 1)[0].replace(/^\/+|\/+$/g, "").toLowerCase() ===
+    "profile";
+}
+
+function gmailProfileEmail(response) {
+  const text = response?.result?.content?.find(
+    (item) => item?.type === "text" && typeof item.text === "string",
+  )?.text;
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    const candidate = parsed?.emailAddress ?? parsed?.data?.emailAddress;
+    return typeof candidate === "string" && candidate.trim()
+      ? candidate.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function gmailProfileMatchesRouting(routing, connectionId, emailAddress) {
+  const expected = routing?.accounts?.gmail?.connections?.find(
+    (connection) => connection?.connectionId === connectionId,
+  )?.label;
+  if (typeof expected !== "string" || !expected.includes("@")) return true;
+  return expected.trim().toLowerCase() === emailAddress.trim().toLowerCase();
+}
+
+/**
+ * Per-provider-session sender checkpoint. Only the desktop runtime can advance
+ * the human turn id; model-authored MCP arguments cannot manufacture a later
+ * turn and therefore cannot self-confirm a Gmail sender.
+ */
+export function createGmailSendConfirmationTracker() {
+  let userTurnId = null;
+  let pending = null;
+  let confirmedConnectionId = null;
+
+  return {
+    setUserTurnId(nextUserTurnId) {
+      userTurnId = nonEmptyString(nextUserTurnId);
+    },
+    noteProfileVerified(connectionId) {
+      const connection = nonEmptyString(connectionId);
+      if (!connection || !userTurnId || confirmedConnectionId === connection) {
+        return;
+      }
+      pending = {
+        preparedAtUserTurnId:
+          pending?.preparedAtUserTurnId ?? userTurnId,
+        verifiedConnectionId: connection,
+      };
+    },
+    canSend(connectionId) {
+      const connection = nonEmptyString(connectionId);
+      if (!connection || !userTurnId) return false;
+      if (confirmedConnectionId === connection) return true;
+      return (
+        pending?.verifiedConnectionId === connection &&
+        pending.preparedAtUserTurnId !== userTurnId
+      );
+    },
+    markSendSucceeded(connectionId) {
+      const connection = nonEmptyString(connectionId);
+      if (!connection) return;
+      confirmedConnectionId = connection;
+      pending = null;
+    },
+  };
+}
+
 /**
  * Decide whether a Seren MCP request can pass through unchanged, must fail
  * closed, or should use the first-party publisher proxy with an OAuth selector.
  */
-export function planSerenMcpRequest(routing, payload) {
+export function planSerenMcpRequest(routing, payload, gmailConfirmation) {
   if (
     !payload ||
     typeof payload !== "object" ||
@@ -130,14 +205,15 @@ export function planSerenMcpRequest(routing, payload) {
   const method = nonEmptyString(args.method) ?? "POST";
   const path = nonEmptyString(args.path);
   if (
-    !selectionWasExplicit &&
-    isGmailSendRequest(publisher, tool, method, path)
+    isGmailSendRequest(publisher, tool, method, path) &&
+    (!selectionWasExplicit ||
+      gmailConfirmation?.canSend(explicitConnectionId) !== true)
   ) {
     return {
       kind: "error",
       response: toolError(
         payload.id,
-        "Gmail send blocked: name the active sender account, ask the user to confirm or choose another account, and wait for a later user reply. After that confirmation, verify gmail/get_profile and retry the send with the confirmed account's top-level connection_id.",
+        "Gmail send blocked: first call gmail/get_profile with the intended account's top-level connection_id, name the verified sender, ask the user to confirm or choose another account, and wait for a later reply from the user. A model-supplied selector cannot confirm a sender on the same human turn.",
       ),
     };
   }
@@ -529,6 +605,7 @@ export async function createSerenMcpOAuthProxy({
   assertRelayableUpstream(api);
 
   let routing = null;
+  const gmailConfirmation = createGmailSendConfirmationTracker();
   let closed = false;
   const routePath = `/${randomBytes(24).toString("hex")}/mcp`;
   const controllers = new Set();
@@ -550,7 +627,11 @@ export async function createSerenMcpOAuthProxy({
       } catch {
         // Let the upstream MCP server return the protocol parse error.
       }
-      const plan = planSerenMcpRequest(routing, payload);
+      const plan = planSerenMcpRequest(
+        routing,
+        payload,
+        gmailConfirmation,
+      );
       if (plan.kind === "error") {
         sendLocalMcpResponse(response, plan.response);
         return;
@@ -561,12 +642,34 @@ export async function createSerenMcpOAuthProxy({
         request.once("aborted", () => controller.abort());
         response.once("close", () => controller.abort());
         try {
-          const routedResponse = await executePublisherPlan(
+          let routedResponse = await executePublisherPlan(
             plan,
             nonEmptyString(request.headers.authorization),
             api.toString(),
             controller.signal,
           );
+          const profileRequest = isGmailProfileRequest(
+            plan.publisher,
+            plan.request.kind === "tool" ? plan.request.tool : null,
+            plan.request.kind === "api" ? plan.request.method : "GET",
+            plan.request.kind === "api" ? plan.request.path : null,
+          );
+          if (profileRequest && routedResponse?.result?.isError !== true) {
+            const profileEmail = gmailProfileEmail(routedResponse);
+            if (
+              !profileEmail ||
+              !gmailProfileMatchesRouting(
+                routing,
+                plan.connectionId,
+                profileEmail,
+              )
+            ) {
+              routedResponse = toolError(
+                plan.id,
+                "Gmail sender verification failed: get_profile did not return the email address for the selected connected account. No sender confirmation was recorded.",
+              );
+            }
+          }
           if (
             plan.selectionWasExplicit &&
             routedResponse?.result?.isError !== true &&
@@ -580,6 +683,20 @@ export async function createSerenMcpOAuthProxy({
             } catch {
               // The publisher call already succeeded. A renderer sync failure
               // must not replace its real result with a proxy error.
+            }
+          }
+          if (routedResponse?.result?.isError !== true) {
+            if (profileRequest) {
+              gmailConfirmation.noteProfileVerified(plan.connectionId);
+            } else if (
+              isGmailSendRequest(
+                plan.publisher,
+                plan.request.kind === "tool" ? plan.request.tool : null,
+                plan.request.kind === "api" ? plan.request.method : "POST",
+                plan.request.kind === "api" ? plan.request.path : null,
+              )
+            ) {
+              gmailConfirmation.markSendSucceeded(plan.connectionId);
             }
           }
           if (!response.destroyed) {
@@ -640,8 +757,12 @@ export async function createSerenMcpOAuthProxy({
       routing = {
         publishers: { ...(nextRouting?.publishers ?? {}) },
         ambiguous: { ...(nextRouting?.ambiguous ?? {}) },
+        accounts: { ...(nextRouting?.accounts ?? {}) },
         available: nextRouting?.available,
       };
+      if (nonEmptyString(nextRouting?.userTurnId)) {
+        gmailConfirmation.setUserTurnId(nextRouting.userTurnId);
+      }
     },
     async close() {
       if (closed) return;

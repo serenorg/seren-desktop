@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   approvalId: "",
   approvalResponse: true,
+  approvalConnectionId: null as string | null,
   // When true, the approval-response listener never fires, so the approval UI's
   // own timeout is what resolves the request (an expiry).
   approvalNoResponse: false,
@@ -64,6 +65,7 @@ vi.mock("@/lib/support/hook", () => ({
 vi.mock("@/stores/conversation.store", () => ({
   conversationStore: {
     activeConversationId: "active-conversation",
+    getMessagesFor: () => [{ id: "user-turn-2", role: "user" }],
   },
 }));
 
@@ -182,10 +184,11 @@ function shellPromptCount(): number {
 }
 
 describe("tool executor authorization gate", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     mocks.approvalId = "";
     mocks.approvalResponse = true;
+    mocks.approvalConnectionId = null;
     mocks.approvalNoResponse = false;
     mocks.shellApprovalId = "";
     mocks.shellApprovalResponse = true;
@@ -216,6 +219,10 @@ describe("tool executor authorization gate", () => {
       isError: false,
     });
     mocks.callSerenTool.mockResolvedValue({ result: "ok", is_error: false });
+    const { resetGmailSenderConfirmationsForTests } = await import(
+      "@/stores/gmail-send-confirmation.store"
+    );
+    resetGmailSenderConfirmationsForTests();
 
     mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "authorize_tool_operation") {
@@ -289,14 +296,22 @@ describe("tool executor authorization gate", () => {
       async (
         eventName: string,
         handler: (event: {
-          payload: { id: string; approved: boolean };
+          payload: {
+            id: string;
+            approved: boolean;
+            connectionId?: string | null;
+          };
         }) => void,
       ) => {
         if (eventName === "gateway-tool-approval-response") {
           // Simulate the user never answering: leave the request to time out.
           if (!mocks.approvalNoResponse) {
             handler({
-              payload: { id: mocks.approvalId, approved: mocks.approvalResponse },
+              payload: {
+                id: mocks.approvalId,
+                approved: mocks.approvalResponse,
+                connectionId: mocks.approvalConnectionId,
+              },
             });
           }
         }
@@ -404,6 +419,42 @@ describe("tool executor authorization gate", () => {
     ]);
   });
 
+  it("rechecks a Gmail account substituted by the approval UI", async () => {
+    const [{ executeTool }, { noteGmailSenderProfileVerified }] =
+      await Promise.all([
+        import("@/lib/tools/executor"),
+        import("@/stores/gmail-send-confirmation.store"),
+      ]);
+    noteGmailSenderProfileVerified(
+      "active-conversation",
+      "conn-confirmed",
+      "user-turn-1",
+    );
+    mocks.authorizeDecision.decision = "prompt";
+    mocks.authorizeDecision.promptKind = "one-shot";
+    mocks.authorizeDecision.operationClass = "high-risk";
+    mocks.approvalConnectionId = "conn-substituted";
+
+    const result = await executeTool({
+      id: "gmail-send-account-substitution",
+      type: "function",
+      function: {
+        name: "gateway__gmail__post_messages_send",
+        arguments: JSON.stringify({
+          connection_id: "conn-confirmed",
+          to: ["recipient@example.test"],
+          subject: "Approval substitution regression",
+          body: "Safe test body",
+        }),
+      },
+    });
+
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("Gmail send blocked");
+    expect(gatewayPromptCount()).toBe(1);
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
   it("treats an approval-UI timeout as an expiry, not a durable denial", async () => {
     const { executeTool } = await import("@/lib/tools/executor");
     mocks.authorizeDecision.decision = "prompt";
@@ -476,7 +527,7 @@ describe("tool executor authorization gate", () => {
         function: {
           name: "seren__call_publisher",
           arguments: JSON.stringify({
-            publisher: "gmail",
+            publisher: "outbound-mailer",
             tool: "post_send",
             connection_id: "conn-confirmed",
             tool_args: { to: "a@example.com" },
@@ -486,17 +537,17 @@ describe("tool executor authorization gate", () => {
       "conv-a",
     );
 
-    // The gate must classify the REAL operation (gmail/post_send), not the
+    // The gate must classify the REAL operation (outbound-mailer/post_send), not the
     // generic call_publisher envelope, so a high-risk publisher call cannot
     // ride an unclassified-call_publisher session grant. The transport
     // unwraps the same envelope, so the handle binding matches.
     expect(authorizeCalls()[0]).toMatchObject({
       route: "gateway",
-      publisherSlug: "gmail",
+      publisherSlug: "outbound-mailer",
       toolName: "post_send",
     });
     expect(mocks.callGatewayTool).toHaveBeenCalledWith(
-      "gmail",
+      "outbound-mailer",
       "post_send",
       { to: "a@example.com", connection_id: "conn-confirmed" },
       "handle-allow",

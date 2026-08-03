@@ -129,6 +129,8 @@ export interface AgentOAuthRouting {
   accounts?: Record<string, AgentOAuthPublisherAccounts>;
   /** False when account discovery failed, so runtimes can refuse default-account fallback. */
   available?: boolean;
+  /** Host-created id of the human message currently driving this agent turn. */
+  userTurnId?: string;
 }
 
 export interface AgentOAuthAccountChoice {

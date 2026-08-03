@@ -38,4 +38,14 @@ describe("chat-selected OAuth account persistence (#3589)", () => {
       expect(source, path).toContain("onConnectionSelected:");
     }
   });
+
+  it("delivers a host-created human turn id to the native OAuth proxy", () => {
+    const store = read("src/stores/agent.store.ts");
+    const proxy = read("bin/browser-local/seren-mcp-oauth-proxy.mjs");
+
+    expect(store).toContain("setAgentOAuthUserTurn");
+    expect(store).toContain("userMessage.id");
+    expect(proxy).toContain("nextRouting?.userTurnId");
+    expect(proxy).toContain("createGmailSendConfirmationTracker");
+  });
 });
