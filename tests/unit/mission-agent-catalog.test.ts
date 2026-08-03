@@ -3,6 +3,15 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const getAgentModelCatalog = vi.hoisted(() =>
+  vi.fn(async (agentType: string) => [
+    {
+      modelId: `${agentType}-cli-model`,
+      name: `${agentType} CLI model`,
+    },
+  ]),
+);
+
 vi.mock("@/services/organization-policy", () => ({
   allowsClaudeAgent: () => true,
   allowsCodexAgent: () => true,
@@ -16,13 +25,11 @@ vi.mock("@/services/private-models", () => ({
   privateModelsService: { listAvailable: vi.fn(async () => []) },
 }));
 vi.mock("@/services/providers", () => ({
+  getAgentModelCatalog,
   testLmStudioConnection: vi.fn(async () => ({ ok: true, models: [] })),
 }));
 vi.mock("@/services/seren-model-catalog", () => ({
   getLiveSerenModelCatalog: vi.fn(async () => []),
-}));
-vi.mock("@/stores/agent.store", () => ({
-  agentStore: { sessions: {} },
 }));
 vi.mock("@/stores/auth.store", () => ({
   authStore: { isAuthenticated: false, privateChatPolicy: null },
@@ -57,25 +64,48 @@ describe("Mission Control agent catalog", () => {
     ]);
   });
 
-  it("provides named built-in choices for each bundled local runtime", async () => {
-    await expect(loadMissionModelCatalog("claude-code")).resolves.toMatchObject({
-      models: expect.arrayContaining([
-        expect.objectContaining({ id: "claude-opus-4-8[1m]" }),
+  it("uses each local CLI catalog exactly, including paired roles", async () => {
+    await expect(
+      Promise.all([
+        loadMissionModelCatalog("claude-code", "/workspace"),
+        loadMissionModelCatalog("codex", "/workspace"),
+        loadMissionModelCatalog("gemini", "/workspace"),
+        loadMissionModelCatalog("grok", "/workspace"),
+        loadMissionModelCatalog("claude-codex:planner", "/workspace"),
+        loadMissionModelCatalog("claude-codex:executor", "/workspace"),
       ]),
-    });
-    await expect(loadMissionModelCatalog("codex")).resolves.toMatchObject({
-      models: expect.arrayContaining([
-        expect.objectContaining({ id: "gpt-5.6-sol" }),
-      ]),
-    });
-    await expect(loadMissionModelCatalog("gemini")).resolves.toMatchObject({
-      models: expect.arrayContaining([
-        expect.objectContaining({ id: "gemini-2.5-pro" }),
-      ]),
-    });
-    await expect(loadMissionModelCatalog("grok")).resolves.toMatchObject({
-      models: [expect.objectContaining({ id: "grok-4.5" })],
-    });
+    ).resolves.toEqual([
+      {
+        models: [
+          { id: "claude-code-cli-model", name: "claude-code CLI model" },
+        ],
+        note: null,
+      },
+      {
+        models: [{ id: "codex-cli-model", name: "codex CLI model" }],
+        note: null,
+      },
+      {
+        models: [{ id: "gemini-cli-model", name: "gemini CLI model" }],
+        note: null,
+      },
+      {
+        models: [{ id: "grok-cli-model", name: "grok CLI model" }],
+        note: null,
+      },
+      {
+        models: [
+          { id: "claude-code-cli-model", name: "claude-code CLI model" },
+        ],
+        note: null,
+      },
+      {
+        models: [{ id: "codex-cli-model", name: "codex CLI model" }],
+        note: null,
+      },
+    ]);
+
+    expect(getAgentModelCatalog).toHaveBeenCalledTimes(4);
   });
 
   it("deduplicates runtime and built-in choices without changing priority", () => {

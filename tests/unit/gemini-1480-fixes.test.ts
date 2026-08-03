@@ -1,23 +1,16 @@
 // ABOUTME: Critical regression guards for #1480 — Gemini Agent bottom controls.
-// ABOUTME: Two load-bearing assertions guarding specific footguns (lockedAgentName covered in gemini-agent.test.ts).
+// ABOUTME: Guards locked agent controls and Gemini ACP model-catalog passthrough.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+// @ts-expect-error - acp-runtime.mjs is a plain ESM harness without type declarations
+import { _applyAcpModelState } from "../../bin/browser-local/acp-runtime.mjs";
 
 const agentChatTsx = readFileSync(
   resolve("src/components/chat/AgentChat.tsx"),
   "utf-8",
 );
-const geminiRuntimeMjs = readFileSync(
-  resolve("bin/browser-local/gemini-runtime.mjs"),
-  "utf-8",
-);
-const acpRuntimeMjs = readFileSync(
-  resolve("bin/browser-local/acp-runtime.mjs"),
-  "utf-8",
-);
-
 describe("Gemini Agent #1480 — bottom-control regression guards", () => {
   it("lockedAgentType filter accepts gemini (not just codex/claude-code)", () => {
     // The filter at line 272/276 was: `=== "codex" || === "claude-code"`,
@@ -34,22 +27,44 @@ describe("Gemini Agent #1480 — bottom-control regression guards", () => {
     expect(matches.length).toBe(2);
   });
 
-  it("gemini-runtime advertises a non-empty availableModels list", () => {
-    // The model picker only renders when availableModels.length > 0.
-    // buildSessionStatus must report at least one model so the UI shows
-    // the "Gemini 2.5 Pro" label instead of falling through to the
-    // hidden-picker / wrong-label state.
-    expect(geminiRuntimeMjs).toContain("GEMINI_AVAILABLE_MODELS");
-    expect(geminiRuntimeMjs).toContain("gemini-2.5-pro");
-    expect(geminiRuntimeMjs).toContain(
-      "availableModels: GEMINI_AVAILABLE_MODELS",
-    );
-    // The shared status builder must surface the adapter's non-empty list.
-    const buildIdx = acpRuntimeMjs.indexOf("function buildSessionStatus");
-    expect(buildIdx).toBeGreaterThan(-1);
-    const fn = acpRuntimeMjs.slice(buildIdx, buildIdx + 800);
-    expect(fn).toContain("availableModels: session.availableModels");
-    // Negative: must NOT be the empty array literal anymore.
-    expect(fn).not.toMatch(/availableModels:\s*\[\s*\]/);
+  it("uses the model catalog returned by Gemini session/new verbatim", () => {
+    const session = {
+      currentModelId: "stale-model",
+      availableModels: [{ modelId: "stale-model", name: "Stale" }],
+      cliModels: [],
+    };
+
+    expect(
+      _applyAcpModelState(session, {
+        currentModelId: "gemini-cli-current",
+        availableModels: [
+          {
+            modelId: "gemini-cli-current",
+            name: "Gemini CLI current",
+            description: "Returned by the installed CLI",
+          },
+          { modelId: "gemini-cli-next", name: "Gemini CLI next" },
+        ],
+      }),
+    ).toBe(true);
+    expect(session).toEqual({
+      currentModelId: "gemini-cli-current",
+      availableModels: [
+        {
+          modelId: "gemini-cli-current",
+          name: "Gemini CLI current",
+          description: "Returned by the installed CLI",
+        },
+        { modelId: "gemini-cli-next", name: "Gemini CLI next" },
+      ],
+      cliModels: [
+        {
+          modelId: "gemini-cli-current",
+          name: "Gemini CLI current",
+          description: "Returned by the installed CLI",
+        },
+        { modelId: "gemini-cli-next", name: "Gemini CLI next" },
+      ],
+    });
   });
 });

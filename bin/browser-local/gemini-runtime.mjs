@@ -167,11 +167,11 @@ const GEMINI_ADAPTER = {
     "Gemini process exited while prompt was active.",
   loginRequiredMessage:
     "Gemini authentication required. Opening `gemini login` in a Terminal window — finish the sign-in there, then click + New Agent → Gemini Agent again.",
-  async setModel({ modelId, logPrefix }) {
-    console.warn(
-      `${logPrefix} setModel: ${modelId} stored as session intent — ` +
-        "no-op against the running CLI process (Gemini --model is fixed at " +
-        "spawn time). The next session spawn will use this model.",
+  async setModel({ session, modelId, request }) {
+    await request(
+      "session/set_model",
+      { sessionId: session.agentSessionId, modelId },
+      5_000,
     );
   },
 };

@@ -1,6 +1,6 @@
 // ABOUTME: Source-level regression tests for #1718 — instrument all three
 // ABOUTME: agent runtimes (Claude / Codex / Gemini) so picker/runtime model
-// ABOUTME: divergence is always visible in the app log.
+// ABOUTME: selections remain observable or are applied through the live protocol.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -74,17 +74,14 @@ describe("#1718 Codex runtime — thread/start model adoption is logged", () => 
   });
 });
 
-describe("#1718 Gemini runtime — mid-session setModel surfaces as a warn", () => {
-  it("setModel emits a console.warn explaining it is a no-op until the next spawn", () => {
-    // Mid-session setModel does not plumb to gemini-cli (Phase 1 limitation
-    // documented in the runtime). Without a log the user can change the
-    // picker and never know the running process is unchanged.
+describe("#3643 Gemini runtime — mid-session setModel reaches the CLI", () => {
+  it("sends session/set_model with the active CLI session and requested model", () => {
     const fnIdx = geminiRuntime.indexOf("async setModel(");
     expect(fnIdx).toBeGreaterThan(0);
     const region = geminiRuntime.slice(fnIdx, fnIdx + 1200);
-    expect(region).toContain("console.warn(");
-    // Pin the message text so the warn cannot be silently rewritten into
-    // something less honest.
-    expect(region).toMatch(/(no-op|spawn[ -]time)/);
+    expect(region).toContain('"session/set_model"');
+    expect(region).toContain("sessionId: session.agentSessionId");
+    expect(region).toContain("modelId");
+    expect(region).not.toMatch(/(no-op|spawn[ -]time)/);
   });
 });

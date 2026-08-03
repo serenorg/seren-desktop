@@ -103,10 +103,48 @@ function createAcpSessionRecord({
     currentModeId: currentModeId ?? adapter.defaultModeId,
     currentModelId: currentModelId ?? adapter.defaultModelId,
     availableModels: adapter.availableModels,
+    cliModels: [],
     configOptions: [],
     serenMcpConfigured,
     serenMcpProxy,
   };
+}
+
+function normalizeAcpModels(models) {
+  if (!Array.isArray(models)) return [];
+  return models
+    .filter(
+      (model) =>
+        model &&
+        typeof model.modelId === "string" &&
+        model.modelId.trim().length > 0,
+    )
+    .map((model) => ({
+      modelId: model.modelId.trim(),
+      name:
+        typeof model.name === "string" && model.name.trim().length > 0
+          ? model.name.trim()
+          : model.modelId.trim(),
+      ...(typeof model.description === "string" && model.description.length > 0
+        ? { description: model.description }
+        : {}),
+    }));
+}
+
+function applyAcpModelState(session, modelState) {
+  if (!modelState || typeof modelState !== "object") return false;
+  const cliModels = normalizeAcpModels(modelState.availableModels);
+  session.cliModels = cliModels;
+  session.availableModels = cliModels;
+
+  const currentModelId =
+    typeof modelState.currentModelId === "string" &&
+    modelState.currentModelId.trim().length > 0
+      ? modelState.currentModelId.trim()
+      : null;
+  session.currentModelId =
+    currentModelId ?? cliModels[0]?.modelId ?? null;
+  return true;
 }
 
 // ============================================================================
@@ -771,6 +809,21 @@ export function createAcpRuntime({
       );
 
       session.agentSessionId = sessionResult?.sessionId ?? sessionId;
+      applyAcpModelState(session, sessionResult?.models);
+
+      if (
+        typeof initialModelId === "string" &&
+        session.availableModels.some((model) => model.modelId === initialModelId) &&
+        session.currentModelId !== initialModelId
+      ) {
+        await sendRequest(
+          session,
+          "session/set_model",
+          { sessionId: session.agentSessionId, modelId: initialModelId },
+          5_000,
+        );
+        session.currentModelId = initialModelId;
+      }
       session.status = "ready";
 
       emit("provider://session-status", buildSessionStatus(session, "ready"));
@@ -1069,7 +1122,9 @@ export function createAcpRuntime({
     if (!session) {
       throw new Error(`No ${adapter.agentName} session: ${sessionId}`);
     }
-    const known = adapter.availableModels.find((model) => model.modelId === modelId);
+    const known = session.availableModels.find(
+      (model) => model.modelId === modelId,
+    );
     if (!known) {
       throw new Error(`Unknown ${adapter.agentName} model: ${modelId}`);
     }
@@ -1085,6 +1140,10 @@ export function createAcpRuntime({
     });
   }
 
+  function listCliModels(sessionId) {
+    return sessions.get(sessionId)?.cliModels ?? [];
+  }
+
   return {
     hasSession(sessionId) {
       return sessions.has(sessionId);
@@ -1098,11 +1157,13 @@ export function createAcpRuntime({
     setOAuthRouting,
     respondToPermission,
     setModel,
+    listCliModels,
   };
 }
 
 export {
   applyAcpPermissionMode as _applyAcpPermissionMode,
+  applyAcpModelState as _applyAcpModelState,
   emitToolCallUpdate as _emitAcpToolCallUpdate,
   sendRequest as _sendAcpRequest,
 };

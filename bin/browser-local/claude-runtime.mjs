@@ -2805,6 +2805,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
             agentSessionId: metadata.agentSessionId,
             claudeVersion: null,
             availableModelRecords: [],
+            cliModelRecords: [],
             currentModelId: metadata.currentModelId,
             currentModeId: "default",
             reasoningEffort: metadata.reasoningEffort,
@@ -2850,6 +2851,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       timeoutSecs: timeoutSecs ?? undefined,
       claudeVersion: null,
       availableModelRecords: [],
+      cliModelRecords: [],
       currentModelId,
       currentModeId,
       mcpConfigJson,
@@ -3184,9 +3186,10 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         }
       }
 
+      session.cliModelRecords = normalizeModelRecords(initResult);
       session.availableModelRecords = ensurePreferredModelRecord(
         augmentWithLegacyOpus(
-          normalizeModelRecords(initResult),
+          session.cliModelRecords,
         ),
         preferredModel,
       );
@@ -3559,6 +3562,16 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     return session ? buildAvailableModels(session) : [];
   }
 
+  function listCliModels(sessionId) {
+    const session = sessions.get(sessionId);
+    if (!session) return [];
+    return session.cliModelRecords.map((record) => ({
+      modelId: record.modelId,
+      name: record.name,
+      description: record.description,
+    }));
+  }
+
   async function setModel({ sessionId, modelId }) {
     const session = sessions.get(sessionId);
     if (!session) {
@@ -3751,6 +3764,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     respondToPermission,
     setModel,
     listSessionModels,
+    listCliModels,
     setConfigOption,
     forkSession,
     buildSyntheticTranscript,

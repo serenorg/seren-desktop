@@ -265,6 +265,10 @@ function registerBrowserLocalHandlers() {
     providerHandlers.getAvailableAgents,
   );
   registerHandler(
+    "provider_get_model_catalog",
+    providerHandlers.getModelCatalog,
+  );
+  registerHandler(
     "provider_check_agent_available",
     providerHandlers.checkAgentAvailable,
   );

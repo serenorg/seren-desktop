@@ -37,6 +37,7 @@ interface ControlClient {
   navigate(route: string): Promise<unknown>;
   click(selector: string): Promise<unknown>;
   fill(selector: string, value: string): Promise<unknown>;
+  select(selector: string, value: string): Promise<unknown>;
   press(key: string): Promise<unknown>;
   waitFor(selector: string, timeoutMs?: number): Promise<unknown>;
   dumpText(selector?: string): Promise<unknown>;
@@ -94,6 +95,13 @@ async function main(): Promise<void> {
       SEREN_VALIDATION_DEV_PORT: String(slot.port),
       SEREN_VALIDATION_INSTANCE: "1",
     };
+    const cliHome = process.env.SEREN_VALIDATION_CLI_HOME?.trim();
+    if (cliHome) {
+      childEnv.HOME = cliHome;
+      console.log(
+        "[validate:walkthrough] using the signed-in host CLI home; app data remains isolated",
+      );
+    }
     console.log(`[validate:walkthrough] scratch home ${validationHome}`);
 
     await rm(artifactsDir, { recursive: true, force: true });
@@ -255,6 +263,8 @@ function createClient(discovery: DiscoveryFile): ControlClient {
     navigate: (route) => command({ command: "navigate", route }),
     click: (selector) => command({ command: "click", selector }),
     fill: (selector, value) => command({ command: "fill", selector, value }),
+    select: (selector, value) =>
+      command({ command: "select", selector, value }),
     press: (key) => command({ command: "press", key }),
     waitFor: (selector, timeoutMs = 5000) =>
       command({ command: "waitFor", selector, timeoutMs }),

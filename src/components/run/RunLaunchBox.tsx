@@ -105,7 +105,13 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
     try {
       await Promise.all(
         MISSION_MODEL_TARGETS.map(async (target) => {
-          setModelCatalogs(target, await loadMissionModelCatalog(target));
+          setModelCatalogs(
+            target,
+            await loadMissionModelCatalog(
+              target,
+              fileTreeState.rootPath ?? ".",
+            ),
+          );
         }),
       );
     } finally {
