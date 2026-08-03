@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 import { getValidationRuntimeInfo } from "@/services/oauth-callback";
+import { getAvailableAgents } from "@/services/providers";
 import { setRootPath } from "@/stores/fileTree";
 
 interface ValidationCommand {
@@ -185,14 +186,15 @@ function select(
   return { selected: selector ?? "", value };
 }
 
-/** Read-only Tauri commands a validation scenario may invoke to assert a
- * server-side outcome (audit rows written, lease charged, approvals pending).
+/** Read-only operations a validation scenario may invoke to assert a native
+ * outcome (audit rows written, lease charged, provider agents advertised).
  * A small allowlist keeps the control channel read-only — no mutating or
  * credential-bearing command is reachable. #3355. */
 const READ_STATE_ALLOWLIST = new Set([
   "list_authorization_audit",
   "list_capability_leases",
   "list_pending_approvals",
+  "provider_get_available_agents",
 ]);
 
 async function readState(
@@ -204,6 +206,9 @@ async function readState(
     throw new Error(
       `readState command is not on the read-only allowlist: ${name}`,
     );
+  }
+  if (name === "provider_get_available_agents") {
+    return getAvailableAgents();
   }
   return invoke(name, args ?? {});
 }

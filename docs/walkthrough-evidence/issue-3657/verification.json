@@ -2,6 +2,25 @@
   "platform": "darwin",
   "signedIn": false,
   "serenSignInRequired": false,
+  "liveAgentTypes": [
+    "codex",
+    "claude-code",
+    "claude-codex",
+    "gemini",
+    "grok",
+    "lmstudio"
+  ],
+  "launchedAgentTypes": [
+    "claude-code",
+    "codex",
+    "gemini",
+    "grok",
+    "claude-codex",
+    "lmstudio"
+  ],
+  "everyLiveLocalAgentLaunched": true,
+  "serenSignInModalShown": false,
+  "postLaunchObservationMs": 2000,
   "liveChatModelCount": 5,
   "renderedChatModelCount": 5,
   "exactModelOrder": true,
