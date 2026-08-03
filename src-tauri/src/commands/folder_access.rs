@@ -146,20 +146,29 @@ fn preflight() -> FolderAccessPreflight {
 
 /// Report access status for every macOS special folder. On macOS the first probe
 /// may itself surface the consent prompt, which is the intended behavior when the
-/// user is on the permissions screen.
+/// user is on the permissions screen. The probe blocks until the user answers,
+/// so it must run on the blocking pool rather than pin an async worker.
 #[tauri::command]
 pub async fn folder_access_check_permissions() -> Result<FolderAccessPreflight, String> {
-    Ok(preflight())
+    tauri::async_runtime::spawn_blocking(preflight)
+        .await
+        .map_err(|error| format!("Folder access preflight failed: {error}"))
 }
 
 /// Touch the requested folder from the foreground app to surface the macOS consent
 /// prompt, then re-report the full preflight so callers see the updated state.
+/// Runs on the blocking pool: the syscall stays pending until the consent
+/// dialog is answered.
 #[tauri::command]
 pub async fn folder_access_request_permission(
     key: FolderAccessKey,
 ) -> Result<FolderAccessPreflight, String> {
-    let _ = check_for(key);
-    Ok(preflight())
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = check_for(key);
+        preflight()
+    })
+    .await
+    .map_err(|error| format!("Folder access request failed: {error}"))
 }
 
 /// Deep-link to System Settings → Privacy & Security → Files and Folders, where the
