@@ -24,6 +24,7 @@ const {
   normalizeToolCalls,
   prepareLmStudioMessagesForContextBudget,
   reasoningTextFromDelta,
+  schemaFromMcpTool,
 } = lmStudioRuntime as {
   buildLmStudioChatCompletionBodyForContextBudget: (args: {
     model: string;
@@ -84,6 +85,7 @@ const {
     modelId?: string,
   ) => void;
   reasoningTextFromDelta: (delta: unknown) => string;
+  schemaFromMcpTool: (tool: Record<string, unknown>) => Record<string, unknown>;
   lmStudioHttpBaseUrl: (value: string) => string;
   lmStudioWsBaseUrl: (value: string) => string;
   normalizeLmStudioBaseUrl: (value: string) => string;
@@ -209,6 +211,58 @@ describe("LM Studio runtime helpers", () => {
       "gateway_gmail_get-messages",
     );
     expect(normalizeOpenAiToolName("")).toBe("tool");
+  });
+
+  it("sends self-contained MCP tool schemas to LM Studio", () => {
+    const schema = schemaFromMcpTool({
+      inputSchema: {
+        type: "object",
+        properties: {
+          key_type: {
+            anyOf: [
+              { $ref: "#/$defs/ApiKeyType" },
+              { type: "null" },
+            ],
+          },
+        },
+        $defs: {
+          ApiKeyType: { type: "string", enum: ["user", "agent"] },
+        },
+        additionalProperties: false,
+      },
+    });
+    const prepared = buildLmStudioChatCompletionBodyForContextBudget({
+      model: "local-model",
+      messages: [{ role: "user", content: "Hello" }],
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "create_api_key",
+            parameters: schema,
+          },
+        },
+      ],
+      contextLength: 32_768,
+    });
+
+    expect(prepared.body.tools).toEqual([
+      expect.objectContaining({
+        function: expect.objectContaining({
+          parameters: expect.objectContaining({
+            properties: {
+              key_type: {
+                anyOf: [{ $ref: "#/$defs/ApiKeyType" }, { type: "null" }],
+              },
+            },
+            $defs: {
+              ApiKeyType: { type: "string", enum: ["user", "agent"] },
+            },
+            additionalProperties: false,
+          }),
+        }),
+      }),
+    ]);
   });
 
   it("returns completed tool calls in stream-index order", () => {

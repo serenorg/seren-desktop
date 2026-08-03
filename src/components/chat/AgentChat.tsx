@@ -1435,6 +1435,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             class="chat-message-row group/msg relative px-5 py-4 bg-surface-1 border-b border-surface-2 [contain:layout]"
             classList={{ "border-l-2 border-l-destructive": showTurnError() }}
             data-message-id={message.id}
+            data-message-role="user"
           >
             <Show when={message.docNames?.length}>
               <div class="flex flex-wrap gap-1.5 mb-2">
@@ -1529,6 +1530,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           <article
             class="chat-message-row group/msg relative px-5 py-4 border-b border-surface-2 [contain:layout]"
             data-message-id={message.id}
+            data-message-role="assistant"
           >
             <Show when={pairedAttribution()}>
               <div

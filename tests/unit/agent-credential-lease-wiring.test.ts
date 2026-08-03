@@ -47,14 +47,14 @@ describe("agent session credential leases (#3194, #3504)", () => {
     );
   });
 
-  it("surfaces sign-in instead of silently omitting publisher tools", () => {
+  it("surfaces sign-in when publisher tools are omitted except for local LM Studio", () => {
     const spawnBody = bodyAfter("async spawnSession(", 30_000);
     const authGate = spawnBody.slice(
       spawnBody.indexOf("if (authStore.isAuthenticated)"),
       spawnBody.indexOf("const enabledMcpServers"),
     );
     expect(authGate).toContain("await createCredentialLease(localSessionId)");
-    expect(authGate).toContain("else {");
+    expect(authGate).toContain('else if (resolvedAgentType !== "lmstudio")');
     expect(authGate).toContain("requestSignInModal()");
 
     const degradedBody = bodyAfter('case "mcpDegraded":', 5_000);

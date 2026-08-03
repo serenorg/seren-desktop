@@ -612,14 +612,21 @@ function uniqueToolName(name, used) {
   return candidate;
 }
 
-function schemaFromMcpTool(tool) {
-  const schema = tool?.inputSchema ?? tool?.input_schema ?? {};
+export function schemaFromMcpTool(tool) {
+  const candidate = tool?.inputSchema ?? tool?.input_schema;
+  const schema =
+    candidate && typeof candidate === "object" && !Array.isArray(candidate)
+      ? candidate
+      : {};
   return {
+    ...schema,
     type: "object",
     properties: schema.properties ?? {},
-    required: schema.required,
     additionalProperties:
-      typeof schema.additionalProperties === "boolean"
+      typeof schema.additionalProperties === "boolean" ||
+      (schema.additionalProperties &&
+        typeof schema.additionalProperties === "object" &&
+        !Array.isArray(schema.additionalProperties))
         ? schema.additionalProperties
         : true,
   };
