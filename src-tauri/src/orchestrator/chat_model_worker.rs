@@ -200,7 +200,9 @@ enum StreamOutcome {
         thinking: Option<String>,
         cost: f64,
     },
-    /// Model wants tool results before continuing (finish_reason: "tool_calls").
+    /// Model emitted one or more tool calls and needs their results before
+    /// continuing. The accumulated calls are authoritative; provider finish
+    /// labels are advisory and vary across compatible APIs.
     ToolCallsPending {
         tool_calls: Vec<AccumulatedToolCall>,
         accumulated_content: String,
@@ -892,12 +894,27 @@ created if missing.",
     ) -> Result<(), String> {
         let mut sorted: Vec<(&usize, &AccumulatedToolCall)> = pending.iter().collect();
         sorted.sort_by_key(|(idx, _)| **idx);
-        for (_idx, tc) in sorted {
+
+        // Validate the entire batch before emitting any frontend cards. If a
+        // provider ends a partial tool-call stream, emitting the valid prefix
+        // first would leave those cards permanently pending when this function
+        // then fails on the malformed entry.
+        for (idx, tc) in &sorted {
             if tc.id.is_empty() || tc.name.is_empty() {
-                // Defensive: an id/name-less entry can't be addressed by
-                // the frontend store and would never receive a ToolResult.
-                continue;
+                let missing = match (tc.id.is_empty(), tc.name.is_empty()) {
+                    (true, true) => "id and name",
+                    (true, false) => "id",
+                    (false, true) => "name",
+                    (false, false) => unreachable!(),
+                };
+                return Err(format!(
+                    "Malformed streamed tool call at index {}: missing {}",
+                    idx, missing
+                ));
             }
+        }
+
+        for (_idx, tc) in sorted {
             event_tx
                 .send(WorkerEvent::ToolCall {
                     tool_call_id: tc.id.clone(),
@@ -919,7 +936,12 @@ created if missing.",
         thinking: String,
         cost: f64,
     ) -> StreamOutcome {
-        if finish_reason.as_deref() == Some("tool_calls") && !pending_tool_calls.is_empty() {
+        // A non-empty accumulated set is the authoritative signal that the
+        // model requested tools. Some OpenAI-compatible providers emit real
+        // tool-call deltas but terminate with `finish_reason: "stop"`; gating
+        // execution on that provider-specific label drops the calls after the
+        // frontend has already rendered them (#3627).
+        if !pending_tool_calls.is_empty() {
             let mut indexed: Vec<(usize, AccumulatedToolCall)> =
                 pending_tool_calls.into_iter().collect();
             indexed.sort_by_key(|(idx, _)| *idx);
@@ -3169,6 +3191,107 @@ mod tests {
             }
             _ => panic!("Expected ToolCallsPending outcome"),
         }
+    }
+
+    #[tokio::test]
+    async fn streamed_tool_call_with_stop_finish_remains_pending() {
+        let chunks = [
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_stop","type":"function","function":{"name":"read_file","arguments":"{\"path\":\"/tmp/test.txt\"}"}}]},"finish_reason":null}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ];
+        let (tx, mut rx) = mpsc::channel::<WorkerEvent>(4);
+        let mut pending = HashMap::new();
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut cost = 0.0;
+        let mut finish_reason = None;
+
+        for chunk in chunks {
+            let result = ChatModelWorker::parse_sse_data(chunk);
+            let outcome = ChatModelWorker::process_parse_result(
+                &result,
+                &mut pending,
+                &mut content,
+                &mut thinking,
+                &mut cost,
+                &mut finish_reason,
+                &tx,
+            )
+            .await
+            .expect("stream chunk should parse");
+            assert!(outcome.is_none());
+        }
+        assert_eq!(finish_reason.as_deref(), Some("stop"));
+
+        ChatModelWorker::emit_accumulated_tool_calls(&pending, &tx)
+            .await
+            .expect("complete tool call should be emitted");
+        let event = rx.recv().await.expect("frontend should receive tool card");
+        match event {
+            WorkerEvent::ToolCall {
+                tool_call_id,
+                name,
+                arguments,
+                ..
+            } => {
+                assert_eq!(tool_call_id, "tc_stop");
+                assert_eq!(name, "read_file");
+                assert_eq!(arguments, r#"{"path":"/tmp/test.txt"}"#);
+            }
+            other => panic!("Expected ToolCall event, got: {:?}", other),
+        }
+
+        let outcome = ChatModelWorker::build_stream_outcome(
+            &finish_reason,
+            pending,
+            content,
+            thinking,
+            cost,
+        );
+
+        match outcome {
+            StreamOutcome::ToolCallsPending {
+                tool_calls,
+                ..
+            } => {
+                assert_eq!(tool_calls.len(), 1);
+                assert_eq!(tool_calls[0].id, "tc_stop");
+                assert_eq!(tool_calls[0].name, "read_file");
+            }
+            other => panic!("Expected ToolCallsPending outcome, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn incomplete_tool_call_batch_fails_before_emitting_cards() {
+        let mut pending = HashMap::new();
+        pending.insert(
+            0,
+            AccumulatedToolCall {
+                id: "tc_valid".to_string(),
+                name: "read_file".to_string(),
+                arguments: r#"{"path":"/tmp/test.txt"}"#.to_string(),
+            },
+        );
+        pending.insert(
+            1,
+            AccumulatedToolCall {
+                id: "tc_incomplete".to_string(),
+                name: String::new(),
+                arguments: String::new(),
+            },
+        );
+        let (tx, mut rx) = mpsc::channel::<WorkerEvent>(4);
+
+        let error = ChatModelWorker::emit_accumulated_tool_calls(&pending, &tx)
+            .await
+            .expect_err("incomplete tool calls must fail explicitly");
+
+        assert!(error.contains("missing name"));
+        assert!(
+            rx.try_recv().is_err(),
+            "validation must happen before any frontend tool card is emitted"
+        );
     }
 
     #[test]
