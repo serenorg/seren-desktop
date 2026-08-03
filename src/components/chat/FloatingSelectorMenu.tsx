@@ -10,6 +10,7 @@ interface Props {
   open: boolean;
   anchor: () => HTMLElement | undefined;
   class?: string;
+  testId?: string;
   onRequestClose: () => void;
   children: JSX.Element;
 }
@@ -76,6 +77,7 @@ export const FloatingSelectorMenu: Component<Props> = (props) => {
       <Portal mount={document.body}>
         <div
           ref={menuRef}
+          data-testid={props.testId}
           class={`${FLOATING_SELECTOR_MENU_BASE_CLASSES} ${props.class ?? ""}`}
           style={style()}
         >

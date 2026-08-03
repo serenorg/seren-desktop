@@ -112,6 +112,7 @@ export const AgentModelSelector: Component<Props> = (props) => {
           anchor={() => dropdownRef}
           onRequestClose={() => setIsOpen(false)}
           class="w-80 max-w-[calc(100vw-2rem)]"
+          testId="agent-model-menu"
         >
           <div class="px-3 py-2 border-b border-surface-2 text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
             Agent Model

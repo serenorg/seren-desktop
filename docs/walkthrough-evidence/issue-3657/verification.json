@@ -1,0 +1,13 @@
+{
+  "platform": "darwin",
+  "signedIn": false,
+  "serenSignInRequired": false,
+  "liveChatModelCount": 5,
+  "renderedChatModelCount": 5,
+  "exactModelOrder": true,
+  "everyLiveModelRendered": true,
+  "extraRenderedModels": 0,
+  "originalContextLength": 8192,
+  "outcome": "completed",
+  "schemaConversionErrorVisible": false
+}
