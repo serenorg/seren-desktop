@@ -1765,7 +1765,12 @@ export function createProviderHandlers({
     }
   }
 
-  async function getModelCatalog({ agentType, cwd }) {
+  async function getModelCatalog({
+    agentType,
+    cwd,
+    lmStudioBaseUrl,
+    lmStudioApiKey,
+  }) {
     if (typeof cwd !== "string" || cwd.length === 0) {
       throw new Error("A working directory is required to load CLI models.");
     }
@@ -1778,6 +1783,13 @@ export function createProviderHandlers({
           name: record.name,
           description: record.description,
         }));
+      });
+    }
+
+    if (agentType === "lmstudio") {
+      return lmStudioRuntime.getModelCatalog({
+        baseUrl: lmStudioBaseUrl,
+        apiKey: lmStudioApiKey,
       });
     }
 
