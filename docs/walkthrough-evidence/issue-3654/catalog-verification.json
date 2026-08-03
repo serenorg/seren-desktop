@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-08-03T18:16:00Z",
+  "source": "live bundled provider runtime",
+  "codingAgents": [
+    { "type": "codex", "name": "Codex", "available": true },
+    { "type": "claude-code", "name": "Claude Code", "available": true },
+    { "type": "claude-codex", "name": "Claude + Codex", "available": true },
+    { "type": "gemini", "name": "Antigravity", "available": true },
+    { "type": "grok", "name": "Grok", "available": true },
+    { "type": "lmstudio", "name": "LM Studio", "available": true }
+  ],
+  "codexModels": [
+    { "modelId": "gpt-5.6-sol", "name": "GPT-5.6-Sol" },
+    { "modelId": "gpt-5.6-terra", "name": "GPT-5.6-Terra" },
+    { "modelId": "gpt-5.6-luna", "name": "GPT-5.6-Luna" },
+    { "modelId": "gpt-5.5", "name": "GPT-5.5" },
+    { "modelId": "gpt-5.4", "name": "GPT-5.4" },
+    { "modelId": "gpt-5.4-mini", "name": "GPT-5.4-Mini" },
+    { "modelId": "gpt-5.3-codex-spark", "name": "GPT-5.3-Codex-Spark" }
+  ],
+  "selectedModel": "gpt-5.6-sol",
+  "selectedModelContextWindow": 258400,
+  "uiMatchedLiveAgentCatalog": true,
+  "uiMatchedLiveCodexModelCatalog": true
+}
