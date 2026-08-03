@@ -1144,6 +1144,15 @@ export function createAcpRuntime({
     return sessions.get(sessionId)?.cliModels ?? [];
   }
 
+  function getPermissionCatalog(params = {}) {
+    const defaultModeId = adapter.resolveInitialMode(params);
+    const state = adapter.buildModes({ currentModeId: defaultModeId });
+    return {
+      defaultModeId,
+      modes: state.availableModes,
+    };
+  }
+
   return {
     hasSession(sessionId) {
       return sessions.has(sessionId);
@@ -1158,6 +1167,7 @@ export function createAcpRuntime({
     respondToPermission,
     setModel,
     listCliModels,
+    getPermissionCatalog,
   };
 }
 

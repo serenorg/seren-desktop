@@ -43,6 +43,14 @@ describe("RunLaunchBox", () => {
     expect(launchBoxSource).toContain("run-model-claude-codex-executor");
     expect(launchBoxSource).not.toContain("Pin an exact runtime model ID");
     expect(launchBoxSource).toContain("run-permission-${agentType}");
+    expect(launchBoxSource).toContain(
+      '"Claude + Codex · Codex executor"',
+    );
+    expect(launchBoxSource).toContain(
+      "Approval prompts are separate from Isolation",
+    );
+    expect(launchBoxSource).not.toContain("Runtime default");
+    expect(launchBoxSource).not.toContain("Allow workspace edits");
     expect(launchBoxSource).toContain('data-testid="run-launch-start"');
     expect(launchBoxSource).toContain("await launchMission({");
   });

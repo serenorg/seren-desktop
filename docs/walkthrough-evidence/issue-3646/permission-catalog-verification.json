@@ -1,0 +1,41 @@
+{
+  "verifiedModes": {
+    "claude-code": [
+      "",
+      "default",
+      "acceptEdits",
+      "plan",
+      "bypassPermissions"
+    ],
+    "codex": [
+      "",
+      "auto",
+      "ask"
+    ],
+    "gemini": [
+      "",
+      "default",
+      "accept-edits",
+      "plan",
+      "yolo"
+    ],
+    "grok": [
+      "",
+      "default",
+      "acceptEdits",
+      "dontAsk",
+      "bypassPermissions",
+      "plan"
+    ],
+    "claude-codex": [
+      "",
+      "auto",
+      "ask"
+    ],
+    "lmstudio": [
+      "",
+      "ask",
+      "auto"
+    ]
+  }
+}

@@ -12,6 +12,33 @@ const getAgentModelCatalog = vi.hoisted(() =>
   ]),
 );
 
+const getAgentPermissionCatalog = vi.hoisted(() =>
+  vi.fn(async (agentType: string) => ({
+    defaultModeId: agentType === "lmstudio" ? "ask" : "native-default",
+    modes:
+      agentType === "lmstudio"
+        ? [
+            {
+              modeId: "ask",
+              name: "Suggest",
+              description: "Ask before each tool call",
+            },
+            {
+              modeId: "auto",
+              name: "Auto",
+              description: "Approve tool calls automatically",
+            },
+          ]
+        : [
+            {
+              modeId: "native-default",
+              name: `${agentType} Default`,
+              description: `${agentType} default behavior`,
+            },
+          ],
+  })),
+);
+
 vi.mock("@/services/organization-policy", () => ({
   allowsClaudeAgent: () => true,
   allowsCodexAgent: () => true,
@@ -26,6 +53,7 @@ vi.mock("@/services/private-models", () => ({
 }));
 vi.mock("@/services/providers", () => ({
   getAgentModelCatalog,
+  getAgentPermissionCatalog,
   testLmStudioConnection: vi.fn(async () => ({ ok: true, models: [] })),
 }));
 vi.mock("@/services/seren-model-catalog", () => ({
@@ -36,13 +64,19 @@ vi.mock("@/stores/auth.store", () => ({
 }));
 vi.mock("@/stores/settings.store", () => ({
   settingsStore: {
-    get: (key: string) =>
-      key === "lmStudioBaseUrl" ? "http://localhost:1234" : "",
+    get: (key: string) => {
+      if (key === "lmStudioBaseUrl") return "http://localhost:1234";
+      if (key === "agentApprovalPolicy") return "on-request";
+      if (key === "agentSandboxMode") return "workspace-write";
+      if (key === "agentNetworkEnabled") return true;
+      return "";
+    },
   },
 }));
 
 import {
   createEmptyMissionModelCatalogs,
+  loadMissionPermissionCatalog,
   loadMissionModelCatalog,
   MISSION_AGENT_TYPES,
   mergeMissionModels,
@@ -121,6 +155,62 @@ describe("Mission Control agent catalog", () => {
       { id: "model-a", name: "Live name" },
       { id: "model-b", name: "Second" },
     ]);
+  });
+
+  it("uses LM Studio's native permission names and explains the settings default", async () => {
+    await expect(loadMissionPermissionCatalog("lmstudio")).resolves.toEqual({
+      options: [
+        {
+          value: "",
+          label: "Agent Settings · Suggest",
+          description:
+            "Uses Agent Settings, currently Suggest: Ask before each tool call",
+        },
+        {
+          value: "ask",
+          label: "Suggest",
+          description: "Ask before each tool call",
+        },
+        {
+          value: "auto",
+          label: "Auto",
+          description: "Approve tool calls automatically",
+        },
+      ],
+      note: null,
+    });
+    expect(getAgentPermissionCatalog).toHaveBeenCalledWith("lmstudio", {
+      approvalPolicy: "on-request",
+      sandboxMode: "workspace-write",
+      networkEnabled: true,
+    });
+  });
+
+  it("keeps hosted permission policy fixed and out of the local runtime RPC", async () => {
+    await expect(loadMissionPermissionCatalog("seren")).resolves.toEqual({
+      options: [
+        {
+          value: "",
+          label: "Review First",
+          description:
+            "External actions pause for review; this hosted mode is fixed.",
+        },
+      ],
+      note: null,
+    });
+    expect(getAgentPermissionCatalog).not.toHaveBeenCalledWith(
+      "seren",
+      expect.anything(),
+    );
+  });
+
+  it("uses Antigravity's product name when its model catalog is unavailable", async () => {
+    getAgentModelCatalog.mockRejectedValueOnce(new Error("signed out"));
+
+    await expect(loadMissionModelCatalog("gemini", "/workspace")).resolves.toEqual({
+      models: [],
+      note: "The installed Antigravity CLI model catalog could not be loaded. System default remains available.",
+    });
   });
 
   it("keeps each runtime catalog isolated while live choices load", () => {

@@ -214,6 +214,17 @@ export interface AgentModelCatalogEntry {
   description?: string;
 }
 
+export interface AgentPermissionCatalogEntry {
+  modeId: string;
+  name: string;
+  description?: string;
+}
+
+export interface AgentPermissionCatalog {
+  defaultModeId: string;
+  modes: AgentPermissionCatalogEntry[];
+}
+
 // Remote sessions (provider runtime listSessions capability)
 export interface RemoteSessionInfo {
   sessionId: string;
@@ -901,6 +912,22 @@ export async function getAgentModelCatalog(
     "provider_get_model_catalog",
     { agentType, cwd },
     { timeoutMs: 120_000 },
+  );
+}
+
+/** Read the runtime's switchable approval modes and effective settings default. */
+export async function getAgentPermissionCatalog(
+  agentType: AgentType,
+  settings: {
+    approvalPolicy: string;
+    sandboxMode: string;
+    networkEnabled: boolean;
+  },
+): Promise<AgentPermissionCatalog> {
+  return invokeProvider<AgentPermissionCatalog>(
+    "provider_get_permission_catalog",
+    { agentType, ...settings },
+    { timeoutMs: 20_000 },
   );
 }
 

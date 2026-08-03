@@ -2,6 +2,7 @@
 // ABOUTME: Starts the bundled runtime on localhost and returns connection config to the frontend.
 
 use serde::Serialize;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant};
@@ -509,6 +510,19 @@ fn spawn_node_process(
         command.env("PATH", embedded_path);
     }
 
+    // Validation may need the operator's installed CLI credentials and model
+    // catalogs, but the Tauri process itself must retain its scratch HOME so
+    // app data and Keychain access stay hermetic. Scope the override to the
+    // provider runtime process, whose agent subprocesses inherit it.
+    if let Some(cli_home) = validation_cli_home_override(
+        std::env::var_os("SEREN_VALIDATION_INSTANCE"),
+        std::env::var_os("SEREN_VALIDATION_CLI_HOME"),
+    ) {
+        command.env("HOME", &cli_home);
+        #[cfg(windows)]
+        command.env("USERPROFILE", &cli_home);
+    }
+
     // serenorg/seren-desktop#1883 — local stdio MCP servers (playwright,
     // future bundled tools) are emitted by the provider runtime with
     // `command: "node"`. The Claude / Codex CLIs are compiled binaries that
@@ -540,6 +554,18 @@ fn spawn_node_process(
     command
         .spawn()
         .map_err(|err| format!("Failed to spawn provider runtime: {err}"))
+}
+
+fn validation_cli_home_override(
+    validation_instance: Option<OsString>,
+    configured_home: Option<OsString>,
+) -> Option<PathBuf> {
+    if validation_instance.as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return None;
+    }
+    configured_home
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
 }
 
 fn pipe_child_output(child: &mut Child, ws_token: &str) {
@@ -1008,6 +1034,27 @@ pub async fn provider_force_kill_session(
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    #[test]
+    fn validation_cli_home_is_scoped_to_validation_provider_runtime() {
+        let host_home = OsString::from("/host-cli-home");
+
+        assert_eq!(
+            validation_cli_home_override(Some(OsString::from("1")), Some(host_home.clone()),),
+            Some(PathBuf::from(host_home)),
+        );
+        assert_eq!(
+            validation_cli_home_override(
+                Some(OsString::from("0")),
+                Some(OsString::from("/host-cli-home")),
+            ),
+            None,
+        );
+        assert_eq!(
+            validation_cli_home_override(Some(OsString::from("1")), Some(OsString::new())),
+            None,
+        );
+    }
 
     #[test]
     fn child_output_redacts_runtime_secret_values_and_lease_shape() {

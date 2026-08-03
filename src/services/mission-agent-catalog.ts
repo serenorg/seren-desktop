@@ -17,6 +17,7 @@ import {
   type AgentModelCatalogEntry,
   type AgentType,
   getAgentModelCatalog,
+  getAgentPermissionCatalog,
   testLmStudioConnection,
 } from "@/services/providers";
 import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
@@ -51,6 +52,12 @@ export interface MissionModelCatalog {
 export interface MissionPermissionOption {
   value: string;
   label: string;
+  description: string;
+}
+
+export interface MissionPermissionCatalog {
+  options: MissionPermissionOption[];
+  note: string | null;
 }
 
 export const MISSION_AGENT_DEFINITIONS: readonly MissionAgentDefinition[] = [
@@ -137,43 +144,84 @@ export function createEmptyMissionModelCatalogs(): Record<
   ) as unknown as Record<MissionModelTarget, MissionModelCatalog>;
 }
 
-export const MISSION_PERMISSION_OPTIONS: Record<
+export function createEmptyMissionPermissionCatalogs(): Record<
   MissionAgentType,
-  readonly MissionPermissionOption[]
-> = {
-  "claude-code": [
-    { value: "", label: "Runtime default" },
-    { value: "plan", label: "Plan only" },
-    { value: "acceptEdits", label: "Allow workspace edits" },
-  ],
-  codex: [
-    { value: "", label: "Runtime default" },
-    { value: "ask", label: "Ask before actions" },
-    { value: "auto", label: "Allow workspace edits" },
-  ],
-  gemini: [
-    { value: "", label: "Runtime default" },
-    { value: "plan", label: "Plan only" },
-    { value: "auto_edit", label: "Allow workspace edits" },
-  ],
-  grok: [
-    { value: "", label: "Runtime default" },
-    { value: "plan", label: "Plan only" },
-    { value: "acceptEdits", label: "Allow workspace edits" },
-  ],
-  seren: [{ value: "", label: "Review first (fixed)" }],
-  "seren-private": [{ value: "", label: "Review first (fixed)" }],
-  "claude-codex": [
-    { value: "", label: "Runtime default" },
-    { value: "ask", label: "Ask before actions" },
-    { value: "auto", label: "Allow workspace edits" },
-  ],
-  lmstudio: [
-    { value: "", label: "Runtime default" },
-    { value: "ask", label: "Ask before actions" },
-    { value: "auto", label: "Allow workspace edits" },
-  ],
-};
+  MissionPermissionCatalog
+> {
+  return Object.fromEntries(
+    MISSION_AGENT_TYPES.map((agentType) => [
+      agentType,
+      {
+        options: [
+          {
+            value: "",
+            label: "Loading runtime modes…",
+            description: "Reading this provider's approval modes.",
+          },
+        ],
+        note: null,
+      },
+    ]),
+  ) as Record<MissionAgentType, MissionPermissionCatalog>;
+}
+
+export async function loadMissionPermissionCatalog(
+  agentType: MissionAgentType,
+): Promise<MissionPermissionCatalog> {
+  if (agentType === "seren" || agentType === "seren-private") {
+    return {
+      options: [
+        {
+          value: "",
+          label: "Review First",
+          description:
+            "External actions pause for review; this hosted mode is fixed.",
+        },
+      ],
+      note: null,
+    };
+  }
+
+  try {
+    const catalog = await getAgentPermissionCatalog(agentType, {
+      approvalPolicy: settingsStore.get("agentApprovalPolicy"),
+      sandboxMode: settingsStore.get("agentSandboxMode"),
+      networkEnabled: settingsStore.get("agentNetworkEnabled"),
+    });
+    const defaultMode = catalog.modes.find(
+      (mode) => mode.modeId === catalog.defaultModeId,
+    );
+    const defaultName = defaultMode?.name ?? catalog.defaultModeId;
+    return {
+      options: [
+        {
+          value: "",
+          label: `Agent Settings · ${defaultName}`,
+          description: defaultMode?.description
+            ? `Uses Agent Settings, currently ${defaultName}: ${defaultMode.description}`
+            : `Uses Agent Settings, currently ${defaultName}.`,
+        },
+        ...catalog.modes.map((mode) => ({
+          value: mode.modeId,
+          label: mode.name,
+          description: mode.description ?? mode.name,
+        })),
+      ],
+      note: null,
+    };
+  } catch {
+    return {
+      options: [
+        {
+          value: "",
+          label: "Agent Settings",
+          description: "Uses the approval policy configured in Agent Settings.",
+        },
+      ],
+      note: "Runtime permission modes could not be loaded.",
+    };
+  }
+}
 
 function localAgentForTarget(
   target: MissionModelTarget,
@@ -191,6 +239,21 @@ function localAgentForTarget(
       return "grok";
     default:
       return null;
+  }
+}
+
+function localAgentDisplayName(
+  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+): string {
+  switch (agentType) {
+    case "claude-code":
+      return "Claude Code";
+    case "codex":
+      return "Codex";
+    case "gemini":
+      return "Antigravity";
+    case "grok":
+      return "Grok";
   }
 }
 
@@ -343,6 +406,7 @@ export async function loadMissionModelCatalog(
 
   const localAgent = localAgentForTarget(target);
   if (localAgent) {
+    const localAgentName = localAgentDisplayName(localAgent);
     try {
       const models = (await loadLocalCatalog(localAgent, cwd)).map(
         toMissionModel,
@@ -352,12 +416,12 @@ export async function loadMissionModelCatalog(
         note:
           models.length > 0
             ? null
-            : `The installed ${localAgent} CLI reported no selectable models. System default remains available.`,
+            : `The installed ${localAgentName} CLI reported no selectable models. System default remains available.`,
       };
     } catch {
       return {
         models: [],
-        note: `The installed ${localAgent} CLI model catalog could not be loaded. System default remains available.`,
+        note: `The installed ${localAgentName} CLI model catalog could not be loaded. System default remains available.`,
       };
     }
   }

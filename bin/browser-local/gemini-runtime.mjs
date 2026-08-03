@@ -224,6 +224,15 @@ function buildModes(session) {
   };
 }
 
+function buildPermissionCatalog(params = {}) {
+  const defaultModeId = resolveAntigravityMode(params);
+  const state = buildModes({ currentModeId: defaultModeId });
+  return {
+    defaultModeId,
+    modes: state.availableModes,
+  };
+}
+
 function buildStatus(session, status = session.status) {
   return {
     sessionId: session.id,
@@ -725,6 +734,7 @@ export function createGeminiRuntime({ emit }) {
     listCliModels(sessionId) {
       return runtimeSessions.get(sessionId)?.cliModels ?? [];
     },
+    getPermissionCatalog: buildPermissionCatalog,
   });
   return runtime;
 }
