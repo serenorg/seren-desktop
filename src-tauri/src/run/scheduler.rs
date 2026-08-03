@@ -1596,10 +1596,26 @@ fn attempt_budget_remaining(
     run_id: &str,
     task_id: &str,
 ) -> Result<bool, String> {
+    if !task_budget_remaining(conn, run_id, task_id)? {
+        return Ok(false);
+    }
     conn.query_row(
-        "SELECT
-             (SELECT COUNT(*) FROM run_attempts WHERE task_id = ?2) < r.max_attempts
-             AND EXISTS(SELECT 1 FROM run_agent_assignments WHERE run_id = ?1)
+        "SELECT EXISTS(SELECT 1 FROM run_agent_assignments WHERE run_id = ?1)",
+        params![run_id],
+        |row| row.get(0),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// True while the task has attempt budget left, regardless of whether any
+/// agent could currently be dispatched against it.
+fn task_budget_remaining(
+    conn: &Connection,
+    run_id: &str,
+    task_id: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM run_attempts WHERE task_id = ?2) < r.max_attempts
          FROM runs r
          WHERE r.id = ?1",
         params![run_id, task_id],
@@ -1681,9 +1697,19 @@ fn prepare_relaunch(conn: &Connection, run_id: &str) -> Result<Vec<NewRunEvent>,
         if state.is_terminal() || state == TaskState::Ready || state == TaskState::Pending {
             continue;
         }
-        store::transition_task(conn, &task_id, TaskState::Ready, None)
+        // An interrupted attempt still counts against the task's budget, and
+        // start_attempt rejects a ready task with nothing left — the
+        // dispatcher would then retry that task on every snapshot change
+        // forever. Settle exhausted tasks as failed, mirroring the terminal
+        // choice finish_attempt makes when the budget runs out.
+        let next_state = if task_budget_remaining(conn, run_id, &task_id)? {
+            TaskState::Ready
+        } else {
+            TaskState::Failed
+        };
+        store::transition_task(conn, &task_id, next_state, None)
             .map_err(|error| error.to_string())?;
-        events.push(task_state_event(run_id, &task_id, TaskState::Ready));
+        events.push(task_state_event(run_id, &task_id, next_state));
     }
     events.push(event_for_task_or_run(
         run_id,
@@ -2341,6 +2367,85 @@ mod tests {
             .unwrap()
             .iter()
             .any(|event| event.event_type == RunEventType::RunRelaunched));
+    }
+
+    #[test]
+    fn relaunch_settles_budget_exhausted_tasks_as_failed() {
+        use crate::run::types::Attempt;
+
+        let conn = connection();
+        store::create_run(
+            &conn,
+            &Run {
+                id: "run-budget".to_string(),
+                objective: "relaunch with a spent attempt budget".to_string(),
+                root_path: None,
+                max_attempts: 1,
+                status: RunStatus::Interrupted,
+                cancel_requested: false,
+                interrupted_at: Some(10),
+                created_at: 1,
+                updated_at: 10,
+                completed_at: None,
+            },
+        )
+        .unwrap();
+        for task_id in ["task-spent", "task-fresh"] {
+            store::add_task(
+                &conn,
+                &Task {
+                    id: task_id.to_string(),
+                    run_id: "run-budget".to_string(),
+                    title: task_id.to_string(),
+                    brief: "restart me".to_string(),
+                    state: TaskState::Ready,
+                    blocked_reason: None,
+                    created_at: 1,
+                    updated_at: 1,
+                },
+                &[],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE run_tasks SET state = 'running' WHERE id = ?1",
+                params![task_id],
+            )
+            .unwrap();
+        }
+        // The interrupted attempt never finished but still consumed the
+        // single-attempt budget.
+        store::insert_attempt(
+            &conn,
+            &Attempt {
+                id: "attempt-spent".to_string(),
+                task_id: "task-spent".to_string(),
+                agent_assignment_id: None,
+                agent_session_id: None,
+                attempt_number: 1,
+                outcome: None,
+                started_at: 5,
+                ended_at: None,
+            },
+        )
+        .unwrap();
+
+        for event in prepare_relaunch(&conn, "run-budget").unwrap() {
+            store::append_event(&conn, &event).unwrap();
+        }
+
+        let snapshot = store::load_run_snapshot(&conn, "run-budget").unwrap().unwrap();
+        let state_of = |id: &str| {
+            snapshot
+                .tasks
+                .iter()
+                .find(|task| task.id == id)
+                .map(|task| task.state)
+                .unwrap()
+        };
+        // The spent task settles instead of returning to ready, where
+        // start_attempt would reject it on every dispatch forever.
+        assert_eq!(state_of("task-spent"), TaskState::Failed);
+        assert_eq!(state_of("task-fresh"), TaskState::Ready);
     }
 
     #[test]
