@@ -20,8 +20,10 @@ describe("agent skill context priming", () => {
 
     expect(body).toContain("skillsStore.getThreadSkillsContent");
     expect(body).toContain("resolvePublisherLiveQueryInstruction");
+    expect(body).toContain("buildOAuthAccountConfirmationInstruction");
     expect(body).toContain("session.info.serenMcpConfigured === true");
     expect(body).toContain("publisherInstruction");
+    expect(body).toContain("oauthAccountInstruction");
     expect(body).toContain("const currentSignature");
     expect(body).toContain("primedContextSignature === currentSignature");
   });
@@ -31,6 +33,15 @@ describe("agent skill context priming", () => {
 
     expect(body).toContain("if (publisherInstruction)");
     expect(body).toContain('{ type: "text", text: publisherInstruction }');
+  });
+
+  it("injects connected-account confirmation guidance when routing exposes it", () => {
+    const body = methodBody("async buildPromptContext");
+
+    expect(body).toContain("if (oauthAccountInstruction)");
+    expect(body).toContain(
+      '{ type: "text", text: oauthAccountInstruction }',
+    );
   });
 
   it("re-primes after the defensive message threshold", () => {
@@ -97,5 +108,17 @@ describe("agent skill context priming", () => {
     expect(agentStoreSource).toContain("isGeneratedPromptPrimer");
     expect(body).toContain("isGeneratedPromptPrimer(session.pendingUserMessage)");
     expect(body).not.toContain('startsWith("# Active Skills")');
+  });
+
+  it("filters connected-account guidance replay even when no skills are active", () => {
+    const historyExportSource = readSource("src/lib/chat-history-export.ts");
+
+    expect(historyExportSource).toContain(
+      '"# Seren connected-account confirmation"',
+    );
+    expect(historyExportSource).toContain("hasOAuthAccountGuidance");
+    expect(historyExportSource).toContain(
+      "hasSkillManifest || hasOAuthAccountGuidance",
+    );
   });
 });

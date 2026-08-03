@@ -23,6 +23,22 @@ const connections = [
   { id: "conn-other", provider_slug: "google", provider_email: "other@example.com", is_valid: true, is_default: false },
 ];
 
+const accountRouting = (
+  activeConnectionId: string | null,
+  selectionSource: "thread" | "default" | "sole" | "ambiguous",
+  rows = connections,
+) => ({
+  providerSlug: "google",
+  providerName: "Google",
+  activeConnectionId,
+  selectionSource,
+  connections: rows.map((connection) => ({
+    connectionId: connection.id,
+    label: connection.provider_email,
+    isDefault: connection.is_default,
+  })),
+});
+
 describe("computeAgentOAuthRouting", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -40,6 +56,10 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-routing")).resolves.toEqual({
       publishers: { gmail: "conn-other", google: "conn-other" },
       ambiguous: {},
+      accounts: {
+        gmail: accountRouting("conn-other", "thread"),
+        google: accountRouting("conn-other", "thread"),
+      },
       available: true,
     });
   });
@@ -49,6 +69,10 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-default")).resolves.toEqual({
       publishers: { gmail: "conn-default", google: "conn-default" },
       ambiguous: {},
+      accounts: {
+        gmail: accountRouting("conn-default", "default"),
+        google: accountRouting("conn-default", "default"),
+      },
       available: true,
     });
 
@@ -58,6 +82,10 @@ describe("computeAgentOAuthRouting", () => {
     await expect(computeAgentOAuthRouting("thread-sole")).resolves.toEqual({
       publishers: { gmail: "conn-other", google: "conn-other" },
       ambiguous: {},
+      accounts: {
+        gmail: accountRouting("conn-other", "sole", [connections[1]]),
+        google: accountRouting("conn-other", "sole", [connections[1]]),
+      },
       available: true,
     });
   });
@@ -72,6 +100,10 @@ describe("computeAgentOAuthRouting", () => {
       ambiguous: {
         gmail: expect.stringContaining("Multiple Google accounts are connected"),
         google: expect.stringContaining("Multiple Google accounts are connected"),
+      },
+      accounts: {
+        gmail: accountRouting(null, "ambiguous", connections.map((connection) => ({ ...connection, is_default: false }))),
+        google: accountRouting(null, "ambiguous", connections.map((connection) => ({ ...connection, is_default: false }))),
       },
       available: true,
     });

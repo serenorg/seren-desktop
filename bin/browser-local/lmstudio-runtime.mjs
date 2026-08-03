@@ -23,7 +23,10 @@ import {
 } from "./file-access-policy.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { resolveBrokeredSerenCredential } from "./mcp-config.mjs";
-import { createSerenMcpOAuthProxy } from "./seren-mcp-oauth-proxy.mjs";
+import {
+  createOAuthSelectionEventEmitter,
+  createSerenMcpOAuthProxy,
+} from "./seren-mcp-oauth-proxy.mjs";
 
 const DEFAULT_BASE_URL = "http://localhost:1234";
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
@@ -1603,6 +1606,10 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
         serenMcpProxy = await createSerenMcpOAuthProxy({
           gatewayUrl: serenCredential.mcpUrl,
           apiUrl: serenCredential.apiBaseUrl,
+          onConnectionSelected: createOAuthSelectionEventEmitter(
+            emit,
+            sessionId,
+          ),
         });
       }
     } catch (error) {

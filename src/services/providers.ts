@@ -125,8 +125,24 @@ export type PairedRole = "planner" | "executor";
 export interface AgentOAuthRouting {
   publishers: Record<string, string>;
   ambiguous: Record<string, string>;
+  /** Human-readable account choices used to confirm write identities in chat. */
+  accounts?: Record<string, AgentOAuthPublisherAccounts>;
   /** False when account discovery failed, so runtimes can refuse default-account fallback. */
   available?: boolean;
+}
+
+export interface AgentOAuthAccountChoice {
+  connectionId: string;
+  label: string;
+  isDefault: boolean;
+}
+
+export interface AgentOAuthPublisherAccounts {
+  providerSlug: string;
+  providerName: string;
+  activeConnectionId: string | null;
+  selectionSource: "thread" | "default" | "sole" | "ambiguous";
+  connections: AgentOAuthAccountChoice[];
 }
 
 export function supportsConversationFork(agentType: AgentType): boolean {
@@ -528,6 +544,17 @@ export interface McpDegradedEvent {
   serverName: string;
 }
 
+/**
+ * Emitted after an agent deliberately uses an explicit OAuth connection on a
+ * successful publisher call. The renderer persists it as this thread's active
+ * provider account so the header and subsequent calls stay aligned.
+ */
+export interface OAuthAccountSelectedEvent {
+  sessionId: string;
+  publisherSlug: string;
+  connectionId: string;
+}
+
 // Union type for all provider runtime events
 export type AgentEvent =
   | { type: "pairedEvent"; data: PairedTranscriptEvent }
@@ -546,6 +573,7 @@ export type AgentEvent =
   | { type: "userMessage"; data: UserMessageEvent }
   | { type: "error"; data: ErrorEvent }
   | { type: "loginRequired"; data: LoginRequiredEvent }
+  | { type: "oauthAccountSelected"; data: OAuthAccountSelectedEvent }
   | { type: "mcpDegraded"; data: McpDegradedEvent };
 
 /**
@@ -1040,6 +1068,7 @@ const EVENT_SUFFIXES = {
   userMessage: "user-message",
   error: "error",
   loginRequired: "login-required",
+  oauthAccountSelected: "oauth-account-selected",
   mcpDegraded: "mcp-degraded",
 } as const;
 
@@ -1205,6 +1234,13 @@ export async function subscribeToSession(
       "error",
       createHandler<{ type: "error"; data: ErrorEvent }>("error"),
     ),
+    subscribeToEvent<OAuthAccountSelectedEvent>(
+      "oauthAccountSelected",
+      createHandler<{
+        type: "oauthAccountSelected";
+        data: OAuthAccountSelectedEvent;
+      }>("oauthAccountSelected"),
+    ),
     subscribeToEvent<McpDegradedEvent>(
       "mcpDegraded",
       createHandler<{ type: "mcpDegraded"; data: McpDegradedEvent }>(
@@ -1270,6 +1306,10 @@ export async function subscribeToAllEvents(
     ),
     subscribeToEvent<LoginRequiredEvent>("loginRequired", (data) =>
       callback({ type: "loginRequired", data }),
+    ),
+    subscribeToEvent<OAuthAccountSelectedEvent>(
+      "oauthAccountSelected",
+      (data) => callback({ type: "oauthAccountSelected", data }),
     ),
     subscribeToEvent<McpDegradedEvent>("mcpDegraded", (data) =>
       callback({ type: "mcpDegraded", data }),

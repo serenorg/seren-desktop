@@ -94,3 +94,13 @@ describe("honest fallback when gateway not ready (#1464)", () => {
     expect(chatSource).toMatch(/still initializing or temporarily unreachable/);
   });
 });
+
+describe("chat Gmail account confirmation (#3589)", () => {
+  it("injects live OAuth account guidance into the built-in chat system prompt", () => {
+    expect(chatSource).toContain("buildOAuthAccountConfirmationInstruction");
+    expect(chatSource).toContain("await computeAgentOAuthRouting(");
+    expect(chatSource).toMatch(
+      /systemContent\s*\+=\s*`\\n\\n\$\{oauthAccountGuidance\}`/,
+    );
+  });
+});

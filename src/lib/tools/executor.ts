@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { isGmailSendTool } from "@/lib/agent/oauth-account-guidance";
 import { mcpClient } from "@/lib/mcp/client";
 import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
@@ -17,10 +18,14 @@ import {
   callSerenTool,
   type PaymentProxyInfo,
 } from "@/services/mcp-gateway";
-import { computeAgentOAuthRouting } from "@/services/publisher-oauth";
+import {
+  computeAgentOAuthRouting,
+  resolveOAuthProviderForPublisher,
+} from "@/services/publisher-oauth";
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { conversationStore } from "@/stores/conversation.store";
+import { setThreadOAuthConnectionId } from "@/stores/oauth-account.store";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
 const GATEWAY_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
@@ -1016,12 +1021,25 @@ export async function executeTool(
         const publisher =
           typeof args.publisher === "string" ? args.publisher : "";
         const tool = typeof args.tool === "string" ? args.tool : "";
-        const toolArgs =
+        let toolArgs =
           args.tool_args &&
           typeof args.tool_args === "object" &&
           !Array.isArray(args.tool_args)
             ? (args.tool_args as Record<string, unknown>)
             : {};
+        if (
+          typeof args.connection_id === "string" &&
+          args.connection_id.trim() &&
+          !(
+            typeof toolArgs.connection_id === "string" &&
+            toolArgs.connection_id.trim()
+          )
+        ) {
+          toolArgs = {
+            ...toolArgs,
+            connection_id: args.connection_id.trim(),
+          };
+        }
         if (!publisher || !tool) {
           return {
             tool_call_id: toolCall.id,
@@ -1434,6 +1452,33 @@ async function executeGatewayTool(
 ): Promise<ToolResult> {
   try {
     let callArgs = args;
+    const explicitConnectionId =
+      typeof args.connection_id === "string" && args.connection_id.trim()
+        ? args.connection_id.trim()
+        : null;
+
+    if (isGmailSendTool(publisherSlug, toolName) && !explicitConnectionId) {
+      return {
+        tool_call_id: toolCallId,
+        content:
+          "Gmail send blocked: name the currently active sender account, ask the user to confirm or change it, wait for a later reply, then retry with the confirmed account's top-level connection_id.",
+        is_error: true,
+      };
+    }
+
+    const persistExplicitSelection = async (
+      isError: boolean,
+    ): Promise<void> => {
+      if (isError || !explicitConnectionId) return;
+      const threadId = conversationId ?? conversationStore.activeConversationId;
+      if (!threadId) return;
+      const resolution = await resolveOAuthProviderForPublisher(publisherSlug);
+      setThreadOAuthConnectionId(
+        threadId,
+        resolution.providerSlug,
+        explicitConnectionId,
+      );
+    };
 
     const auth = await authorizeToolOperation(
       "gateway",
@@ -1596,6 +1641,7 @@ async function executeGatewayTool(
         if (reservationId && !retryResponse.is_error) {
           await settleLeaseSpend(reservationId, charge.micros);
         }
+        await persistExplicitSelection(retryResponse.is_error);
 
         const retryContent =
           typeof retryResponse.result === "string"
@@ -1629,6 +1675,7 @@ async function executeGatewayTool(
         if (reservationId && !retryResponse.is_error) {
           await settleLeaseSpend(reservationId, charge.micros);
         }
+        await persistExplicitSelection(retryResponse.is_error);
 
         const retryContent =
           typeof retryResponse.result === "string"
@@ -1655,6 +1702,8 @@ async function executeGatewayTool(
     if (response.is_error && isOAuthTokenError(content)) {
       notifyOAuthExpired(publisherSlug, content);
     }
+
+    await persistExplicitSelection(response.is_error);
 
     return {
       tool_call_id: toolCallId,

@@ -3,7 +3,7 @@
 
 import { createStore } from "solid-js/store";
 import { HappyArchiveFence } from "@/lib/agent/happy-archive";
-import type { AgentEvent } from "@/services/providers";
+import type { AgentEvent, AgentOAuthRouting } from "@/services/providers";
 import type { AgentState } from "@/stores/agent.store";
 
 /** Per-session ready promises — resolved when backend emits "ready" status */
@@ -83,6 +83,7 @@ export const agentOAuthRoutingAvailability = new Map<string, boolean>();
 export const agentOAuthRoutingDelivery = new Map<string, boolean>();
 export const agentOAuthRoutingRevisions = new Map<string, string>();
 export const agentOAuthRoutingSelectionThreads = new Map<string, string>();
+export const agentOAuthRoutingSnapshots = new Map<string, AgentOAuthRouting>();
 
 export const pendingSessionEvents = new Map<string, AgentEvent[]>();
 

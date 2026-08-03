@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   callGatewayTool: vi.fn(),
   callSerenTool: vi.fn(),
   computeAgentOAuthRouting: vi.fn(),
+  resolveOAuthProviderForPublisher: vi.fn(),
   emit: vi.fn(),
   listen: vi.fn(),
   invoke: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock("@/services/mcp-gateway", () => ({
 
 vi.mock("@/services/publisher-oauth", () => ({
   computeAgentOAuthRouting: mocks.computeAgentOAuthRouting,
+  resolveOAuthProviderForPublisher: mocks.resolveOAuthProviderForPublisher,
 }));
 
 vi.mock("@/stores/conversation.store", () => ({
@@ -57,6 +59,11 @@ describe("tool executor OAuth account routing", () => {
       publishers: {},
       ambiguous: {},
       available: true,
+    });
+    mocks.resolveOAuthProviderForPublisher.mockResolvedValue({
+      publisherSlug: "gmail",
+      providerSlug: "google",
+      providerName: "Google",
     });
     mocks.callGatewayTool.mockResolvedValue({
       result: "ok",
@@ -123,6 +130,90 @@ describe("tool executor OAuth account routing", () => {
         q: "from:example",
         connection_id: "conn-google-personal",
       },
+      "handle-allow",
+    );
+  });
+
+  it("blocks a Gmail send before dispatch until chat supplies an explicit confirmed account", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+
+    const result = await executeTool({
+      id: "tool-call-send-unconfirmed",
+      type: "function",
+      function: {
+        name: "gateway__gmail__post_messages_send",
+        arguments: JSON.stringify({
+          to: ["recipient@example.test"],
+          subject: "Account confirmation regression",
+          body: "Safe test body",
+        }),
+      },
+    });
+
+    expect(result.is_error).toBe(true);
+    expect(result.content).toContain("Gmail send blocked");
+    expect(result.content).toContain("later reply");
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("persists a successful explicit chat selection to the owning thread", async () => {
+    const [{ executeTool }, { getThreadOAuthConnectionId }] =
+      await Promise.all([
+        import("@/lib/tools/executor"),
+        import("@/stores/oauth-account.store"),
+      ]);
+
+    const result = await executeTool(
+      {
+        id: "tool-call-profile-confirmed",
+        type: "function",
+        function: {
+          name: "gateway__gmail__get_profile",
+          arguments: JSON.stringify({
+            connection_id: "conn-google-confirmed",
+          }),
+        },
+      },
+      "thread-2",
+    );
+
+    expect(result.is_error).toBe(false);
+    expect(getThreadOAuthConnectionId("thread-2", "google")).toBe(
+      "conn-google-confirmed",
+    );
+  });
+
+  it("forwards a top-level selector through built-in call_publisher sends", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+
+    const result = await executeTool(
+      {
+        id: "tool-call-generic-send-confirmed",
+        type: "function",
+        function: {
+          name: "seren__call_publisher",
+          arguments: JSON.stringify({
+            publisher: "gmail",
+            tool: "post_messages_send",
+            connection_id: "conn-google-confirmed",
+            tool_args: {
+              to: ["recipient@example.test"],
+              subject: "Account confirmation regression",
+              body: "Safe test body",
+            },
+          }),
+        },
+      },
+      "thread-2",
+    );
+
+    expect(result.is_error).toBe(false);
+    expect(mocks.callGatewayTool).toHaveBeenCalledWith(
+      "gmail",
+      "post_messages_send",
+      expect.objectContaining({
+        connection_id: "conn-google-confirmed",
+      }),
       "handle-allow",
     );
   });

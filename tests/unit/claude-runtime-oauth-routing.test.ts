@@ -12,7 +12,12 @@ describe("spawned Claude Seren MCP OAuth routing", () => {
         { publisher: "gmail", tool: "post_send" },
       ),
     ).toEqual({
-      input: { publisher: "gmail", tool: "post_send", connection_id: "conn-alpha" },
+      input: {
+        publisher: "gmail",
+        tool: "post_send",
+        connection_id: "conn-alpha",
+        _seren_auto_connection_id: true,
+      },
       denyMessage: null,
     });
   });
