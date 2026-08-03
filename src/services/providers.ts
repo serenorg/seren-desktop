@@ -208,6 +208,12 @@ export interface AgentInfo {
   unavailableReason?: string;
 }
 
+export interface AgentModelCatalogEntry {
+  modelId: string;
+  name: string;
+  description?: string;
+}
+
 // Remote sessions (provider runtime listSessions capability)
 export interface RemoteSessionInfo {
   sessionId: string;
@@ -884,6 +890,18 @@ export async function respondToDiffProposal(
  */
 export async function getAvailableAgents(): Promise<AgentInfo[]> {
   return invokeProvider<AgentInfo[]>("provider_get_available_agents");
+}
+
+/** Read the installed agent CLI's own model catalog without starting a turn. */
+export async function getAgentModelCatalog(
+  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+  cwd: string,
+): Promise<AgentModelCatalogEntry[]> {
+  return invokeProvider<AgentModelCatalogEntry[]>(
+    "provider_get_model_catalog",
+    { agentType, cwd },
+    { timeoutMs: 120_000 },
+  );
 }
 
 /**

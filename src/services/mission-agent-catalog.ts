@@ -13,9 +13,13 @@ import {
   type OrganizationPrivateModelsPolicy,
 } from "@/services/organization-policy";
 import { privateModelsService } from "@/services/private-models";
-import { type AgentType, testLmStudioConnection } from "@/services/providers";
+import {
+  type AgentModelCatalogEntry,
+  type AgentType,
+  getAgentModelCatalog,
+  testLmStudioConnection,
+} from "@/services/providers";
 import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
-import { type AgentModelInfo, agentStore } from "@/stores/agent.store";
 import { authStore } from "@/stores/auth.store";
 import { settingsStore } from "@/stores/settings.store";
 
@@ -130,70 +134,8 @@ export function createEmptyMissionModelCatalogs(): Record<
 > {
   return Object.fromEntries(
     MISSION_MODEL_TARGETS.map((target) => [target, { models: [], note: null }]),
-  ) as Record<MissionModelTarget, MissionModelCatalog>;
+  ) as unknown as Record<MissionModelTarget, MissionModelCatalog>;
 }
-
-const CLAUDE_MODELS: readonly MissionModelOption[] = [
-  {
-    id: "claude-opus-4-8[1m]",
-    name: "Claude Opus 4.8 · 1M context",
-    description: "SerenDesktop's preferred Claude Code model",
-  },
-  {
-    id: "claude-opus-4-7[1m]",
-    name: "Claude Opus 4.7 · 1M context",
-    description: "Previous Opus generation with a 1M context window",
-  },
-  {
-    id: "claude-sonnet-4-7[1m]",
-    name: "Claude Sonnet 4.7 · 1M context",
-    description: "Faster Claude model with a 1M context window",
-  },
-] as const;
-
-const CODEX_MODELS: readonly MissionModelOption[] = [
-  {
-    id: "gpt-5.6-sol",
-    name: "GPT-5.6 Sol",
-    description: "Flagship Codex model",
-  },
-  {
-    id: "gpt-5.6-luna",
-    name: "GPT-5.6 Luna",
-    description: "Fast, lower-cost Codex model",
-  },
-  {
-    id: "gpt-5.6-terra",
-    name: "GPT-5.6 Terra",
-    description: "Balanced Codex model",
-  },
-] as const;
-
-const GEMINI_MODELS: readonly MissionModelOption[] = [
-  {
-    id: "gemini-2.5-pro",
-    name: "Gemini 2.5 Pro",
-    description: "Most capable Gemini CLI model",
-  },
-  {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    description: "Fast Gemini CLI model",
-  },
-  {
-    id: "gemini-2.5-flash-lite",
-    name: "Gemini 2.5 Flash Lite",
-    description: "Lowest-latency Gemini CLI model",
-  },
-] as const;
-
-const GROK_MODELS: readonly MissionModelOption[] = [
-  {
-    id: "grok-4.5",
-    name: "Grok 4.5",
-    description: "Grok Build's coding-agent model",
-  },
-] as const;
 
 export const MISSION_PERMISSION_OPTIONS: Record<
   MissionAgentType,
@@ -233,27 +175,46 @@ export const MISSION_PERMISSION_OPTIONS: Record<
   ],
 };
 
-function builtinModels(
+function localAgentForTarget(
   target: MissionModelTarget,
-): readonly MissionModelOption[] {
+): Exclude<AgentType, "claude-codex" | "lmstudio"> | null {
   switch (target) {
     case "claude-code":
     case "claude-codex:planner":
-      return CLAUDE_MODELS;
+      return "claude-code";
     case "codex":
     case "claude-codex:executor":
-      return CODEX_MODELS;
+      return "codex";
     case "gemini":
-      return GEMINI_MODELS;
+      return "gemini";
     case "grok":
-      return GROK_MODELS;
+      return "grok";
     default:
-      return [];
+      return null;
   }
 }
 
+const localCatalogLoads = new Map<string, Promise<AgentModelCatalogEntry[]>>();
+
+function loadLocalCatalog(
+  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+  cwd: string,
+): Promise<AgentModelCatalogEntry[]> {
+  const key = `${agentType}:${cwd}`;
+  const existing = localCatalogLoads.get(key);
+  if (existing) return existing;
+
+  const pending = getAgentModelCatalog(agentType, cwd);
+  localCatalogLoads.set(key, pending);
+  void pending.then(
+    () => localCatalogLoads.delete(key),
+    () => localCatalogLoads.delete(key),
+  );
+  return pending;
+}
+
 function toMissionModel(
-  model: AgentModelInfo | ProviderModel,
+  model: AgentModelCatalogEntry | ProviderModel,
 ): MissionModelOption {
   if ("modelId" in model) {
     return {
@@ -277,25 +238,6 @@ export function mergeMissionModels(
     }
   }
   return [...merged.values()];
-}
-
-function liveSessionModels(target: MissionModelTarget): MissionModelOption[] {
-  const models: MissionModelOption[] = [];
-  for (const session of Object.values(agentStore.sessions)) {
-    if (target === "claude-codex:planner") {
-      const roleModels = session.paired?.planner.models?.availableModels ?? [];
-      models.push(...roleModels.map(toMissionModel));
-      continue;
-    }
-    if (target === "claude-codex:executor") {
-      const roleModels = session.paired?.executor.models?.availableModels ?? [];
-      models.push(...roleModels.map(toMissionModel));
-      continue;
-    }
-    if (session.info.agentType !== target) continue;
-    models.push(...(session.availableModels ?? []).map(toMissionModel));
-  }
-  return models;
 }
 
 export function missionAgentAllowed(
@@ -330,10 +272,8 @@ export function missionAgentRequiresSignIn(
 
 export async function loadMissionModelCatalog(
   target: MissionModelTarget,
+  cwd = ".",
 ): Promise<MissionModelCatalog> {
-  const builtins = builtinModels(target);
-  const runtimeModels = liveSessionModels(target);
-
   if (target === "seren") {
     if (!authStore.isAuthenticated) {
       return { models: [], note: "Sign in to load Seren Models." };
@@ -387,7 +327,7 @@ export async function loadMissionModelCatalog(
         description: model.description,
       }));
       return {
-        models: mergeMissionModels(runtimeModels, models),
+        models: mergeMissionModels(models),
         note:
           models.length > 0
             ? null
@@ -395,17 +335,32 @@ export async function loadMissionModelCatalog(
       };
     } catch {
       return {
-        models: mergeMissionModels(runtimeModels),
+        models: [],
         note: "Start LM Studio to load models downloaded on this device.",
       };
     }
   }
 
-  return {
-    models: mergeMissionModels(runtimeModels, builtins),
-    note:
-      runtimeModels.length > 0
-        ? "Includes models reported by the live runtime."
-        : null,
-  };
+  const localAgent = localAgentForTarget(target);
+  if (localAgent) {
+    try {
+      const models = (await loadLocalCatalog(localAgent, cwd)).map(
+        toMissionModel,
+      );
+      return {
+        models: mergeMissionModels(models),
+        note:
+          models.length > 0
+            ? null
+            : `The installed ${localAgent} CLI reported no selectable models. System default remains available.`,
+      };
+    } catch {
+      return {
+        models: [],
+        note: `The installed ${localAgent} CLI model catalog could not be loaded. System default remains available.`,
+      };
+    }
+  }
+
+  return { models: [], note: null };
 }

@@ -330,6 +330,7 @@ fn is_allowed_command(command: &str) -> bool {
             // and other context-menu flows are otherwise undrivable). #3355.
             | "contextmenu"
             | "fill"
+            | "select"
             | "press"
             | "waitFor"
             | "dumpText"

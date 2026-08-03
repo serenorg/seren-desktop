@@ -135,6 +135,7 @@ export function createUnavailableRuntime(label, reason) {
     setOAuthRouting: unavailable,
     respondToPermission: unavailable,
     listRemoteSessions: unavailable,
+    listCliModels: unavailable,
     setModel: unavailable,
     setSessionModel: unavailable,
     setConfigOption: unavailable,
@@ -1764,6 +1765,72 @@ export function createProviderHandlers({
     }
   }
 
+  async function getModelCatalog({ agentType, cwd }) {
+    if (typeof cwd !== "string" || cwd.length === 0) {
+      throw new Error("A working directory is required to load CLI models.");
+    }
+
+    if (agentType === "codex") {
+      return withTemporaryCodexSession(cwd, async (session) => {
+        const result = await sendRequest(session, "model/list", {}, 10_000);
+        return normalizeModelRecords(result).map((record) => ({
+          modelId: record.modelId,
+          name: record.name,
+          description: record.description,
+        }));
+      });
+    }
+
+    const runtimeDefinition =
+      agentType === "claude-code"
+        ? [claudeRuntimeModule, "createClaudeRuntime"]
+        : agentType === "gemini"
+          ? [geminiRuntimeModule, "createGeminiRuntime"]
+          : agentType === "grok"
+            ? [grokRuntimeModule, "createGrokRuntime"]
+            : null;
+    if (!runtimeDefinition) {
+      throw new Error(`Model catalogs are not supported for ${agentType}.`);
+    }
+
+    const probeRuntime = instantiateAgentRuntime(
+      agentType,
+      runtimeDefinition[0],
+      runtimeDefinition[1],
+      { emit: () => {}, runtimeMode: `${runtimeMode}-catalog` },
+    );
+    const sessionId = randomUUID();
+    let spawned = false;
+    try {
+      const sandboxProfile =
+        agentType === "claude-code"
+          ? await resolveSandboxLaunchSpec({
+              sandboxMode: "danger-full-access",
+              cwd,
+              networkEnabled: true,
+            })
+          : null;
+      await probeRuntime.spawnSession({
+        agentType,
+        cwd,
+        localSessionId: sessionId,
+        sandboxMode: "danger-full-access",
+        sandboxProfile,
+        networkEnabled: true,
+        suppressHistoryReplay: true,
+      });
+      spawned = true;
+      if (typeof probeRuntime.listCliModels !== "function") {
+        throw new Error(`${agentType} did not expose its CLI model catalog.`);
+      }
+      return probeRuntime.listCliModels(sessionId);
+    } finally {
+      if (spawned) {
+        await probeRuntime.terminateSession({ sessionId }).catch(() => {});
+      }
+    }
+  }
+
   async function spawnOwnedSession(callerParams) {
     // Every provider_spawn caller reaches this one function — the desktop
     // renderer, a paired role's inner spawn, an orchestrator one-shot, and the
@@ -2819,6 +2886,7 @@ export function createProviderHandlers({
     respondToPermission,
     respondToDiffProposal,
     getAvailableAgents,
+    getModelCatalog,
     checkAgentAvailable,
     checkAgentAuthenticated,
     ensureAgentCli,

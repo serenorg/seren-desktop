@@ -113,6 +113,8 @@ async function handleCommand(command: ValidationCommand): Promise<unknown> {
       return readState(command.invokeName, command.invokeArgs);
     case "fill":
       return fill(command.selector, command.value ?? "");
+    case "select":
+      return select(command.selector, command.value ?? "");
     case "press":
       return press(command.key ?? command.value ?? "");
     case "waitFor":
@@ -157,6 +159,30 @@ function fill(selector: string | undefined, value: string): { filled: string } {
   );
   element.dispatchEvent(new Event("change", { bubbles: true }));
   return { filled: selector ?? "" };
+}
+
+function select(
+  selector: string | undefined,
+  value: string,
+): { selected: string; value: string } {
+  const element = findElement(selector);
+  if (!(element instanceof HTMLSelectElement)) {
+    throw new Error(`Element is not a select: ${selector}`);
+  }
+  if (![...element.options].some((option) => option.value === value)) {
+    throw new Error(
+      `Select option is unavailable: ${value}. Available: ${[...element.options]
+        .map((option) => option.value || "<default>")
+        .join(", ")}`,
+    );
+  }
+  element.focus();
+  element.value = value;
+  element.dispatchEvent(
+    new InputEvent("input", { bubbles: true, data: value }),
+  );
+  element.dispatchEvent(new Event("change", { bubbles: true }));
+  return { selected: selector ?? "", value };
 }
 
 /** Read-only Tauri commands a validation scenario may invoke to assert a

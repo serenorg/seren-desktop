@@ -16,12 +16,15 @@ describe("#1776 — post-init currentModelId resolution preserves [1m]", () => {
     // running on 1M. chooseUpdatedModelId carries the existing #1763
     // [1m]-preservation guard — reuse it here so spawn-time and per-message
     // resolution agree on the tier marker.
-    const spawnAnchor = "ensurePreferredModelRecord(\n        augmentWithLegacyOpus(";
+    const spawnAnchor =
+      "session.cliModelRecords = normalizeModelRecords(initResult)";
     const idx = claudeRuntimeSource.indexOf(spawnAnchor);
     expect(idx, "spawnSession post-init block must exist").toBeGreaterThan(0);
 
     const block = claudeRuntimeSource.slice(idx, idx + 1200);
-    expect(block).toContain("normalizeModelRecords(initResult)");
+    expect(block).toContain(
+      "augmentWithLegacyOpus(\n          session.cliModelRecords,",
+    );
     expect(block).toContain("preferredModel");
     expect(block).toContain("resolvePostInitCurrentModelId(");
     expect(block).toContain("session.currentModelId,");
