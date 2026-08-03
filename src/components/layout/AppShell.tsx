@@ -86,6 +86,7 @@ import {
   type KeybindingActionId,
 } from "@/stores/keybindings.store";
 import { meetingStore } from "@/stores/meeting.store";
+import { runStore } from "@/stores/run.store";
 import { skillPublishStore } from "@/stores/skill-publish.store";
 import { skillsStore } from "@/stores/skills.store";
 import { threadStore } from "@/stores/thread.store";
@@ -604,6 +605,10 @@ export const AppShell: Component<AppShellProps> = (props) => {
   };
 
   const handleOpenMissionControl = () => {
+    // New Mission must land on the launch form even when the panel is already
+    // open showing a settled run — re-setting the same panel value alone
+    // notifies nothing. Live runs keep their overview.
+    runStore.showLaunchForm();
     setSlidePanel("missioncontrol");
   };
 
