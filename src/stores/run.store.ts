@@ -337,6 +337,17 @@ async function setFindingStatus(
   }
 }
 
+/**
+ * Return to the launch form when the visible run is settled. A running or
+ * interrupted run keeps its overview — starting a new mission must never
+ * discard live work.
+ */
+function showLaunchForm(): void {
+  const status = state.snapshot?.run.status;
+  if (!status || status === "running" || status === "interrupted") return;
+  setState({ activeRunId: null, snapshot: null, lastSequence: 0, error: null });
+}
+
 function needsYou() {
   return (state.snapshot?.findings ?? []).filter(
     (finding) => finding.needs_approval && finding.status === "open",
@@ -383,6 +394,7 @@ export const runStore = {
   launch,
   cancel,
   relaunch,
+  showLaunchForm,
   approveFinding: (findingId: string) =>
     setFindingStatus(findingId, "accepted"),
   rejectFinding: (findingId: string) => setFindingStatus(findingId, "rejected"),
