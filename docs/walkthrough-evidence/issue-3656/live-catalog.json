@@ -1,0 +1,46 @@
+{
+  "source": "provider_get_available_agents",
+  "platform": "macOS",
+  "signedIn": true,
+  "agents": [
+    {
+      "type": "codex",
+      "name": "Codex",
+      "available": true
+    },
+    {
+      "type": "claude-code",
+      "name": "Claude Code",
+      "available": true
+    },
+    {
+      "type": "claude-codex",
+      "name": "Claude + Codex",
+      "available": true
+    },
+    {
+      "type": "gemini",
+      "name": "Antigravity",
+      "available": true
+    },
+    {
+      "type": "grok",
+      "name": "Grok",
+      "available": true
+    },
+    {
+      "type": "lmstudio",
+      "name": "LM Studio",
+      "available": true
+    }
+  ],
+  "menuOrder": [
+    "codex",
+    "claude-code",
+    "claude-codex",
+    "gemini",
+    "grok",
+    "lmstudio"
+  ],
+  "exactMatch": true
+}

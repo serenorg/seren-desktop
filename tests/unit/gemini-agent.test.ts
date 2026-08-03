@@ -45,6 +45,10 @@ const threadSidebarTsx = readFileSync(
   resolve("src/components/layout/ThreadSidebar.tsx"),
   "utf-8",
 );
+const nativeAgentLaunchersTs = readFileSync(
+  resolve("src/components/layout/native-agent-launchers.ts"),
+  "utf-8",
+);
 const providerIndexTs = readFileSync(
   resolve("src/lib/providers/index.ts"),
   "utf-8",
@@ -183,10 +187,11 @@ describe("Gemini Agent — UI surface (#1471)", () => {
   });
 
   it("ThreadSidebar agent launcher includes an Antigravity button", () => {
-    expect(threadSidebarTsx).toContain("allowsGeminiAgent");
-    expect(threadSidebarTsx).toContain('data-testid="new-gemini-agent"');
-    expect(threadSidebarTsx).toContain('handleNewAgent("gemini")');
-    expect(threadSidebarTsx).toContain("Antigravity");
+    expect(nativeAgentLaunchersTs).toContain("allowsGeminiAgent");
+    expect(nativeAgentLaunchersTs).toContain('testId: "new-gemini-agent"');
+    expect(nativeAgentLaunchersTs).toContain('label: "Antigravity"');
+    expect(threadSidebarTsx).toContain("getNativeAgentLaunchers(");
+    expect(threadSidebarTsx).toContain("handleNewAgent(launcher.type)");
     // Helper still routes to threadStore.createAgentThread under the hood.
     expect(threadSidebarTsx).toMatch(
       /threadStore\.createAgentThread\(\s*agentType\s*,\s*cwd\s*\)/,
