@@ -12,6 +12,10 @@ const geminiRuntimeMjs = readFileSync(
   resolve("bin/browser-local/gemini-runtime.mjs"),
   "utf-8",
 );
+const agentRegistryMjs = readFileSync(
+  resolve("bin/browser-local/agent-registry.mjs"),
+  "utf-8",
+);
 const agentStoreTs = readFileSync(
   resolve("src/stores/agent.store.ts"),
   "utf-8",
@@ -44,17 +48,15 @@ describe("Gemini Agent #1476 — load-bearing regression guards", () => {
     expect(viteConfigTs).toMatch(/find:\s*\/\^qrcode\$\//);
   });
 
-  // ─── Slice B: never accept Homebrew gemini-cli ───────────────────────
-  it("gemini-runtime resolveGeminiBinary does NOT include Homebrew paths", () => {
-    // The whole reason this PR exists. /usr/local/bin/gemini and
-    // /opt/homebrew/bin/gemini are deliberately excluded — Homebrew's
-    // gemini-cli ships without compiled keytar and cannot read its
-    // own keychain when launched from a GUI app.
-    const idx = geminiRuntimeMjs.indexOf("function resolveGeminiBinary");
+  // ─── Slice B: Antigravity first-run auth ─────────────────────────────
+  it("launches agy itself because Antigravity has no login subcommand", () => {
+    const idx = agentRegistryMjs.indexOf("gemini: {");
     expect(idx).toBeGreaterThan(-1);
-    const fnSlice = geminiRuntimeMjs.slice(idx, idx + 2000);
-    expect(fnSlice).not.toContain('"/usr/local/bin/gemini"');
-    expect(fnSlice).not.toContain('"/opt/homebrew/bin/gemini"');
+    const definition = agentRegistryMjs.slice(idx, idx + 2400);
+    expect(definition).toContain("launchInteractiveCommand");
+    expect(definition).not.toContain("launchLoginCommand");
+    expect(geminiRuntimeMjs).toContain("isAntigravityAuthError");
+    expect(geminiRuntimeMjs).toContain('"provider://login-required"');
   });
 
   // ─── Slice C: login-required handler position ───────────────────────

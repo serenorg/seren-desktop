@@ -36,7 +36,7 @@ describe("#3443 claude-code spawn wiring enforces the baseline", () => {
       "async function ensureClaudeCodeCli",
     );
     const end = agentRegistrySource.indexOf(
-      "function resolveInstalledGeminiBinary",
+      "export function resolveInstalledClaudeBinary",
     );
     const helper = agentRegistrySource.slice(start, end);
 

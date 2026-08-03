@@ -770,9 +770,9 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                     {"\u2728"}
                   </span>
                   <div class="flex-1 min-w-0">
-                    <div class="font-medium">Gemini</div>
+                    <div class="font-medium">Antigravity</div>
                     <div class="text-[11px] text-muted-foreground">
-                      Google · chat-style coding agent
+                      Google · Antigravity coding agent
                     </div>
                   </div>
                   <LauncherChip variant="subscription">

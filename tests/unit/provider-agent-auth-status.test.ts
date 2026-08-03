@@ -15,7 +15,8 @@ describe("provider agent authentication status", () => {
     expect(registrySource).toContain("authenticated: isAgentAuthenticated");
     expect(registrySource).toContain('path.join(home, ".claude", ".credentials.json")');
     expect(registrySource).toContain('path.join(home, ".codex", "auth.json")');
-    expect(registrySource).toContain('path.join(home, ".gemini", "oauth_creds.json")');
+    expect(registrySource).toContain("checkAntigravityAuthenticated");
+    expect(registrySource).toContain("resolveAntigravityBinary");
     expect(registrySource).toContain('path.join(os.homedir(), ".grok", "auth.json")');
   });
 

@@ -20,6 +20,12 @@ import {
   loadState,
   runInstalledVersion,
 } from "./cli-updater.mjs";
+import {
+  ANTIGRAVITY_INSTALL_URL,
+  checkAntigravityAuthenticated,
+  ensureAntigravityCli,
+  resolveAntigravityBinary,
+} from "./antigravity-binary.mjs";
 import { resolveGrokBinary } from "./grok-binary.mjs";
 
 // LM Studio support is loaded lazily so a missing LM Studio dependency (e.g.
@@ -162,23 +168,15 @@ function buildLoginShellCommand(command) {
   return `${quoted} login`;
 }
 
-/**
- * Launch `<command> login` in a new terminal window.
- *
- * Accepts either a bare command name (resolved by the user's shell PATH)
- * or an absolute path returned by `resolveInstalled*Binary`. The latter
- * guarantees that login targets the same binary `spawnSession` would have
- * picked, preventing the auth/spawn split-brain in #1876.
- *
- * Exported for #1878 test coverage of shell-quoting behavior.
- */
-export function launchLoginCommand(command) {
+function buildInteractiveShellCommand(command) {
+  const isBare = !/[\s/\\]/.test(command);
+  if (isBare) return command;
+  return `'${command.replace(/'/g, "'\\''")}'`;
+}
+
+function launchTerminalCommand(command, args, shellCommand) {
   if (process.platform === "darwin") {
-    const loginCommand = buildLoginShellCommand(command);
-    // AppleScript string layer: escape backslashes first, then double
-    // quotes. Without this, a path containing `"` would terminate the
-    // do-script string early and inject AppleScript.
-    const escapedForAppleScript = loginCommand
+    const escapedForAppleScript = shellCommand
       .replace(/\\/g, "\\\\")
       .replace(/"/g, '\\"');
     spawn(
@@ -195,25 +193,36 @@ export function launchLoginCommand(command) {
   }
 
   if (process.platform === "win32") {
-    // `start` syntax: `start [title] [command]`. When the first quoted arg
-    // is present, `start` always treats it as the window title — so an
-    // unquoted path with spaces breaks parsing, and a quoted path silently
-    // becomes the title and never runs. Emit an explicit empty title to
-    // pin the window-title slot regardless of what the path looks like.
-    spawn(
-      "cmd",
-      ["/c", "start", "", command, "login"],
-      { detached: true, stdio: "ignore" },
-    ).unref();
+    spawn("cmd", ["/c", "start", "", command, ...args], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
     return;
   }
 
-  // x-terminal-emulator argv form: spaces survive argv boundaries, so the
-  // resolved absolute path needs no shell quoting.
-  spawn("x-terminal-emulator", ["-e", command, "login"], {
+  spawn("x-terminal-emulator", ["-e", command, ...args], {
     detached: true,
     stdio: "ignore",
   }).unref();
+}
+
+/**
+ * Launch `<command> login` in a new terminal window.
+ *
+ * Accepts either a bare command name (resolved by the user's shell PATH)
+ * or an absolute path returned by `resolveInstalled*Binary`. The latter
+ * guarantees that login targets the same binary `spawnSession` would have
+ * picked, preventing the auth/spawn split-brain in #1876.
+ *
+ * Exported for #1878 test coverage of shell-quoting behavior.
+ */
+export function launchLoginCommand(command) {
+  launchTerminalCommand(command, ["login"], buildLoginShellCommand(command));
+}
+
+/** Launch a CLI's interactive first-run flow without inventing a login subcommand. */
+export function launchInteractiveCommand(command) {
+  launchTerminalCommand(command, [], buildInteractiveShellCommand(command));
 }
 
 function execText(command, args) {
@@ -299,22 +308,6 @@ function hasCodexCredentials() {
   ]);
 }
 
-function hasGeminiCredentials() {
-  const home = os.homedir();
-  const appData = process.env.APPDATA;
-  return Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) ||
-    hasAnyCredentialPath([
-      path.join(home, ".gemini", "oauth_creds.json"),
-      path.join(home, ".gemini", "credentials.json"),
-      ...(appData
-        ? [
-            path.join(appData, "gemini", "oauth_creds.json"),
-            path.join(appData, "Google", "Gemini", "oauth_creds.json"),
-          ]
-        : []),
-    ]);
-}
-
 function hasGrokCredentials() {
   return (
     Boolean(process.env.XAI_API_KEY) ||
@@ -329,7 +322,7 @@ function isAgentAuthenticated(agentType) {
     case "codex":
       return hasCodexCredentials();
     case "gemini":
-      return hasGeminiCredentials();
+      return false;
     case "grok":
       return hasGrokCredentials();
     case "lmstudio":
@@ -640,86 +633,6 @@ async function ensureClaudeCodeCli(emit) {
 }
 
 /**
- * Resolve the installed Gemini CLI binary path.
- *
- * Mirrors `resolveInstalledClaudeBinary()` below. Prefers the binary that
- * the embedded runtime's `npm install -g @google/gemini-cli` would have
- * placed at `<prefix>/bin/gemini` (Unix) or `<nodeDir>/gemini.cmd` (Windows)
- * over any system install (Homebrew, system npm, etc.).
- *
- * Why: Homebrew's gemini-cli formula skips the `node-gyp rebuild` postinstall
- * step that compiles `keytar.node`, so the Homebrew binary cannot read
- * stored credentials when launched as a child process from a GUI app and
- * fails immediately with "When using Gemini API, you must specify the
- * GEMINI_API_KEY environment variable" (#1476). Preferring the embedded
- * install ensures Seren controls the install path end-to-end and the
- * keychain integration actually works.
- *
- * Returns the bare "gemini" string if no install is found, so the caller
- * can trigger ensureCli() to install via the embedded runtime's npm.
- */
-function resolveInstalledGeminiBinary() {
-  // IMPORTANT: Gemini intentionally does NOT include /usr/local/bin,
-  // /opt/homebrew/bin, /usr/bin (Unix), or C:\Program Files\nodejs\
-  // (Windows MSI) in its candidate list — even though Codex and Claude
-  // do post-#1665. The Homebrew gemini-cli formula (and other system
-  // installs that don't run npm scripts) skip the keytar postinstall, so
-  // a system-installed gemini binary cannot read its own keychain when
-  // spawned from a GUI app and fails first-run auth with a misleading
-  // "GEMINI_API_KEY environment variable" message (#1476).
-  //
-  // Mirroring the deliberate exclusion in `resolveGeminiBinary` at
-  // bin/browser-local/gemini-runtime.mjs:30. If install-detection here
-  // discovered a system Gemini, ensureCli() would return "available" and
-  // skip the bundled-runtime install where keytar IS run correctly. The
-  // spawn path (which intentionally still excludes the same locations)
-  // would then fall through to bare "gemini", PATH would resolve the
-  // broken system install, and auth would silently fail. Keep the
-  // bundled+user-local-only restriction here too.
-  //
-  // The auto-updater (#1637) returning skipped:unresolved for Gemini in
-  // this configuration is the intended outcome — we do not want to
-  // auto-update a binary we can't safely spawn. See #1665 PR for the
-  // full audit.
-  if (process.platform === "win32") {
-    const home = os.homedir();
-    const appData = process.env.APPDATA ?? "";
-    const nodeDir = path.dirname(process.execPath);
-    const candidates = [
-      // npm global install via embedded runtime's npm (prefix = node dir on Windows)
-      path.join(nodeDir, "gemini.cmd"),
-      path.join(nodeDir, "gemini"),
-      // npm global install via system npm
-      ...(appData ? [path.join(appData, "npm", "gemini.cmd")] : []),
-      // Generic install fallbacks
-      path.join(home, ".local", "bin", "gemini.exe"),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  } else {
-    const home = os.homedir();
-    const nodeDir = path.dirname(process.execPath);
-    const prefix = path.dirname(nodeDir);
-    const candidates = [
-      // npm global install via embedded runtime's npm — check FIRST so a
-      // broken Homebrew install doesn't shadow our working bundled one.
-      path.join(prefix, "bin", "gemini"),
-      // Generic user-local install fallbacks
-      path.join(home, ".local", "bin", "gemini"),
-    ];
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) {
-        return candidate;
-      }
-    }
-  }
-  return resolveViaNpmGlobalPrefix("gemini.cmd", "gemini") ?? "gemini";
-}
-
-/**
  * Resolve the installed Claude Code binary path.
  * GUI apps don't inherit shell PATH updates made by installers, so check
  * well-known install locations before falling back to bare command name.
@@ -1014,29 +927,26 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     },
     gemini: {
       type: "gemini",
-      name: "Gemini",
-      description: "Google Gemini via gemini-cli (Agent Client Protocol)",
-      command: "gemini",
+      name: "Antigravity",
+      description: "Google Antigravity coding agent",
+      command: "agy",
       async getAvailability() {
-        // Resolve via the embedded-install-aware path, NOT bare PATH lookup.
-        // A Homebrew gemini-cli on PATH cannot read its own keychain when
-        // spawned from a GUI app (#1476), so we report the agent as needing
-        // install whenever our embedded npm install path is empty — even if
-        // some other gemini is on PATH.
-        const resolved = resolveInstalledGeminiBinary();
-        const installed = resolved !== "gemini";
+        const resolved = resolveAntigravityBinary();
+        const installed = resolved !== "agy";
         return {
           type: "gemini",
-          name: "Gemini",
-          description: "Google Gemini via gemini-cli (Agent Client Protocol)",
-          command: "gemini",
+          name: "Antigravity",
+          description: "Google Antigravity coding agent",
+          command: "agy",
           available: true,
-          authenticated: isAgentAuthenticated("gemini"),
+          authenticated: installed
+            ? await checkAntigravityAuthenticated(resolved)
+            : false,
           ...(installed
             ? {}
             : {
                 unavailableReason:
-                  "Gemini CLI is not installed yet. Seren can install it automatically on first launch.",
+                  "Antigravity CLI is not installed yet. Seren can install Google's verified binary on first launch.",
               }),
         };
       },
@@ -1044,25 +954,31 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        // Short-circuit if our embedded install already exists. This prevents
-        // re-running npm on every spawn while still bypassing broken system
-        // installs that might be on PATH.
-        const resolved = resolveInstalledGeminiBinary();
-        if (resolved !== "gemini") {
-          return resolved;
+        try {
+          return await ensureAntigravityCli({ emit });
+        } catch (error) {
+          emit?.("provider://cli-install-progress", {
+            stage: "action_required",
+            message:
+              "Antigravity needs your attention before Seren can use it.",
+          });
+          emit?.("provider://cli-update-action-required", {
+            label: "Antigravity",
+            bareCommand: "agy",
+            packageName: "antigravity-cli",
+            reason: "installation_required",
+            actions: ["retry", "open_official_instructions"],
+            officialInstructionsUrl: ANTIGRAVITY_INSTALL_URL,
+          });
+          throw error;
         }
-        return ensureGlobalNpmPackage({
-          emit,
-          command: "gemini",
-          packageName: "@google/gemini-cli",
-          label: "Gemini",
-        });
       },
       launchLogin() {
-        // Use the resolved embedded-install path so the user runs `gemini login`
-        // with the WORKING binary (with compiled keytar), not the broken one.
-        const resolved = resolveInstalledGeminiBinary();
-        launchLoginCommand(resolved !== "gemini" ? resolved : "gemini");
+        const resolved = resolveAntigravityBinary();
+        launchInteractiveCommand(resolved !== "agy" ? resolved : "agy");
+      },
+      async checkAuthenticated() {
+        return checkAntigravityAuthenticated(resolveAntigravityBinary());
       },
     },
     grok: {

@@ -629,7 +629,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       case "codex":
         return "Codex";
       case "gemini":
-        return "Gemini";
+        return "Antigravity";
       case "grok":
         return "Grok";
       case "claude-codex":
@@ -2073,7 +2073,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
             agentType === "codex"
               ? "Codex"
               : agentType === "gemini"
-                ? "Gemini"
+                ? "Antigravity"
                 : agentType === "grok"
                   ? "Grok"
                   : agentType === "claude-codex"

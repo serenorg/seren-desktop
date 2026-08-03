@@ -586,7 +586,6 @@ try {
   `$agentCliPackages = @(
     @{ Label = "Claude Code"; Package = "@anthropic-ai/claude-code@latest"; Binary = "claude.cmd" },
     @{ Label = "Codex"; Package = "@openai/codex@latest"; Binary = "codex.cmd" },
-    @{ Label = "Gemini"; Package = "@google/gemini-cli@latest"; Binary = "gemini.cmd" },
     @{ Label = "Grok"; Package = "@xai-official/grok@latest"; Binary = "grok.cmd" }
   )
   # The installed app resolves agent CLIs from the real default npm global
@@ -616,6 +615,35 @@ try {
     }
     Invoke-LoggedNative "Verify `$(`$agentCli.Label) CLI" `$cliPath @("--version") 120
   }
+
+  # Antigravity is a native Google binary, not an npm package. Match the
+  # production installer: trust only Google's platform manifest/storage path
+  # and verify SHA-512 before the release gate launches the app.
+  `$agyManifestOrigin = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
+  `$agyManifest = Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json"
+  `$agyArtifactUri = [Uri][string]`$agyManifest.url
+  if (
+    `$agyArtifactUri.Scheme -ne "https" -or
+    `$agyArtifactUri.Host -ne "storage.googleapis.com" -or
+    -not `$agyArtifactUri.AbsolutePath.StartsWith("/antigravity-public/antigravity-cli/")
+  ) {
+    throw "Antigravity manifest selected an untrusted artifact URL"
+  }
+  `$agyBinDir = Join-Path `$env:LOCALAPPDATA "agy\bin"
+  `$agyPath = Join-Path `$agyBinDir "agy.exe"
+  New-Item -ItemType Directory -Path `$agyBinDir -Force | Out-Null
+  `$previousProgress = `$ProgressPreference
+  `$ProgressPreference = "SilentlyContinue"
+  try {
+    Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath
+  } finally {
+    `$ProgressPreference = `$previousProgress
+  }
+  `$agyHash = (Get-FileHash -LiteralPath `$agyPath -Algorithm SHA512).Hash.ToLowerInvariant()
+  if (`$agyHash -ne ([string]`$agyManifest.sha512).ToLowerInvariant()) {
+    throw "Antigravity release checksum verification failed"
+  }
+  Invoke-LoggedNative "Verify Antigravity CLI" `$agyPath @("--version") 120
   Invoke-LoggedNative "Playwright Chromium install" "pnpm" @("exec", "playwright", "install", "chromium") 600
   `$harnessArgs = @(
     "-NoProfile",

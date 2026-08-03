@@ -24,7 +24,7 @@ export function providerDisplayName(
     case "codex":
       return "Codex";
     case "gemini":
-      return "Gemini";
+      return "Antigravity";
     case "grok":
       return "Grok";
     case "claude-codex":

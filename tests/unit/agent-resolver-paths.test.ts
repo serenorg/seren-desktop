@@ -9,6 +9,10 @@ const registrySource = readFileSync(
   resolve("bin/browser-local/agent-registry.mjs"),
   "utf-8",
 );
+const antigravitySource = readFileSync(
+  resolve("bin/browser-local/antigravity-binary.mjs"),
+  "utf-8",
+);
 
 function sliceFn(name: string): string {
   const start = registrySource.indexOf(`function ${name}`);
@@ -68,40 +72,18 @@ describe("#1665 — Claude + Codex Windows resolvers cover MSI + user prefix", (
   });
 });
 
-describe("#1665 follow-up — Gemini resolver INTENTIONALLY excludes system + Homebrew paths (#1476 keytar)", () => {
-  // The Homebrew gemini-cli formula skips the keytar postinstall, so a
-  // system-installed gemini cannot read its own keychain when spawned from
-  // a GUI app and silently fails first-run auth. Mirroring the deliberate
-  // exclusion in resolveGeminiBinary at gemini-runtime.mjs.
-  it("does NOT include /usr/local/bin/gemini", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).not.toContain("/usr/local/bin/gemini");
+describe("#3648 — Antigravity resolver covers Google's documented install paths", () => {
+  it("prefers the official per-user install and covers common managed paths", () => {
+    expect(antigravitySource).toContain('path.join(home, ".local", "bin", "agy")');
+    expect(antigravitySource).toContain('path.join(localAppData, "agy", "bin", "agy.exe")');
+    expect(antigravitySource).toContain('"/opt/homebrew/bin/agy"');
+    expect(antigravitySource).toContain('"/usr/local/bin/agy"');
   });
 
-  it("does NOT include /opt/homebrew/bin/gemini", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).not.toContain("/opt/homebrew/bin/gemini");
-  });
-
-  it("does NOT include /usr/bin/gemini", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).not.toContain("/usr/bin/gemini");
-  });
-
-  it("does NOT read ProgramFiles\\nodejs (Windows MSI install)", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).not.toContain("process.env.ProgramFiles");
-  });
-
-  it("does NOT include <HOME>\\.npm-global on Windows", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).not.toContain('".npm-global"');
-  });
-
-  it("DOES include the bundled-runtime prefix and ~/.local/bin (the safe channels)", () => {
-    const fn = sliceFn("resolveInstalledGeminiBinary");
-    expect(fn).toContain('path.join(prefix, "bin", "gemini")');
-    expect(fn).toContain('path.join(home, ".local", "bin", "gemini")');
+  it("also searches inherited PATH without using a shell", () => {
+    expect(antigravitySource).toContain("process.env.PATH");
+    expect(antigravitySource).toContain("path.delimiter");
+    expect(antigravitySource).toContain("shell: false");
   });
 });
 
@@ -129,7 +111,6 @@ describe("#3377 — resolvers fall back to the dynamic npm global prefix", () =>
   it.each([
     "resolveInstalledCodexBinary",
     "resolveInstalledClaudeBinary",
-    "resolveInstalledGeminiBinary",
   ])(
     "%s consults the dynamic prefix for custom / version-manager installs",
     (name) => {

@@ -12,7 +12,7 @@ export function agentDisplayName(agentType?: string): string {
     case "claude-code":
       return "Claude Code";
     case "gemini":
-      return "Gemini";
+      return "Antigravity";
     case "grok":
       return "Grok";
     case "claude-codex":
@@ -30,7 +30,7 @@ export function agentInitializationFailureMessage(agentType?: string): string {
     agentType === "codex"
       ? "Codex is installed and signed in"
       : agentType === "gemini"
-        ? "Gemini is installed and signed in"
+        ? "Antigravity is installed and signed in"
         : agentType === "grok"
           ? "Grok is installed and signed in"
           : agentType === "lmstudio"

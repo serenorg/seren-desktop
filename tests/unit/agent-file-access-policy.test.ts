@@ -21,7 +21,7 @@ const geminiModulePath = new URL(
   "../../bin/browser-local/gemini-runtime.mjs",
   import.meta.url,
 ).href;
-const { _geminiSandboxEnv: geminiSandboxEnv } = await import(
+const { buildAntigravityArgs } = await import(
   /* @vite-ignore */ geminiModulePath
 );
 const claudeHookPath = fileURLToPath(
@@ -237,19 +237,26 @@ describe("Windows bounded-session containment (#3514)", () => {
   });
 });
 
-describe("Gemini ACP containment (#3091)", () => {
-  it("enables Gemini's project sandbox except for explicit Full Access", () => {
-    expect(
-      geminiSandboxEnv({
+describe("Antigravity headless containment (#3648)", () => {
+  it("enables Antigravity's sandbox except for explicit Full Access", () => {
+    const bounded = buildAntigravityArgs(
+      {
+        timeoutSecs: 60,
+        currentModeId: "accept-edits",
         sandboxMode: "workspace-write",
-        networkEnabled: true,
-      }).GEMINI_SANDBOX,
-    ).toBe("true");
-    expect(
-      geminiSandboxEnv({
+      },
+      "test",
+    );
+    const fullAccess = buildAntigravityArgs(
+      {
+        timeoutSecs: 60,
+        currentModeId: "yolo",
         sandboxMode: "full-access",
-        networkEnabled: true,
-      }).GEMINI_SANDBOX,
-    ).toBe("false");
+      },
+      "test",
+    );
+    expect(bounded).toContain("--sandbox");
+    expect(fullAccess).not.toContain("--sandbox");
+    expect(fullAccess).toContain("--dangerously-skip-permissions");
   });
 });

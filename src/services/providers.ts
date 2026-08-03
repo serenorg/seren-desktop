@@ -962,9 +962,9 @@ export async function getPendingCliUpdateAction(): Promise<CliUpdateActionRequir
 }
 
 /**
- * Ensure Gemini CLI (`@google/gemini-cli`) is installed.
- * Installs or upgrades via npm if needed.
- * Returns the bin directory path containing the gemini binary.
+ * Ensure Google Antigravity CLI (`agy`) is installed at the supported baseline.
+ * The local provider runtime verifies Google's release manifest and SHA-512.
+ * The durable service name remains Gemini for saved-session compatibility.
  */
 export async function ensureGeminiCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {

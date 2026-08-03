@@ -1,5 +1,5 @@
 // ABOUTME: OAuth service for provider authentication flows.
-// ABOUTME: Handles PKCE-based OAuth 2.0 for OpenAI. Gemini OAuth was removed in favor of the Gemini Agent (gemini-cli).
+// ABOUTME: Handles PKCE-based OAuth 2.0 for OpenAI; Google's Antigravity CLI owns its coding-agent auth.
 
 import { appFetch } from "@/lib/fetch";
 import type { OAuthCredentials, ProviderId } from "@/lib/providers/types";

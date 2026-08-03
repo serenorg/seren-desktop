@@ -74,14 +74,13 @@ describe("#1718 Codex runtime — thread/start model adoption is logged", () => 
   });
 });
 
-describe("#3643 Gemini runtime — mid-session setModel reaches the CLI", () => {
-  it("sends session/set_model with the active CLI session and requested model", () => {
-    const fnIdx = geminiRuntime.indexOf("async setModel(");
+describe("#3648 Antigravity runtime — model selection reaches the next CLI turn", () => {
+  it("stores a validated selection and passes it through --model", () => {
+    const fnIdx = geminiRuntime.indexOf("async function setModel(");
     expect(fnIdx).toBeGreaterThan(0);
     const region = geminiRuntime.slice(fnIdx, fnIdx + 1200);
-    expect(region).toContain('"session/set_model"');
-    expect(region).toContain("sessionId: session.agentSessionId");
-    expect(region).toContain("modelId");
-    expect(region).not.toMatch(/(no-op|spawn[ -]time)/);
+    expect(region).toContain("session.availableModels.some");
+    expect(region).toContain("session.currentModelId = modelId");
+    expect(geminiRuntime).toContain('args.push("--model", session.currentModelId)');
   });
 });
