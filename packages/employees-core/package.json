@@ -7,5 +7,11 @@
     ".": "./src/index.ts"
   },
   "types": "./src/index.ts",
-  "sideEffects": false
+  "sideEffects": false,
+  "peerDependencies": {
+    "@seren/employees-api-types": "0.0.0"
+  },
+  "devDependencies": {
+    "@seren/employees-api-types": "workspace:*"
+  }
 }

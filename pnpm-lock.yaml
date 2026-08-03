@@ -29,6 +29,9 @@ importers:
       '@seren/chat-ui':
         specifier: workspace:*
         version: link:packages/chat-ui
+      '@seren/employees-api-types':
+        specifier: workspace:*
+        version: link:packages/employees-api-types
       '@seren/employees-core':
         specifier: workspace:*
         version: link:packages/employees-core
@@ -157,7 +160,13 @@ importers:
         specifier: 1.9.14
         version: 1.9.14
 
-  packages/employees-core: {}
+  packages/employees-api-types: {}
+
+  packages/employees-core:
+    devDependencies:
+      '@seren/employees-api-types':
+        specifier: workspace:*
+        version: link:../employees-api-types
 
   packages/passwords-core:
     dependencies:
@@ -5784,7 +5793,7 @@ snapshots:
       '@babel/types': 7.29.7
       '@jridgewell/remapping': 2.3.5
       convert-source-map: 2.0.0
-      debug: 4.4.3
+      debug: 4.3.4
       gensync: 1.0.0-beta.2
       json5: 2.2.3
       semver: 6.3.1

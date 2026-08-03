@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { appendMemory, consolidateJob, createKnowledgeDomain, deleteKnowledgeDomainGrant, deleteKnowledgeRecord, deleteMemoriesBySource, deleteMemory, exportMemories, forgetMemory, getKnowledgeModel, getMemory, health, healthDetailed, ingestDocument, invokeKnowledgeOperation, learnFromError, linkMemories, listKnowledgeDomainGrants, listKnowledgeDomains, listKnowledgeOperations, listKnowledgeRecords, listMemories, listMemoryRevisions, livez, mcpHandler, memoryTimeline, openKnowledgeEntity, type Options, processConversation, putKnowledgeDomain, putKnowledgeDomainGrant, putKnowledgeModel, putKnowledgeRecord, readyz, recall, remember, root, searchKnowledge, serveOpenapi, sessionBootstrap, setMemoryStatus, skillMd, syncStatus, unlinkMemories } from '../sdk.gen';
-import type { AppendMemoryData, AppendMemoryError, AppendMemoryResponse, ConsolidateJobData, ConsolidateJobError, ConsolidateJobResponse2, CreateKnowledgeDomainData, CreateKnowledgeDomainError, CreateKnowledgeDomainResponse, DeleteKnowledgeDomainGrantData, DeleteKnowledgeDomainGrantError, DeleteKnowledgeDomainGrantResponse2, DeleteKnowledgeRecordData, DeleteKnowledgeRecordError, DeleteKnowledgeRecordResponse2, DeleteMemoriesBySourceData, DeleteMemoriesBySourceError, DeleteMemoriesBySourceResponse, DeleteMemoryData, DeleteMemoryError, DeleteMemoryResponse2, ExportMemoriesData, ExportMemoriesError, ExportMemoriesResponse, ForgetMemoryData, ForgetMemoryError, ForgetMemoryResponse2, GetKnowledgeModelData, GetKnowledgeModelError, GetKnowledgeModelResponse, GetMemoryData, GetMemoryError, GetMemoryResponse, HealthData, HealthDetailedData, HealthDetailedResponse, HealthResponse2, IngestDocumentData, IngestDocumentError, IngestDocumentResponse, InvokeKnowledgeOperationData, InvokeKnowledgeOperationError, InvokeKnowledgeOperationResponse, LearnFromErrorData, LearnFromErrorError, LearnFromErrorResponse, LinkMemoriesData, LinkMemoriesError, LinkMemoriesResponse, ListKnowledgeDomainGrantsData, ListKnowledgeDomainGrantsError, ListKnowledgeDomainGrantsResponse, ListKnowledgeDomainsData, ListKnowledgeDomainsError, ListKnowledgeDomainsResponse, ListKnowledgeOperationsData, ListKnowledgeOperationsError, ListKnowledgeOperationsResponse, ListKnowledgeRecordsData, ListKnowledgeRecordsError, ListKnowledgeRecordsResponse2, ListMemoriesData, ListMemoriesError, ListMemoriesResponse2, ListMemoryRevisionsData, ListMemoryRevisionsError, ListMemoryRevisionsResponse, LivezData, McpHandlerData, McpHandlerError, MemoryTimelineData, MemoryTimelineError, MemoryTimelineResponse, OpenKnowledgeEntityData, OpenKnowledgeEntityError, OpenKnowledgeEntityResponse, ProcessConversationData, ProcessConversationError, ProcessConversationResponse, PutKnowledgeDomainData, PutKnowledgeDomainError, PutKnowledgeDomainGrantData, PutKnowledgeDomainGrantError, PutKnowledgeDomainGrantResponse, PutKnowledgeDomainResponse, PutKnowledgeModelData, PutKnowledgeModelError, PutKnowledgeModelResponse, PutKnowledgeRecordData, PutKnowledgeRecordError, PutKnowledgeRecordResponse, ReadyzData, ReadyzError, ReadyzResponse, RecallData, RecallError, RecallResponse2, RememberData, RememberError, RememberResponse, RootData, RootResponse, SearchKnowledgeData, SearchKnowledgeError, SearchKnowledgeResponse, ServeOpenapiData, ServeOpenapiResponse, SessionBootstrapData, SessionBootstrapError, SessionBootstrapResponse, SetMemoryStatusData, SetMemoryStatusError, SetMemoryStatusResponse, SkillMdData, SyncStatusData, SyncStatusError, SyncStatusResponse, UnlinkMemoriesData, UnlinkMemoriesError, UnlinkMemoriesResponse } from '../types.gen';
+import { appendMemory, captureAgentTurn, consolidateJob, createKnowledgeDomain, createMigration, deleteKnowledgeDomainGrant, deleteKnowledgeRecord, deleteMemoriesBySource, deleteMemory, embedMigrationRecords, executeWorkspaceMerge, exportMemories, forgetMemory, getKnowledgeModel, getMemory, getMigration, health, healthDetailed, importMigrationRecords, ingestDocument, invokeKnowledgeOperation, learnFromError, linkMemories, listKnowledgeDomainGrants, listKnowledgeDomains, listKnowledgeOperations, listKnowledgeRecords, listMemories, listMemoryRevisions, livez, mcpHandler, memoryTimeline, openKnowledgeEntity, type Options, previewWorkspaceMerge, processConversation, putKnowledgeDomain, putKnowledgeDomainGrant, putKnowledgeModel, putKnowledgeRecord, readyz, recall, remember, rollbackMigration, root, searchKnowledge, serveOpenapi, sessionBootstrap, setMemoryReview, setMemoryStatus, setMigrationState, skillMd, syncStatus, unlinkMemories } from '../sdk.gen';
+import type { AppendMemoryData, AppendMemoryError, AppendMemoryResponse, CaptureAgentTurnData, CaptureAgentTurnError, CaptureAgentTurnResponse, ConsolidateJobData, ConsolidateJobError, ConsolidateJobResponse2, CreateKnowledgeDomainData, CreateKnowledgeDomainError, CreateKnowledgeDomainResponse, CreateMigrationData, CreateMigrationError, CreateMigrationResponse, DeleteKnowledgeDomainGrantData, DeleteKnowledgeDomainGrantError, DeleteKnowledgeDomainGrantResponse2, DeleteKnowledgeRecordData, DeleteKnowledgeRecordError, DeleteKnowledgeRecordResponse2, DeleteMemoriesBySourceData, DeleteMemoriesBySourceError, DeleteMemoriesBySourceResponse, DeleteMemoryData, DeleteMemoryError, DeleteMemoryResponse2, EmbedMigrationRecordsData, EmbedMigrationRecordsError, EmbedMigrationRecordsResponse2, ExecuteWorkspaceMergeData, ExecuteWorkspaceMergeError, ExecuteWorkspaceMergeResponse, ExportMemoriesData, ExportMemoriesError, ExportMemoriesResponse, ForgetMemoryData, ForgetMemoryError, ForgetMemoryResponse2, GetKnowledgeModelData, GetKnowledgeModelError, GetKnowledgeModelResponse, GetMemoryData, GetMemoryError, GetMemoryResponse, GetMigrationData, GetMigrationError, GetMigrationResponse, HealthData, HealthDetailedData, HealthDetailedResponse, HealthResponse2, ImportMigrationRecordsData, ImportMigrationRecordsError, ImportMigrationRecordsResponse, IngestDocumentData, IngestDocumentError, IngestDocumentResponse, InvokeKnowledgeOperationData, InvokeKnowledgeOperationError, InvokeKnowledgeOperationResponse, LearnFromErrorData, LearnFromErrorError, LearnFromErrorResponse, LinkMemoriesData, LinkMemoriesError, LinkMemoriesResponse, ListKnowledgeDomainGrantsData, ListKnowledgeDomainGrantsError, ListKnowledgeDomainGrantsResponse, ListKnowledgeDomainsData, ListKnowledgeDomainsError, ListKnowledgeDomainsResponse, ListKnowledgeOperationsData, ListKnowledgeOperationsError, ListKnowledgeOperationsResponse, ListKnowledgeRecordsData, ListKnowledgeRecordsError, ListKnowledgeRecordsResponse2, ListMemoriesData, ListMemoriesError, ListMemoriesResponse2, ListMemoryRevisionsData, ListMemoryRevisionsError, ListMemoryRevisionsResponse, LivezData, McpHandlerData, McpHandlerError, MemoryTimelineData, MemoryTimelineError, MemoryTimelineResponse, OpenKnowledgeEntityData, OpenKnowledgeEntityError, OpenKnowledgeEntityResponse, PreviewWorkspaceMergeData, PreviewWorkspaceMergeError, PreviewWorkspaceMergeResponse, ProcessConversationData, ProcessConversationError, ProcessConversationResponse, PutKnowledgeDomainData, PutKnowledgeDomainError, PutKnowledgeDomainGrantData, PutKnowledgeDomainGrantError, PutKnowledgeDomainGrantResponse, PutKnowledgeDomainResponse, PutKnowledgeModelData, PutKnowledgeModelError, PutKnowledgeModelResponse, PutKnowledgeRecordData, PutKnowledgeRecordError, PutKnowledgeRecordResponse, ReadyzData, ReadyzError, ReadyzResponse, RecallData, RecallError, RecallResponse2, RememberData, RememberError, RememberResponse, RollbackMigrationData, RollbackMigrationError, RollbackMigrationResponse2, RootData, RootResponse, SearchKnowledgeData, SearchKnowledgeError, SearchKnowledgeResponse, ServeOpenapiData, ServeOpenapiResponse, SessionBootstrapData, SessionBootstrapError, SessionBootstrapResponse, SetMemoryReviewData, SetMemoryReviewError, SetMemoryReviewResponse2, SetMemoryStatusData, SetMemoryStatusError, SetMemoryStatusResponse, SetMigrationStateData, SetMigrationStateError, SetMigrationStateResponse, SkillMdData, SyncStatusData, SyncStatusError, SyncStatusResponse, UnlinkMemoriesData, UnlinkMemoriesError, UnlinkMemoriesResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -64,6 +64,25 @@ export const sessionBootstrapMutation = (options?: Partial<Options<SessionBootst
     const mutationOptions: MutationOptions<SessionBootstrapResponse, SessionBootstrapError, Options<SessionBootstrapData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await sessionBootstrap({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Capture a completed agent turn from a lifecycle hook
+ *
+ * Dedicated ingestion operation for automatic agent capture. Accepts prompt and assistant-response content as separate fields so the current organization policy can independently permit each content class before the service assembles an extraction transcript. Requires a stable source_external_id in the reserved hook: namespace and the current server-issued organization policy_version. Stale callers must refresh the policy and re-sanitize queued content. The operation always stores a metadata source envelope for idempotent retries and stores the assembled raw payload only when both retain_source is requested and organization policy permits it. Source metadata is provenance validated against a separate 16,000-byte serialized bound and does not count against max_transcript_bytes.
+ */
+export const captureAgentTurnMutation = (options?: Partial<Options<CaptureAgentTurnData>>): MutationOptions<CaptureAgentTurnResponse, CaptureAgentTurnError, Options<CaptureAgentTurnData>> => {
+    const mutationOptions: MutationOptions<CaptureAgentTurnResponse, CaptureAgentTurnError, Options<CaptureAgentTurnData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await captureAgentTurn({
                 ...options,
                 ...fnOptions,
                 throwOnError: true
@@ -731,6 +750,25 @@ export const appendMemoryMutation = (options?: Partial<Options<AppendMemoryData>
     return mutationOptions;
 };
 
+/**
+ * Set a private memory review status
+ *
+ * Explicit review transition. No ingestion channel grants reviewed trust automatically, and this operation is intentionally not exposed as an MCP tool.
+ */
+export const setMemoryReviewMutation = (options?: Partial<Options<SetMemoryReviewData>>): MutationOptions<SetMemoryReviewResponse2, SetMemoryReviewError, Options<SetMemoryReviewData>> => {
+    const mutationOptions: MutationOptions<SetMemoryReviewResponse2, SetMemoryReviewError, Options<SetMemoryReviewData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await setMemoryReview({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
 export const listMemoryRevisionsQueryKey = (options: Options<ListMemoryRevisionsData>) => createQueryKey('listMemoryRevisions', options);
 
 /**
@@ -780,6 +818,115 @@ export const memoryTimelineOptions = (options: Options<MemoryTimelineData>) => q
     },
     queryKey: memoryTimelineQueryKey(options)
 });
+
+/**
+ * Create a durable import migration record
+ */
+export const createMigrationMutation = (options?: Partial<Options<CreateMigrationData>>): MutationOptions<CreateMigrationResponse, CreateMigrationError, Options<CreateMigrationData>> => {
+    const mutationOptions: MutationOptions<CreateMigrationResponse, CreateMigrationError, Options<CreateMigrationData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await createMigration({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const getMigrationQueryKey = (options: Options<GetMigrationData>) => createQueryKey('getMigration', options);
+
+/**
+ * Get one migration record with live record counts
+ */
+export const getMigrationOptions = (options: Options<GetMigrationData>) => queryOptions<GetMigrationResponse, GetMigrationError, GetMigrationResponse, ReturnType<typeof getMigrationQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await getMigration({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: getMigrationQueryKey(options)
+});
+
+/**
+ * Generate embeddings for imported migration records
+ *
+ * Processes a bounded batch of pending or failed imported memories. Call until embedding_pending and embedding_failed are both zero before completing the migration.
+ */
+export const embedMigrationRecordsMutation = (options?: Partial<Options<EmbedMigrationRecordsData>>): MutationOptions<EmbedMigrationRecordsResponse2, EmbedMigrationRecordsError, Options<EmbedMigrationRecordsData>> => {
+    const mutationOptions: MutationOptions<EmbedMigrationRecordsResponse2, EmbedMigrationRecordsError, Options<EmbedMigrationRecordsData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await embedMigrationRecords({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Import a batch of already-extracted records under a migration
+ *
+ * Records use the reserved import: namespace and are idempotent per source_external_id. Extraction never runs. The response reports the outcome and durable IDs for every submitted record.
+ */
+export const importMigrationRecordsMutation = (options?: Partial<Options<ImportMigrationRecordsData>>): MutationOptions<ImportMigrationRecordsResponse, ImportMigrationRecordsError, Options<ImportMigrationRecordsData>> => {
+    const mutationOptions: MutationOptions<ImportMigrationRecordsResponse, ImportMigrationRecordsError, Options<ImportMigrationRecordsData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await importMigrationRecords({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Remove every record created by a migration run or its series
+ *
+ * Selection is strictly by stored migration provenance; hook, MCP, manual, and unrelated import records can never be selected.
+ */
+export const rollbackMigrationMutation = (options?: Partial<Options<RollbackMigrationData>>): MutationOptions<RollbackMigrationResponse2, RollbackMigrationError, Options<RollbackMigrationData>> => {
+    const mutationOptions: MutationOptions<RollbackMigrationResponse2, RollbackMigrationError, Options<RollbackMigrationData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await rollbackMigration({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Transition a migration lifecycle state
+ */
+export const setMigrationStateMutation = (options?: Partial<Options<SetMigrationStateData>>): MutationOptions<SetMigrationStateResponse, SetMigrationStateError, Options<SetMigrationStateData>> => {
+    const mutationOptions: MutationOptions<SetMigrationStateResponse, SetMigrationStateError, Options<SetMigrationStateData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await setMigrationState({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
 
 export const serveOpenapiQueryKey = (options?: Options<ServeOpenapiData>) => createQueryKey('serveOpenapi', options);
 
@@ -903,3 +1050,41 @@ export const syncStatusOptions = (options?: Options<SyncStatusData>) => queryOpt
     },
     queryKey: syncStatusQueryKey(options)
 });
+
+/**
+ * Execute a reviewed workspace merge
+ *
+ * Rechecks the state-bound preview under workspace locks, rewrites source envelopes to the canonical target, creates a durable alias for future captures, and records an immutable audit row. Retrying the same accepted plan is idempotent.
+ */
+export const executeWorkspaceMergeMutation = (options?: Partial<Options<ExecuteWorkspaceMergeData>>): MutationOptions<ExecuteWorkspaceMergeResponse, ExecuteWorkspaceMergeError, Options<ExecuteWorkspaceMergeData>> => {
+    const mutationOptions: MutationOptions<ExecuteWorkspaceMergeResponse, ExecuteWorkspaceMergeError, Options<ExecuteWorkspaceMergeData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await executeWorkspaceMerge({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Preview a controlled workspace merge
+ *
+ * Returns content-free source counts, shared external-session collisions, dependent aliases, and a state-bound plan hash. No records are changed.
+ */
+export const previewWorkspaceMergeMutation = (options?: Partial<Options<PreviewWorkspaceMergeData>>): MutationOptions<PreviewWorkspaceMergeResponse, PreviewWorkspaceMergeError, Options<PreviewWorkspaceMergeData>> => {
+    const mutationOptions: MutationOptions<PreviewWorkspaceMergeResponse, PreviewWorkspaceMergeError, Options<PreviewWorkspaceMergeData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await previewWorkspaceMerge({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};

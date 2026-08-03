@@ -428,7 +428,7 @@ export const serenCloudDeploymentAuditInfiniteOptions = (options: Options<SerenC
 };
 
 /**
- * Bind encrypted Seren Secrets references to a managed employee connector.
+ * Bind encrypted `seren-secrets://` references to a managed employee connector.
  */
 export const serenCloudBindConnectorSecretsMutation = (options?: Partial<Options<SerenCloudBindConnectorSecretsData>>): MutationOptions<SerenCloudBindConnectorSecretsResponse, DefaultError, Options<SerenCloudBindConnectorSecretsData>> => {
     const mutationOptions: MutationOptions<SerenCloudBindConnectorSecretsResponse, DefaultError, Options<SerenCloudBindConnectorSecretsData>> = {

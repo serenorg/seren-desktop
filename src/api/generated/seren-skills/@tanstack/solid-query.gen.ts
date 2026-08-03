@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, downloadSkillFile, downloadSkillManifest, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listCollaborators, listFiles, listOrphanFolders, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
-import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillFileData, DownloadSkillFileResponse, DownloadSkillManifestData, DownloadSkillManifestResponse, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListCollaboratorsData, ListCollaboratorsResponse, ListFilesData, ListFilesResponse, ListOrphanFoldersData, ListOrphanFoldersResponse, ListSkillsData, ListSkillsResponse, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse, ListUpdateRequestsData, ListUpdateRequestsResponse, ListUsageEventsData, ListUsageEventsResponse, ListVersionsData, ListVersionsResponse, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
+import { acceptUpdateRequest, createOrgFolder, createSkill, createUpdateRequest, createUpdateRequestComment, createVersion, deleteCollaborator, deleteFile, deleteSkill, downloadSkill, downloadSkillFile, downloadSkillManifest, getAuthorIdentity, getDraft, getFile, getMergeState, getOrgFolder, getSkill, getSkillEditDocument, getUpdateRequest, getUpdateRequestDiff, getVersionManifest, githubStatus, listAgentGrants, listCollaborators, listFiles, listOrphanFolders, listSkills, listUpdateRequestComments, listUpdateRequests, listUsageEvents, listVersions, type Options, publisherRoot, purchaseSkill, putFile, reconcileOrphans, rejectUpdateRequest, replaceOrgFolder, resolveConflict, retryGithubPublish, revokeAgentGrant, skillMd, syncFromMain, transferOrgFolder, updateOrgFolder, updateSkill, updateSponsor, upsertAgentGrant, upsertAuthorIdentity, upsertCollaborator, usageSummary } from '../sdk.gen';
+import type { AcceptUpdateRequestData, AcceptUpdateRequestResponse, CreateOrgFolderData, CreateOrgFolderResponse, CreateSkillData, CreateSkillResponse, CreateUpdateRequestCommentData, CreateUpdateRequestCommentResponse, CreateUpdateRequestData, CreateUpdateRequestResponse, CreateVersionData, CreateVersionResponse2, DeleteCollaboratorData, DeleteCollaboratorResponse, DeleteFileData, DeleteFileResponse, DeleteSkillData, DeleteSkillResponse, DownloadSkillData, DownloadSkillFileData, DownloadSkillFileResponse, DownloadSkillManifestData, DownloadSkillManifestResponse, DownloadSkillResponse, GetAuthorIdentityData, GetAuthorIdentityResponse, GetDraftData, GetDraftResponse, GetFileData, GetFileResponse2, GetMergeStateData, GetMergeStateResponse, GetOrgFolderData, GetOrgFolderResponse, GetSkillData, GetSkillEditDocumentData, GetSkillEditDocumentResponse, GetSkillResponse, GetUpdateRequestData, GetUpdateRequestDiffData, GetUpdateRequestDiffResponse, GetUpdateRequestResponse, GetVersionManifestData, GetVersionManifestResponse, GithubStatusData, GithubStatusResponse, ListAgentGrantsData, ListAgentGrantsResponse, ListCollaboratorsData, ListCollaboratorsResponse, ListFilesData, ListFilesResponse, ListOrphanFoldersData, ListOrphanFoldersResponse, ListSkillsData, ListSkillsResponse, ListUpdateRequestCommentsData, ListUpdateRequestCommentsResponse, ListUpdateRequestsData, ListUpdateRequestsResponse, ListUsageEventsData, ListUsageEventsResponse, ListVersionsData, ListVersionsResponse, PublisherRootData, PublisherRootResponse, PurchaseSkillData, PurchaseSkillResponse, PutFileData, PutFileResponse, ReconcileOrphansData, ReconcileOrphansError, ReconcileOrphansResponse, RejectUpdateRequestData, RejectUpdateRequestResponse, ReplaceOrgFolderData, ReplaceOrgFolderResponse, ResolveConflictData, ResolveConflictResponse, RetryGithubPublishData, RetryGithubPublishResponse, RevokeAgentGrantData, RevokeAgentGrantResponse, SkillMdData, SyncFromMainData, SyncFromMainResponse, TransferOrgFolderData, TransferOrgFolderResponse, UpdateOrgFolderData, UpdateOrgFolderResponse, UpdateSkillData, UpdateSkillResponse, UpdateSponsorData, UpdateSponsorResponse, UpsertAgentGrantData, UpsertAgentGrantResponse, UpsertAuthorIdentityData, UpsertAuthorIdentityResponse, UpsertCollaboratorData, UpsertCollaboratorResponse, UsageSummaryData, UsageSummaryResponse2 } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -337,6 +337,49 @@ export const updateSkillMutation = (options?: Partial<Options<UpdateSkillData>>)
     const mutationOptions: MutationOptions<UpdateSkillResponse, DefaultError, Options<UpdateSkillData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await updateSkill({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const listAgentGrantsQueryKey = (options: Options<ListAgentGrantsData>) => createQueryKey('listAgentGrants', options);
+
+export const listAgentGrantsOptions = (options: Options<ListAgentGrantsData>) => queryOptions<ListAgentGrantsResponse, DefaultError, ListAgentGrantsResponse, ReturnType<typeof listAgentGrantsQueryKey>>({
+    queryFn: async ({ queryKey, signal }) => {
+        const { data } = await listAgentGrants({
+            ...options,
+            ...queryKey[0],
+            signal,
+            throwOnError: true
+        });
+        return data;
+    },
+    queryKey: listAgentGrantsQueryKey(options)
+});
+
+export const revokeAgentGrantMutation = (options?: Partial<Options<RevokeAgentGrantData>>): MutationOptions<RevokeAgentGrantResponse, DefaultError, Options<RevokeAgentGrantData>> => {
+    const mutationOptions: MutationOptions<RevokeAgentGrantResponse, DefaultError, Options<RevokeAgentGrantData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await revokeAgentGrant({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+export const upsertAgentGrantMutation = (options?: Partial<Options<UpsertAgentGrantData>>): MutationOptions<UpsertAgentGrantResponse, DefaultError, Options<UpsertAgentGrantData>> => {
+    const mutationOptions: MutationOptions<UpsertAgentGrantResponse, DefaultError, Options<UpsertAgentGrantData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await upsertAgentGrant({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

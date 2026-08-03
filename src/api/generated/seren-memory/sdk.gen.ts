@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AppendMemoryData, AppendMemoryErrors, AppendMemoryResponses, ConsolidateJobData, ConsolidateJobErrors, ConsolidateJobResponses, CreateKnowledgeDomainData, CreateKnowledgeDomainErrors, CreateKnowledgeDomainResponses, DeleteKnowledgeDomainGrantData, DeleteKnowledgeDomainGrantErrors, DeleteKnowledgeDomainGrantResponses, DeleteKnowledgeRecordData, DeleteKnowledgeRecordErrors, DeleteKnowledgeRecordResponses, DeleteMemoriesBySourceData, DeleteMemoriesBySourceErrors, DeleteMemoriesBySourceResponses, DeleteMemoryData, DeleteMemoryErrors, DeleteMemoryResponses, ExportMemoriesData, ExportMemoriesErrors, ExportMemoriesResponses, ForgetMemoryData, ForgetMemoryErrors, ForgetMemoryResponses, GetKnowledgeModelData, GetKnowledgeModelErrors, GetKnowledgeModelResponses, GetMemoryData, GetMemoryErrors, GetMemoryResponses, HealthData, HealthDetailedData, HealthDetailedResponses, HealthResponses, IngestDocumentData, IngestDocumentErrors, IngestDocumentResponses, InvokeKnowledgeOperationData, InvokeKnowledgeOperationErrors, InvokeKnowledgeOperationResponses, LearnFromErrorData, LearnFromErrorErrors, LearnFromErrorResponses, LinkMemoriesData, LinkMemoriesErrors, LinkMemoriesResponses, ListKnowledgeDomainGrantsData, ListKnowledgeDomainGrantsErrors, ListKnowledgeDomainGrantsResponses, ListKnowledgeDomainsData, ListKnowledgeDomainsErrors, ListKnowledgeDomainsResponses, ListKnowledgeOperationsData, ListKnowledgeOperationsErrors, ListKnowledgeOperationsResponses, ListKnowledgeRecordsData, ListKnowledgeRecordsErrors, ListKnowledgeRecordsResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListMemoryRevisionsData, ListMemoryRevisionsErrors, ListMemoryRevisionsResponses, LivezData, LivezResponses, McpHandlerData, McpHandlerErrors, McpHandlerResponses, MemoryTimelineData, MemoryTimelineErrors, MemoryTimelineResponses, OpenKnowledgeEntityData, OpenKnowledgeEntityErrors, OpenKnowledgeEntityResponses, ProcessConversationData, ProcessConversationErrors, ProcessConversationResponses, PutKnowledgeDomainData, PutKnowledgeDomainErrors, PutKnowledgeDomainGrantData, PutKnowledgeDomainGrantErrors, PutKnowledgeDomainGrantResponses, PutKnowledgeDomainResponses, PutKnowledgeModelData, PutKnowledgeModelErrors, PutKnowledgeModelResponses, PutKnowledgeRecordData, PutKnowledgeRecordErrors, PutKnowledgeRecordResponses, ReadyzData, ReadyzErrors, ReadyzResponses, RecallData, RecallErrors, RecallResponses, RememberData, RememberErrors, RememberResponses, RootData, RootResponses, SearchKnowledgeData, SearchKnowledgeErrors, SearchKnowledgeResponses, ServeOpenapiData, ServeOpenapiResponses, SessionBootstrapData, SessionBootstrapErrors, SessionBootstrapResponses, SetMemoryStatusData, SetMemoryStatusErrors, SetMemoryStatusResponses, SkillMdData, SkillMdResponses, SyncStatusData, SyncStatusErrors, SyncStatusResponses, UnlinkMemoriesData, UnlinkMemoriesErrors, UnlinkMemoriesResponses } from './types.gen';
+import type { AppendMemoryData, AppendMemoryErrors, AppendMemoryResponses, CaptureAgentTurnData, CaptureAgentTurnErrors, CaptureAgentTurnResponses, ConsolidateJobData, ConsolidateJobErrors, ConsolidateJobResponses, CreateKnowledgeDomainData, CreateKnowledgeDomainErrors, CreateKnowledgeDomainResponses, CreateMigrationData, CreateMigrationErrors, CreateMigrationResponses, DeleteKnowledgeDomainGrantData, DeleteKnowledgeDomainGrantErrors, DeleteKnowledgeDomainGrantResponses, DeleteKnowledgeRecordData, DeleteKnowledgeRecordErrors, DeleteKnowledgeRecordResponses, DeleteMemoriesBySourceData, DeleteMemoriesBySourceErrors, DeleteMemoriesBySourceResponses, DeleteMemoryData, DeleteMemoryErrors, DeleteMemoryResponses, EmbedMigrationRecordsData, EmbedMigrationRecordsErrors, EmbedMigrationRecordsResponses, ExecuteWorkspaceMergeData, ExecuteWorkspaceMergeErrors, ExecuteWorkspaceMergeResponses, ExportMemoriesData, ExportMemoriesErrors, ExportMemoriesResponses, ForgetMemoryData, ForgetMemoryErrors, ForgetMemoryResponses, GetKnowledgeModelData, GetKnowledgeModelErrors, GetKnowledgeModelResponses, GetMemoryData, GetMemoryErrors, GetMemoryResponses, GetMigrationData, GetMigrationErrors, GetMigrationResponses, HealthData, HealthDetailedData, HealthDetailedResponses, HealthResponses, ImportMigrationRecordsData, ImportMigrationRecordsErrors, ImportMigrationRecordsResponses, IngestDocumentData, IngestDocumentErrors, IngestDocumentResponses, InvokeKnowledgeOperationData, InvokeKnowledgeOperationErrors, InvokeKnowledgeOperationResponses, LearnFromErrorData, LearnFromErrorErrors, LearnFromErrorResponses, LinkMemoriesData, LinkMemoriesErrors, LinkMemoriesResponses, ListKnowledgeDomainGrantsData, ListKnowledgeDomainGrantsErrors, ListKnowledgeDomainGrantsResponses, ListKnowledgeDomainsData, ListKnowledgeDomainsErrors, ListKnowledgeDomainsResponses, ListKnowledgeOperationsData, ListKnowledgeOperationsErrors, ListKnowledgeOperationsResponses, ListKnowledgeRecordsData, ListKnowledgeRecordsErrors, ListKnowledgeRecordsResponses, ListMemoriesData, ListMemoriesErrors, ListMemoriesResponses, ListMemoryRevisionsData, ListMemoryRevisionsErrors, ListMemoryRevisionsResponses, LivezData, LivezResponses, McpHandlerData, McpHandlerErrors, McpHandlerResponses, MemoryTimelineData, MemoryTimelineErrors, MemoryTimelineResponses, OpenKnowledgeEntityData, OpenKnowledgeEntityErrors, OpenKnowledgeEntityResponses, PreviewWorkspaceMergeData, PreviewWorkspaceMergeErrors, PreviewWorkspaceMergeResponses, ProcessConversationData, ProcessConversationErrors, ProcessConversationResponses, PutKnowledgeDomainData, PutKnowledgeDomainErrors, PutKnowledgeDomainGrantData, PutKnowledgeDomainGrantErrors, PutKnowledgeDomainGrantResponses, PutKnowledgeDomainResponses, PutKnowledgeModelData, PutKnowledgeModelErrors, PutKnowledgeModelResponses, PutKnowledgeRecordData, PutKnowledgeRecordErrors, PutKnowledgeRecordResponses, ReadyzData, ReadyzErrors, ReadyzResponses, RecallData, RecallErrors, RecallResponses, RememberData, RememberErrors, RememberResponses, RollbackMigrationData, RollbackMigrationErrors, RollbackMigrationResponses, RootData, RootResponses, SearchKnowledgeData, SearchKnowledgeErrors, SearchKnowledgeResponses, ServeOpenapiData, ServeOpenapiResponses, SessionBootstrapData, SessionBootstrapErrors, SessionBootstrapResponses, SetMemoryReviewData, SetMemoryReviewErrors, SetMemoryReviewResponses, SetMemoryStatusData, SetMemoryStatusErrors, SetMemoryStatusResponses, SetMigrationStateData, SetMigrationStateErrors, SetMigrationStateResponses, SkillMdData, SkillMdResponses, SyncStatusData, SyncStatusErrors, SyncStatusResponses, UnlinkMemoriesData, UnlinkMemoriesErrors, UnlinkMemoriesResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -29,6 +29,21 @@ export const root = <ThrowOnError extends boolean = false>(options?: Options<Roo
 export const sessionBootstrap = <ThrowOnError extends boolean = false>(options: Options<SessionBootstrapData, ThrowOnError>): RequestResult<SessionBootstrapResponses, SessionBootstrapErrors, ThrowOnError> => (options.client ?? client).post<SessionBootstrapResponses, SessionBootstrapErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/bootstrap',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Capture a completed agent turn from a lifecycle hook
+ *
+ * Dedicated ingestion operation for automatic agent capture. Accepts prompt and assistant-response content as separate fields so the current organization policy can independently permit each content class before the service assembles an extraction transcript. Requires a stable source_external_id in the reserved hook: namespace and the current server-issued organization policy_version. Stale callers must refresh the policy and re-sanitize queued content. The operation always stores a metadata source envelope for idempotent retries and stores the assembled raw payload only when both retain_source is requested and organization policy permits it. Source metadata is provenance validated against a separate 16,000-byte serialized bound and does not count against max_transcript_bytes.
+ */
+export const captureAgentTurn = <ThrowOnError extends boolean = false>(options: Options<CaptureAgentTurnData, ThrowOnError>): RequestResult<CaptureAgentTurnResponses, CaptureAgentTurnErrors, ThrowOnError> => (options.client ?? client).post<CaptureAgentTurnResponses, CaptureAgentTurnErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/capture_agent_turn',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -372,6 +387,21 @@ export const appendMemory = <ThrowOnError extends boolean = false>(options: Opti
 });
 
 /**
+ * Set a private memory review status
+ *
+ * Explicit review transition. No ingestion channel grants reviewed trust automatically, and this operation is intentionally not exposed as an MCP tool.
+ */
+export const setMemoryReview = <ThrowOnError extends boolean = false>(options: Options<SetMemoryReviewData, ThrowOnError>): RequestResult<SetMemoryReviewResponses, SetMemoryReviewErrors, ThrowOnError> => (options.client ?? client).put<SetMemoryReviewResponses, SetMemoryReviewErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/memories/{id}/review',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
  * List a private memory's revisions
  */
 export const listMemoryRevisions = <ThrowOnError extends boolean = false>(options: Options<ListMemoryRevisionsData, ThrowOnError>): RequestResult<ListMemoryRevisionsResponses, ListMemoryRevisionsErrors, ThrowOnError> => (options.client ?? client).get<ListMemoryRevisionsResponses, ListMemoryRevisionsErrors, ThrowOnError>({
@@ -397,6 +427,86 @@ export const memoryTimeline = <ThrowOnError extends boolean = false>(options: Op
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/memories/{id}/timeline',
     ...options
+});
+
+/**
+ * Create a durable import migration record
+ */
+export const createMigration = <ThrowOnError extends boolean = false>(options: Options<CreateMigrationData, ThrowOnError>): RequestResult<CreateMigrationResponses, CreateMigrationErrors, ThrowOnError> => (options.client ?? client).post<CreateMigrationResponses, CreateMigrationErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Get one migration record with live record counts
+ */
+export const getMigration = <ThrowOnError extends boolean = false>(options: Options<GetMigrationData, ThrowOnError>): RequestResult<GetMigrationResponses, GetMigrationErrors, ThrowOnError> => (options.client ?? client).get<GetMigrationResponses, GetMigrationErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations/{id}',
+    ...options
+});
+
+/**
+ * Generate embeddings for imported migration records
+ *
+ * Processes a bounded batch of pending or failed imported memories. Call until embedding_pending and embedding_failed are both zero before completing the migration.
+ */
+export const embedMigrationRecords = <ThrowOnError extends boolean = false>(options: Options<EmbedMigrationRecordsData, ThrowOnError>): RequestResult<EmbedMigrationRecordsResponses, EmbedMigrationRecordsErrors, ThrowOnError> => (options.client ?? client).post<EmbedMigrationRecordsResponses, EmbedMigrationRecordsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations/{id}/embeddings',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Import a batch of already-extracted records under a migration
+ *
+ * Records use the reserved import: namespace and are idempotent per source_external_id. Extraction never runs. The response reports the outcome and durable IDs for every submitted record.
+ */
+export const importMigrationRecords = <ThrowOnError extends boolean = false>(options: Options<ImportMigrationRecordsData, ThrowOnError>): RequestResult<ImportMigrationRecordsResponses, ImportMigrationRecordsErrors, ThrowOnError> => (options.client ?? client).post<ImportMigrationRecordsResponses, ImportMigrationRecordsErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations/{id}/records',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Remove every record created by a migration run or its series
+ *
+ * Selection is strictly by stored migration provenance; hook, MCP, manual, and unrelated import records can never be selected.
+ */
+export const rollbackMigration = <ThrowOnError extends boolean = false>(options: Options<RollbackMigrationData, ThrowOnError>): RequestResult<RollbackMigrationResponses, RollbackMigrationErrors, ThrowOnError> => (options.client ?? client).post<RollbackMigrationResponses, RollbackMigrationErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations/{id}/rollback',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Transition a migration lifecycle state
+ */
+export const setMigrationState = <ThrowOnError extends boolean = false>(options: Options<SetMigrationStateData, ThrowOnError>): RequestResult<SetMigrationStateResponses, SetMigrationStateErrors, ThrowOnError> => (options.client ?? client).put<SetMigrationStateResponses, SetMigrationStateErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/migrations/{id}/state',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 /**
@@ -460,4 +570,34 @@ export const syncStatus = <ThrowOnError extends boolean = false>(options?: Optio
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/sync/status',
     ...options
+});
+
+/**
+ * Execute a reviewed workspace merge
+ *
+ * Rechecks the state-bound preview under workspace locks, rewrites source envelopes to the canonical target, creates a durable alias for future captures, and records an immutable audit row. Retrying the same accepted plan is idempotent.
+ */
+export const executeWorkspaceMerge = <ThrowOnError extends boolean = false>(options: Options<ExecuteWorkspaceMergeData, ThrowOnError>): RequestResult<ExecuteWorkspaceMergeResponses, ExecuteWorkspaceMergeErrors, ThrowOnError> => (options.client ?? client).post<ExecuteWorkspaceMergeResponses, ExecuteWorkspaceMergeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/workspaces/merge',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Preview a controlled workspace merge
+ *
+ * Returns content-free source counts, shared external-session collisions, dependent aliases, and a state-bound plan hash. No records are changed.
+ */
+export const previewWorkspaceMerge = <ThrowOnError extends boolean = false>(options: Options<PreviewWorkspaceMergeData, ThrowOnError>): RequestResult<PreviewWorkspaceMergeResponses, PreviewWorkspaceMergeErrors, ThrowOnError> => (options.client ?? client).post<PreviewWorkspaceMergeResponses, PreviewWorkspaceMergeErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/workspaces/merge/preview',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });

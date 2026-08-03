@@ -9,6 +9,42 @@ export type AppendMemoryRequest = {
 };
 
 /**
+ * Request body for the dedicated agent-capture operation. Requires a stable
+ * hook-namespace source identity so lifecycle retries stay idempotent.
+ */
+export type CaptureAgentTurnParams = {
+    agent_platform: string;
+    /**
+     * Sanitized final assistant content, when organization policy permits response capture.
+     */
+    assistant_response?: string | null;
+    external_parent_session_id?: string | null;
+    external_session_id?: string | null;
+    external_turn_id?: string | null;
+    observed_at?: string | null;
+    org_id?: string | null;
+    policy_version: string;
+    project_context?: string | null;
+    project_id?: string | null;
+    retain_source?: boolean | null;
+    session_id?: string | null;
+    source_external_id: string;
+    /**
+     * Provenance metadata validated against its own 16,000-byte serialized
+     * bound. It is not counted against the organization transcript limit.
+     */
+    source_metadata?: unknown;
+    source_revision?: string | null;
+    source_uri?: string | null;
+    /**
+     * Sanitized user content, when organization policy permits prompt capture.
+     */
+    user_prompt?: string | null;
+    workspace_key?: string | null;
+    workspace_uri?: string | null;
+};
+
+/**
  * Action determined by the conflict resolution pipeline.
  */
 export type ConflictAction = 'add' | 'update' | 'delete' | 'noop';
@@ -23,21 +59,38 @@ export type ConsolidateJobResponse = {
     summaries_created: number;
 };
 
+/**
+ * Metadata envelope for a captured conversation. Raw content lives in an
+ * optional payload record; `content_retained` reports whether it exists.
+ */
 export type ConversationSource = {
+    agent_platform?: string | null;
+    content_retained: boolean;
     content_sha256: string;
+    conversation_id: string;
     created_at: string;
+    duplicate_of_source_id?: string | null;
+    external_parent_session_id?: string | null;
+    external_session_id?: string | null;
+    external_turn_id?: string | null;
     extraction_completed_at?: string | null;
     id: string;
+    observed_at?: string | null;
     org_id?: string | null;
-    project_context: string;
+    policy_version?: string | null;
+    project_context?: string | null;
     project_id?: string | null;
     session_id?: string | null;
     source_external_id: string;
+    source_metadata: unknown;
+    source_origin: SourceOrigin;
     source_revision?: string | null;
     source_uri?: string | null;
-    transcript: string;
+    transcript?: string | null;
     updated_at: string;
     user_id: string;
+    workspace_key?: string | null;
+    workspace_uri?: string | null;
 };
 
 export type CreateKnowledgeDomainRequest = {
@@ -45,6 +98,17 @@ export type CreateKnowledgeDomainRequest = {
     name: string;
     slug: string;
     visibility: KnowledgeDomainVisibility;
+};
+
+export type CreateMigrationRequest = {
+    expected_record_count: number;
+    final_catch_up?: boolean | null;
+    plan_hash: string;
+    policy_version?: string | null;
+    series_id?: string | null;
+    snapshot_id?: string | null;
+    source_instance_id: string;
+    source_type: string;
 };
 
 export type DataResponseConsolidateJobResponse = {
@@ -89,6 +153,14 @@ export type DataResponseDeleteMemoryResponse = {
     };
 };
 
+export type DataResponseEmbedMigrationRecordsResponse = {
+    data: {
+        embedding_failed: number;
+        embedding_pending: number;
+        embedding_ready: number;
+    };
+};
+
 export type DataResponseExtractionResult = {
     /**
      * Structured extraction output grouped by memory type.
@@ -114,6 +186,15 @@ export type DataResponseHealthResponse = {
     data: {
         server: string;
         status: string;
+    };
+};
+
+export type DataResponseImportRecordsResponse = {
+    data: {
+        failed: number;
+        imported: number;
+        records: Array<ImportRecordResult>;
+        unchanged: number;
     };
 };
 
@@ -230,6 +311,31 @@ export type DataResponseMemoryExportResponse = {
     };
 };
 
+export type DataResponseMemoryMigration = {
+    /**
+     * Content-free durable record of an import migration run.
+     */
+    data: {
+        created_at: string;
+        expected_record_count: number;
+        failed_count: number;
+        final_catch_up: boolean;
+        id: string;
+        imported_count: number;
+        org_id?: string | null;
+        plan_hash: string;
+        policy_version?: string | null;
+        series_id: string;
+        snapshot_id?: string | null;
+        source_instance_id: string;
+        source_type: string;
+        state: MigrationState;
+        unchanged_count: number;
+        updated_at: string;
+        user_id: string;
+    };
+};
+
 export type DataResponseMemoryOutput = {
     data: {
         access_count: number;
@@ -247,6 +353,7 @@ export type DataResponseMemoryOutput = {
         org_id?: string | null;
         project_id?: string | null;
         relevance_score: number;
+        review_status: string;
         session_id?: string | null;
         source_external_id?: string | null;
         source_kind: string;
@@ -256,6 +363,18 @@ export type DataResponseMemoryOutput = {
         summary?: string | null;
         updated_at: string;
         user_id: string;
+    };
+};
+
+export type DataResponseMigrationStatusResponse = {
+    data: {
+        attributed_memories: number;
+        attributed_sources: number;
+        embedding_failed: number;
+        embedding_pending: number;
+        embedding_ready: number;
+        migration: MemoryMigration;
+        processed_records: number;
     };
 };
 
@@ -276,6 +395,7 @@ export type DataResponseOptionMemoryOutput = {
         org_id?: string | null;
         project_id?: string | null;
         relevance_score: number;
+        review_status: string;
         session_id?: string | null;
         source_external_id?: string | null;
         source_kind: string;
@@ -316,6 +436,13 @@ export type DataResponseRememberOutput = {
     };
 };
 
+export type DataResponseRollbackMigrationResponse = {
+    data: {
+        removed_memories: number;
+        removed_sources: number;
+    };
+};
+
 export type DataResponseSessionContext = {
     /**
      * Assembled session context for LLM system prompt injection.
@@ -325,6 +452,12 @@ export type DataResponseSessionContext = {
             [key: string]: Array<string>;
         };
         total_memories: number;
+    };
+};
+
+export type DataResponseSetMemoryReviewResponse = {
+    data: {
+        updated: boolean;
     };
 };
 
@@ -362,6 +495,33 @@ export type DataResponseVecMemoryRevision = {
         revision: number;
         summary?: string | null;
     }>;
+};
+
+export type DataResponseWorkspaceMergePreview = {
+    data: {
+        dependent_alias_count: number;
+        plan_hash: string;
+        shared_external_sessions: number;
+        source_count: number;
+        source_workspace_key: string;
+        target_count: number;
+        target_workspace_key: string;
+    };
+};
+
+export type DataResponseWorkspaceMergeResult = {
+    data: {
+        created_at: string;
+        dependent_alias_count: number;
+        merge_id: string;
+        merged_source_count: number;
+        plan_hash: string;
+        shared_external_sessions: number;
+        source_count: number;
+        source_workspace_key: string;
+        target_count: number;
+        target_workspace_key: string;
+    };
 };
 
 /**
@@ -414,6 +574,16 @@ export type DeleteMemoryResponse = {
  */
 export type EdgeType = 'relates_to' | 'derived_from' | 'contradicts' | 'supersedes' | 'enriched_by';
 
+export type EmbedMigrationRecordsRequest = {
+    limit?: number | null;
+};
+
+export type EmbedMigrationRecordsResponse = {
+    embedding_failed: number;
+    embedding_pending: number;
+    embedding_ready: number;
+};
+
 /**
  * State of semantic indexing for a memory.
  */
@@ -422,6 +592,12 @@ export type EmbeddingStatus = 'pending' | 'ready' | 'failed';
 export type ErrorBody = {
     error: string;
     message: string;
+};
+
+export type ExecuteWorkspaceMergeRequest = {
+    plan_hash: string;
+    source_workspace_key: string;
+    target_workspace_key: string;
 };
 
 /**
@@ -456,6 +632,51 @@ export type ForgetParams = {
 export type HealthResponse = {
     server: string;
     status: string;
+};
+
+/**
+ * One already-extracted record submitted through the import channel.
+ * Import never runs conversation extraction.
+ */
+export type ImportRecord = {
+    agent_platform?: string | null;
+    content: string;
+    external_parent_session_id?: string | null;
+    external_session_id?: string | null;
+    external_turn_id?: string | null;
+    memory_type: MemoryType;
+    observed_at?: string | null;
+    project?: string | null;
+    source_external_id: string;
+    source_metadata?: {
+        [key: string]: unknown;
+    } | null;
+    source_record_type?: string | null;
+    source_uri?: string | null;
+    workspace_key?: string | null;
+    workspace_uri?: string | null;
+};
+
+export type ImportRecordResult = {
+    conversation_source_id?: string | null;
+    error?: string | null;
+    memory_id?: string | null;
+    record_index: number;
+    source_external_id: string;
+    status: ImportRecordStatus;
+};
+
+export type ImportRecordStatus = 'imported' | 'unchanged' | 'failed';
+
+export type ImportRecordsRequest = {
+    records: Array<ImportRecord>;
+};
+
+export type ImportRecordsResponse = {
+    failed: number;
+    imported: number;
+    records: Array<ImportRecordResult>;
+    unchanged: number;
 };
 
 export type IngestDocumentOutput = {
@@ -692,6 +913,29 @@ export type MemoryExportResponse = {
  */
 export type MemoryLifecycle = 'active' | 'draft' | 'canonical' | 'deprecated';
 
+/**
+ * Content-free durable record of an import migration run.
+ */
+export type MemoryMigration = {
+    created_at: string;
+    expected_record_count: number;
+    failed_count: number;
+    final_catch_up: boolean;
+    id: string;
+    imported_count: number;
+    org_id?: string | null;
+    plan_hash: string;
+    policy_version?: string | null;
+    series_id: string;
+    snapshot_id?: string | null;
+    source_instance_id: string;
+    source_type: string;
+    state: MigrationState;
+    unchanged_count: number;
+    updated_at: string;
+    user_id: string;
+};
+
 export type MemoryOutput = {
     access_count: number;
     content: string;
@@ -708,6 +952,7 @@ export type MemoryOutput = {
     org_id?: string | null;
     project_id?: string | null;
     relevance_score: number;
+    review_status: string;
     session_id?: string | null;
     source_external_id?: string | null;
     source_kind: string;
@@ -718,6 +963,12 @@ export type MemoryOutput = {
     updated_at: string;
     user_id: string;
 };
+
+/**
+ * Review state for a memory. No ingestion channel grants reviewed trust;
+ * promotion is a separate authorized transition.
+ */
+export type MemoryReview = 'unreviewed' | 'reviewed';
 
 export type MemoryRevision = {
     change_kind: string;
@@ -731,9 +982,36 @@ export type MemoryRevision = {
     summary?: string | null;
 };
 
+/**
+ * Categories of memory stored in the system.
+ */
+export type MemoryType = 'episodic' | 'semantic' | 'procedural' | 'code' | 'error_fix' | 'preference' | 'skill';
+
+/**
+ * Lifecycle state of one import migration run.
+ */
+export type MigrationState = 'planned' | 'running' | 'interrupted' | 'completed' | 'verification_failed' | 'rolling_back' | 'rolled_back' | 'failed';
+
+export type MigrationStatusResponse = {
+    attributed_memories: number;
+    attributed_sources: number;
+    embedding_failed: number;
+    embedding_pending: number;
+    embedding_ready: number;
+    migration: MemoryMigration;
+    processed_records: number;
+};
+
+export type MigrationTransitionState = 'running' | 'interrupted' | 'completed' | 'verification_failed' | 'failed';
+
 export type OpenKnowledgeEntityRequest = {
     domain_id?: string | null;
     entity_id: string;
+};
+
+export type PreviewWorkspaceMergeRequest = {
+    source_workspace_key: string;
+    target_workspace_key: string;
 };
 
 export type ProcessConversationParams = {
@@ -804,6 +1082,15 @@ export type RememberParams = {
     skip_enrichment?: boolean | null;
 };
 
+export type RollbackMigrationRequest = {
+    series?: boolean | null;
+};
+
+export type RollbackMigrationResponse = {
+    removed_memories: number;
+    removed_sources: number;
+};
+
 export type SearchKnowledgeRequest = {
     domain_id?: string | null;
     query: string;
@@ -814,6 +1101,10 @@ export type SessionBootstrapParams = {
     include_time?: boolean | null;
     org_id?: string | null;
     project_id?: string | null;
+    /**
+     * Restrict automatic context assembly to explicitly reviewed memories.
+     */
+    reviewed_only?: boolean | null;
     token_budget?: number | null;
 };
 
@@ -827,9 +1118,27 @@ export type SessionContext = {
     total_memories: number;
 };
 
+export type SetMemoryReviewRequest = {
+    review_status: MemoryReview;
+};
+
+export type SetMemoryReviewResponse = {
+    updated: boolean;
+};
+
 export type SetMemoryStatusRequest = {
     lifecycle_status: MemoryLifecycle;
 };
+
+export type SetMigrationStateRequest = {
+    state: MigrationTransitionState;
+};
+
+/**
+ * Server-assigned ingestion channel for a retained conversation source.
+ * Describes how the content arrived, not whether it is trusted.
+ */
+export type SourceOrigin = 'agent_hook' | 'legacy' | 'mcp' | 'manual' | 'migration';
 
 export type SyncStatus = {
     server: string;
@@ -845,6 +1154,29 @@ export type UpdateKnowledgeDomainRequest = {
 
 export type UpsertKnowledgeRecordRequest = {
     payload: KnowledgeRecord;
+};
+
+export type WorkspaceMergePreview = {
+    dependent_alias_count: number;
+    plan_hash: string;
+    shared_external_sessions: number;
+    source_count: number;
+    source_workspace_key: string;
+    target_count: number;
+    target_workspace_key: string;
+};
+
+export type WorkspaceMergeResult = {
+    created_at: string;
+    dependent_alias_count: number;
+    merge_id: string;
+    merged_source_count: number;
+    plan_hash: string;
+    shared_external_sessions: number;
+    source_count: number;
+    source_workspace_key: string;
+    target_count: number;
+    target_workspace_key: string;
 };
 
 export type RootData = {
@@ -891,6 +1223,51 @@ export type SessionBootstrapResponses = {
 };
 
 export type SessionBootstrapResponse = SessionBootstrapResponses[keyof SessionBootstrapResponses];
+
+export type CaptureAgentTurnData = {
+    body: CaptureAgentTurnParams;
+    path?: never;
+    query?: never;
+    url: '/capture_agent_turn';
+};
+
+export type CaptureAgentTurnErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Automatic capture or the requested capture mode is disabled by organization policy
+     */
+    403: ErrorBody;
+    /**
+     * The submitted organization policy revision is stale
+     */
+    409: ErrorBody;
+    /**
+     * The captured transcript and project context exceed the organization policy limit
+     */
+    413: ErrorBody;
+    /**
+     * The organization policy could not be verified
+     */
+    503: ErrorBody;
+};
+
+export type CaptureAgentTurnError = CaptureAgentTurnErrors[keyof CaptureAgentTurnErrors];
+
+export type CaptureAgentTurnResponses = {
+    /**
+     * Extracted memory candidates
+     */
+    200: DataResponseExtractionResult;
+};
+
+export type CaptureAgentTurnResponse = CaptureAgentTurnResponses[keyof CaptureAgentTurnResponses];
 
 export type ForgetMemoryData = {
     body: ForgetParams;
@@ -1907,6 +2284,40 @@ export type AppendMemoryResponses = {
 
 export type AppendMemoryResponse = AppendMemoryResponses[keyof AppendMemoryResponses];
 
+export type SetMemoryReviewData = {
+    body: SetMemoryReviewRequest;
+    path: {
+        /**
+         * Memory ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/memories/{id}/review';
+};
+
+export type SetMemoryReviewErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Memory not found
+     */
+    404: ErrorBody;
+};
+
+export type SetMemoryReviewError = SetMemoryReviewErrors[keyof SetMemoryReviewErrors];
+
+export type SetMemoryReviewResponses = {
+    /**
+     * Review transition result
+     */
+    200: DataResponseSetMemoryReviewResponse;
+};
+
+export type SetMemoryReviewResponse2 = SetMemoryReviewResponses[keyof SetMemoryReviewResponses];
+
 export type ListMemoryRevisionsData = {
     body?: never;
     path: {
@@ -2007,6 +2418,237 @@ export type MemoryTimelineResponses = {
 };
 
 export type MemoryTimelineResponse = MemoryTimelineResponses[keyof MemoryTimelineResponses];
+
+export type CreateMigrationData = {
+    body: CreateMigrationRequest;
+    path?: never;
+    query?: never;
+    url: '/migrations';
+};
+
+export type CreateMigrationErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Snapshot or series identity conflict
+     */
+    409: ErrorBody;
+};
+
+export type CreateMigrationError = CreateMigrationErrors[keyof CreateMigrationErrors];
+
+export type CreateMigrationResponses = {
+    /**
+     * Created migration
+     */
+    200: DataResponseMemoryMigration;
+};
+
+export type CreateMigrationResponse = CreateMigrationResponses[keyof CreateMigrationResponses];
+
+export type GetMigrationData = {
+    body?: never;
+    path: {
+        /**
+         * Migration ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/migrations/{id}';
+};
+
+export type GetMigrationErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Migration not found
+     */
+    404: ErrorBody;
+};
+
+export type GetMigrationError = GetMigrationErrors[keyof GetMigrationErrors];
+
+export type GetMigrationResponses = {
+    /**
+     * Migration status
+     */
+    200: DataResponseMigrationStatusResponse;
+};
+
+export type GetMigrationResponse = GetMigrationResponses[keyof GetMigrationResponses];
+
+export type EmbedMigrationRecordsData = {
+    body: EmbedMigrationRecordsRequest;
+    path: {
+        /**
+         * Migration ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/migrations/{id}/embeddings';
+};
+
+export type EmbedMigrationRecordsErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Migration not found
+     */
+    404: ErrorBody;
+    /**
+     * Migration state does not accept embedding work
+     */
+    409: ErrorBody;
+    /**
+     * Embedding service unavailable
+     */
+    502: ErrorBody;
+};
+
+export type EmbedMigrationRecordsError = EmbedMigrationRecordsErrors[keyof EmbedMigrationRecordsErrors];
+
+export type EmbedMigrationRecordsResponses = {
+    /**
+     * Current embedding status
+     */
+    200: DataResponseEmbedMigrationRecordsResponse;
+};
+
+export type EmbedMigrationRecordsResponse2 = EmbedMigrationRecordsResponses[keyof EmbedMigrationRecordsResponses];
+
+export type ImportMigrationRecordsData = {
+    body: ImportRecordsRequest;
+    path: {
+        /**
+         * Migration ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/migrations/{id}/records';
+};
+
+export type ImportMigrationRecordsErrors = {
+    /**
+     * Invalid request
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Migration not found
+     */
+    404: ErrorBody;
+    /**
+     * Migration state or stable record identity conflict
+     */
+    409: ErrorBody;
+};
+
+export type ImportMigrationRecordsError = ImportMigrationRecordsErrors[keyof ImportMigrationRecordsErrors];
+
+export type ImportMigrationRecordsResponses = {
+    /**
+     * Batch outcome
+     */
+    200: DataResponseImportRecordsResponse;
+};
+
+export type ImportMigrationRecordsResponse = ImportMigrationRecordsResponses[keyof ImportMigrationRecordsResponses];
+
+export type RollbackMigrationData = {
+    body: RollbackMigrationRequest;
+    path: {
+        /**
+         * Migration ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/migrations/{id}/rollback';
+};
+
+export type RollbackMigrationErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Migration not found
+     */
+    404: ErrorBody;
+    /**
+     * Rollback is already in progress
+     */
+    409: ErrorBody;
+};
+
+export type RollbackMigrationError = RollbackMigrationErrors[keyof RollbackMigrationErrors];
+
+export type RollbackMigrationResponses = {
+    /**
+     * Rollback result
+     */
+    200: DataResponseRollbackMigrationResponse;
+};
+
+export type RollbackMigrationResponse2 = RollbackMigrationResponses[keyof RollbackMigrationResponses];
+
+export type SetMigrationStateData = {
+    body: SetMigrationStateRequest;
+    path: {
+        /**
+         * Migration ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/migrations/{id}/state';
+};
+
+export type SetMigrationStateErrors = {
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Migration not found
+     */
+    404: ErrorBody;
+    /**
+     * Invalid or concurrent state transition
+     */
+    409: ErrorBody;
+};
+
+export type SetMigrationStateError = SetMigrationStateErrors[keyof SetMigrationStateErrors];
+
+export type SetMigrationStateResponses = {
+    /**
+     * Transition result
+     */
+    200: DataResponseMemoryMigration;
+};
+
+export type SetMigrationStateResponse = SetMigrationStateResponses[keyof SetMigrationStateResponses];
 
 export type ServeOpenapiData = {
     body?: never;
@@ -2176,3 +2818,69 @@ export type SyncStatusResponses = {
 };
 
 export type SyncStatusResponse = SyncStatusResponses[keyof SyncStatusResponses];
+
+export type ExecuteWorkspaceMergeData = {
+    body: ExecuteWorkspaceMergeRequest;
+    path?: never;
+    query?: never;
+    url: '/workspaces/merge';
+};
+
+export type ExecuteWorkspaceMergeErrors = {
+    /**
+     * Invalid workspace keys or plan hash
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Preview is stale or workspace alias conflicts
+     */
+    409: ErrorBody;
+};
+
+export type ExecuteWorkspaceMergeError = ExecuteWorkspaceMergeErrors[keyof ExecuteWorkspaceMergeErrors];
+
+export type ExecuteWorkspaceMergeResponses = {
+    /**
+     * Completed workspace merge
+     */
+    200: DataResponseWorkspaceMergeResult;
+};
+
+export type ExecuteWorkspaceMergeResponse = ExecuteWorkspaceMergeResponses[keyof ExecuteWorkspaceMergeResponses];
+
+export type PreviewWorkspaceMergeData = {
+    body: PreviewWorkspaceMergeRequest;
+    path?: never;
+    query?: never;
+    url: '/workspaces/merge/preview';
+};
+
+export type PreviewWorkspaceMergeErrors = {
+    /**
+     * Invalid workspace keys
+     */
+    400: ErrorBody;
+    /**
+     * Authentication required
+     */
+    401: ErrorBody;
+    /**
+     * Source workspace is already an alias
+     */
+    409: ErrorBody;
+};
+
+export type PreviewWorkspaceMergeError = PreviewWorkspaceMergeErrors[keyof PreviewWorkspaceMergeErrors];
+
+export type PreviewWorkspaceMergeResponses = {
+    /**
+     * Workspace merge preview
+     */
+    200: DataResponseWorkspaceMergePreview;
+};
+
+export type PreviewWorkspaceMergeResponse = PreviewWorkspaceMergeResponses[keyof PreviewWorkspaceMergeResponses];

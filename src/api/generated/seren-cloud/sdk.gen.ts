@@ -193,7 +193,7 @@ export const serenCloudDeploymentAudit = <ThrowOnError extends boolean = false>(
 });
 
 /**
- * Bind encrypted Seren Secrets references to a managed employee connector.
+ * Bind encrypted `seren-secrets://` references to a managed employee connector.
  */
 export const serenCloudBindConnectorSecrets = <ThrowOnError extends boolean = false>(options: Options<SerenCloudBindConnectorSecretsData, ThrowOnError>): RequestResult<SerenCloudBindConnectorSecretsResponses, SerenCloudBindConnectorSecretsErrors, ThrowOnError> => (options.client ?? client).put<SerenCloudBindConnectorSecretsResponses, SerenCloudBindConnectorSecretsErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],

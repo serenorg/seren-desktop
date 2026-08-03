@@ -1,0 +1,24 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Seren employee Core API types",
+    "version": "0.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "OrganizationEmployeeCollaborationAssignment": {
+        "$ref": "../../../openapi/openapi.json#/components/schemas/OrganizationEmployeeCollaborationAssignment"
+      },
+      "OrganizationEmployeeCollaborationPolicy": {
+        "$ref": "../../../openapi/openapi.json#/components/schemas/OrganizationEmployeeCollaborationPolicy"
+      },
+      "UpdateOrganizationEmployeeCollaborationPolicyRequest": {
+        "$ref": "../../../openapi/openapi.json#/components/schemas/UpdateOrganizationEmployeeCollaborationPolicyRequest"
+      },
+      "UpsertOrganizationEmployeeCollaborationAssignmentRequest": {
+        "$ref": "../../../openapi/openapi.json#/components/schemas/UpsertOrganizationEmployeeCollaborationAssignmentRequest"
+      }
+    }
+  }
+}

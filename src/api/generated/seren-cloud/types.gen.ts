@@ -286,6 +286,19 @@ export type BoundConnectorSecrets = {
     secret_refs: Array<string>;
 };
 
+/**
+ * Current Core-owned identity of an organization channel binding.
+ *
+ * The binding is provider-neutral. Core resolves it to the configured
+ * connector account and external conversation and rechecks the generation
+ * before minting a target-scoped identity. Downstream services still recheck
+ * their own resource grants.
+ */
+export type ChannelBindingRef = {
+    binding_id: string;
+    generation: number;
+};
+
 export type CloudConversationListResponse = {
     conversations: Array<CloudConversationResponse>;
     has_more: boolean;
@@ -294,6 +307,7 @@ export type CloudConversationListResponse = {
 
 export type CloudConversationMessageResponse = {
     client_message_id?: string | null;
+    collaboration_target: CloudRunCollaborationTarget;
     content: string;
     conversation_id: string;
     created_at: string;
@@ -663,6 +677,7 @@ export type CloudDeploymentRunRequest = {
      * Whether to request async execution for always-on orchestrators.
      */
     async?: boolean | null;
+    collaboration?: null | CloudRunCollaborationSelection;
     /**
      * Optional message for orchestrated runtimes.
      */
@@ -1024,6 +1039,29 @@ export type CloudRunApprovalDecisionKind = 'approve' | 'reject' | 'escalate';
  * Normalized approval action accepted by the cloud resume API.
  */
 export type CloudRunApprovalDecisionValue = 'approve' | 'reject';
+
+export type CloudRunCollaborationSelection = {
+    /**
+     * Trusted source proposed for this invocation. Core revalidates channel
+     * binding references before signing the organization work context.
+     */
+    invocation_origin: InvocationOrigin;
+    /**
+     * Explicit destination for captured interaction data.
+     */
+    knowledge_capture_target: KnowledgeCaptureTarget;
+    /**
+     * Provider-owned organization knowledge requested for this invocation.
+     */
+    knowledge_selection?: KnowledgeSelection;
+    /**
+     * Audience permitted to receive output or protected side effects.
+     */
+    output_audience: OutputAudience;
+    task_label?: null | TaskLabel;
+};
+
+export type CloudRunCollaborationTarget = 'individual' | 'organization';
 
 /**
  * Terminal status reported by a `Done` event.
@@ -6193,6 +6231,59 @@ export type EvalGateSchedule = {
     timezone?: string | null;
 };
 
+/**
+ * Trusted source that initiated an organization-authorized invocation.
+ *
+ * This is provenance rather than resource ownership. A channel-originated
+ * invocation can read a provider-owned knowledge selection and can have an
+ * independently authorized output audience.
+ */
+export type InvocationOrigin = {
+    kind: 'direct';
+} | {
+    binding: ChannelBindingRef;
+    kind: 'channel';
+};
+
+/**
+ * Single knowledge destination permitted to receive captured interaction data.
+ *
+ * Personal capture is relative to the authenticated user bound by the
+ * enclosing context. It is an explicit cross-boundary write and does not
+ * follow automatically from invocation origin or output audience.
+ *
+ * Employee identity is deliberately absent because it identifies the actor,
+ * while Memory has no agent-owned capture boundary.
+ */
+export type KnowledgeCaptureTarget = {
+    kind: 'none';
+} | {
+    kind: 'organization_selection';
+} | {
+    kind: 'personal';
+    provider: KnowledgeProvider;
+};
+
+/**
+ * Service that owns and revalidates a knowledge selection or capture target.
+ */
+export type KnowledgeProvider = 'memory';
+
+/**
+ * Organization knowledge requested for one invocation.
+ *
+ * Seren Core transports the selection opaquely, and the named provider retains
+ * final authorization over the stable selection and its current materialized
+ * sources.
+ */
+export type KnowledgeSelection = {
+    kind: 'none';
+} | {
+    kind: 'organization';
+    provider: KnowledgeProvider;
+    selection_id: string;
+};
+
 export type ManagedAgentApprovalPolicy = 'read_only' | 'allow_mutations';
 
 export type ManagedAgentLlmConnection = {
@@ -6270,6 +6361,16 @@ export type ManagedStorageWorkspaceRequest = {
 export type OrchestrationMode = 'script' | 'llm';
 
 /**
+ * Audience permitted to receive output or protected side effects.
+ */
+export type OutputAudience = {
+    kind: 'organization';
+} | {
+    binding: ChannelBindingRef;
+    kind: 'channel';
+};
+
+/**
  * Pagination metadata included in responses.
  */
 export type PaginationMeta = {
@@ -6332,6 +6433,15 @@ export type SideEffectPolicy = {
     min_seconds_between_mutating_calls?: number | null;
     require_idempotency_key?: boolean;
 };
+
+/**
+ * Organization-defined policy selector in canonical form.
+ *
+ * The syntax is enforced during deserialization rather than by convention, so
+ * every producer and consumer of an [`OrganizationWorkContext`] agrees on which labels
+ * exist without each one repeating the check.
+ */
+export type TaskLabel = string;
 
 /**
  * Condition for a conditional approval rule.

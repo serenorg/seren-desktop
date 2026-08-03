@@ -240,6 +240,22 @@ export type DataResponsePurchaseResponse = {
     pagination?: null | PaginationMeta;
 };
 
+export type DataResponseSkillAgentGrant = {
+    data: {
+        agent_identity_id: string;
+        allowed_task_classes: Array<string>;
+        created_at: string;
+        grant_generation: number;
+        granted_by_user_id: string;
+        id: string;
+        organization_id: string;
+        skill_id: string;
+        skill_version_id: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
 export type DataResponseSkillBundle = {
     data: {
         content_hash: string;
@@ -420,6 +436,22 @@ export type DataResponseVecFileListing = {
     pagination?: null | PaginationMeta;
 };
 
+export type DataResponseVecSkillAgentGrant = {
+    data: Array<{
+        agent_identity_id: string;
+        allowed_task_classes: Array<string>;
+        created_at: string;
+        grant_generation: number;
+        granted_by_user_id: string;
+        id: string;
+        organization_id: string;
+        skill_id: string;
+        skill_version_id: string;
+        updated_at: string;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
 export type DataResponseVecSkillSummary = {
     data: Array<{
         created_at: string;
@@ -512,6 +544,11 @@ export type DataResponseVecUsageEvent = {
         units: number;
         user_id: string;
     }>;
+    pagination?: null | PaginationMeta;
+};
+
+export type DataResponseBool = {
+    data: boolean;
     pagination?: null | PaginationMeta;
 };
 
@@ -721,6 +758,19 @@ export type SkillAccess = {
     can_manage: boolean;
     can_view: boolean;
     reason: string;
+};
+
+export type SkillAgentGrant = {
+    agent_identity_id: string;
+    allowed_task_classes: Array<string>;
+    created_at: string;
+    grant_generation: number;
+    granted_by_user_id: string;
+    id: string;
+    organization_id: string;
+    skill_id: string;
+    skill_version_id: string;
+    updated_at: string;
 };
 
 export type SkillBundle = {
@@ -976,6 +1026,11 @@ export type UpsertCollaboratorRequest = {
 export type UpsertOrgFolderRequest = {
     display_name?: string | null;
     folder_slug: string;
+};
+
+export type UpsertSkillAgentGrantRequest = {
+    allowed_task_classes?: Array<string>;
+    skill_version_id: string;
 };
 
 export type UsageEvent = {
@@ -1310,6 +1365,77 @@ export type UpdateSkillResponses = {
 };
 
 export type UpdateSkillResponse = UpdateSkillResponses[keyof UpdateSkillResponses];
+
+export type ListAgentGrantsData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/agent-grants';
+};
+
+export type ListAgentGrantsResponses = {
+    /**
+     * Managed employee grants for the private organization skill
+     */
+    200: DataResponseVecSkillAgentGrant;
+};
+
+export type ListAgentGrantsResponse = ListAgentGrantsResponses[keyof ListAgentGrantsResponses];
+
+export type RevokeAgentGrantData = {
+    body?: never;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+        /**
+         * Managed employee identity
+         */
+        agent_identity_id: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/agent-grants/{agent_identity_id}';
+};
+
+export type RevokeAgentGrantResponses = {
+    /**
+     * Managed employee skill grant revoked
+     */
+    200: DataResponseBool;
+};
+
+export type RevokeAgentGrantResponse = RevokeAgentGrantResponses[keyof RevokeAgentGrantResponses];
+
+export type UpsertAgentGrantData = {
+    body: UpsertSkillAgentGrantRequest;
+    path: {
+        /**
+         * Skill slug
+         */
+        slug: string;
+        /**
+         * Managed employee identity
+         */
+        agent_identity_id: string;
+    };
+    query?: never;
+    url: '/skills/{slug}/agent-grants/{agent_identity_id}';
+};
+
+export type UpsertAgentGrantResponses = {
+    /**
+     * Created or updated managed employee skill grant
+     */
+    200: DataResponseSkillAgentGrant;
+};
+
+export type UpsertAgentGrantResponse = UpsertAgentGrantResponses[keyof UpsertAgentGrantResponses];
 
 export type ListCollaboratorsData = {
     body?: never;

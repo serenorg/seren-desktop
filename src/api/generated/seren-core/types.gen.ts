@@ -610,7 +610,7 @@ export type CostEstimate = {
  */
 export type CreateApiKeyRequest = {
     /**
-     * Required when `key_type` is `"agent"`. The Seren Secrets identity the agent acts as.
+     * Required when `key_type` is `"agent"`. The Seren Passwords identity the agent acts as.
      */
     agent_identity_id?: string | null;
     /**
@@ -620,7 +620,9 @@ export type CreateApiKeyRequest = {
     key_type?: null | ApiKeyType;
     name: string;
     /**
-     * Optional publisher capability scopes. Omit for a legacy unrestricted user key. Supported values are `publisher:*`, `publisher:<slug>`, and `publisher:<slug>:operation:<operation_id>`.
+     * Optional least-privilege scopes. Omit for an unrestricted user API key.
+     * Publisher scopes and `managed-deployment:<operation>` control-plane
+     * scopes grant separate capabilities and may be combined.
      */
     scopes?: Array<string> | null;
 };
@@ -1905,6 +1907,96 @@ export type DataResponseApiKeyCreated = {
         key_type: ApiKeyType;
         name: string;
         organization_id: string;
+        scopes?: Array<string> | null;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseApiKeyInfo = {
+    /**
+     * Response struct for listing API keys (never includes the secret)
+     */
+    data: {
+        created_at: string;
+        expires_at?: string | null;
+        id: string;
+        key_id: string;
+        key_prefix: string;
+        key_type: ApiKeyType;
+        last_used_at?: string | null;
+        name: string;
+        organization_id: string;
+        revoked_at?: string | null;
         scopes?: Array<string> | null;
     };
     pagination?: null | PaginationMeta;
@@ -4332,6 +4424,184 @@ export type DataResponseOrganizationCustomSkillRevision = {
  * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
  * ```
  */
+export type DataResponseOrganizationEmployeeCollaborationAssignment = {
+    data: {
+        agent_identity_id: string;
+        allowed_task_labels: Array<string>;
+        assignment_generation: number;
+        created_at: string;
+        deployment_id: string;
+        granted_by_user_id?: string | null;
+        organization_artifact_write: boolean;
+        organization_credential_use: boolean;
+        organization_id: string;
+        organization_knowledge_read: boolean;
+        organization_skill_use: boolean;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationEmployeeCollaborationPolicy = {
+    data: {
+        /**
+         * Organization collaboration is unavailable unless explicitly enabled.
+         */
+        enabled: boolean;
+        organization_artifact_write: boolean;
+        organization_credential_use: boolean;
+        organization_id: string;
+        organization_knowledge_read: boolean;
+        organization_skill_use: boolean;
+        /**
+         * Opaque revision rotated only when the effective policy changes.
+         */
+        policy_revision: string;
+        updated_at: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
 export type DataResponseOrganizationInvite = {
     /**
      * Response type for organization invites (token is not exposed over the API).
@@ -4346,6 +4616,100 @@ export type DataResponseOrganizationInvite = {
         organization_id: string;
         revoked_at?: string | null;
         role: string;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseOrganizationMemoryCapturePolicy = {
+    data: {
+        /**
+         * Empty permits every supported platform; otherwise names are lowercase.
+         */
+        allowed_agent_platforms: Array<string>;
+        cache_ttl_seconds: number;
+        capture_assistant_responses: boolean;
+        capture_enabled: boolean;
+        capture_user_prompts: boolean;
+        max_transcript_bytes: number;
+        offline_grace_seconds: number;
+        organization_id: string;
+        /**
+         * Opaque revision that automatic capture submissions must present. It
+         * changes only when the effective policy changes.
+         */
+        policy_version: string;
+        retain_source_allowed: boolean;
+        updated_at: string;
     };
     pagination?: null | PaginationMeta;
 };
@@ -7408,6 +7772,11 @@ export type DataResponseUserMe = {
          * Present when /auth/me is authenticated by an API key.
          */
         api_key_id?: string | null;
+        /**
+         * Normalized least-privilege scopes for a restricted API key. Omitted for
+         * signed user sessions and unrestricted user API keys.
+         */
+        api_key_scopes?: Array<string> | null;
         api_key_type?: null | ApiKeyType;
         /**
          * The user's default organization ID for API calls requiring an organization context.
@@ -8498,6 +8867,94 @@ export type DataResponseVecOrganizationCustomSkillRevisionSummary = {
         revision_number: number;
         status: OrganizationCustomSkillRevisionStatus;
         title?: string | null;
+    }>;
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseVecOrganizationEmployeeCollaborationAssignment = {
+    data: Array<{
+        agent_identity_id: string;
+        allowed_task_labels: Array<string>;
+        assignment_generation: number;
+        created_at: string;
+        deployment_id: string;
+        granted_by_user_id?: string | null;
+        organization_artifact_write: boolean;
+        organization_credential_use: boolean;
+        organization_id: string;
+        organization_knowledge_read: boolean;
+        organization_skill_use: boolean;
+        updated_at: string;
     }>;
     pagination?: null | PaginationMeta;
 };
@@ -12150,6 +12607,38 @@ export type OrganizationCustomSkillRevisionSummary = {
 
 export type OrganizationCustomSkillStatus = 'active' | 'archived';
 
+export type OrganizationEmployeeCollaborationAssignment = {
+    agent_identity_id: string;
+    allowed_task_labels: Array<string>;
+    assignment_generation: number;
+    created_at: string;
+    deployment_id: string;
+    granted_by_user_id?: string | null;
+    organization_artifact_write: boolean;
+    organization_credential_use: boolean;
+    organization_id: string;
+    organization_knowledge_read: boolean;
+    organization_skill_use: boolean;
+    updated_at: string;
+};
+
+export type OrganizationEmployeeCollaborationPolicy = {
+    /**
+     * Organization collaboration is unavailable unless explicitly enabled.
+     */
+    enabled: boolean;
+    organization_artifact_write: boolean;
+    organization_credential_use: boolean;
+    organization_id: string;
+    organization_knowledge_read: boolean;
+    organization_skill_use: boolean;
+    /**
+     * Opaque revision rotated only when the effective policy changes.
+     */
+    policy_revision: string;
+    updated_at: string;
+};
+
 /**
  * Response type for organization invites (token is not exposed over the API).
  */
@@ -12176,6 +12665,27 @@ export type OrganizationMemberWithUser = {
     organization_id: string;
     role: string;
     user_id: string;
+};
+
+export type OrganizationMemoryCapturePolicy = {
+    /**
+     * Empty permits every supported platform; otherwise names are lowercase.
+     */
+    allowed_agent_platforms: Array<string>;
+    cache_ttl_seconds: number;
+    capture_assistant_responses: boolean;
+    capture_enabled: boolean;
+    capture_user_prompts: boolean;
+    max_transcript_bytes: number;
+    offline_grace_seconds: number;
+    organization_id: string;
+    /**
+     * Opaque revision that automatic capture submissions must present. It
+     * changes only when the effective policy changes.
+     */
+    policy_version: string;
+    retain_source_allowed: boolean;
+    updated_at: string;
 };
 
 export type OrganizationOtpCodeRequest = {
@@ -13841,6 +14351,16 @@ export type TypedParam = {
 export type UndocumentedEndpointPolicy = 'default_allow' | 'default_deny';
 
 /**
+ * Request to replace the least-privilege scopes on an existing user API key.
+ */
+export type UpdateApiKeyScopesRequest = {
+    /**
+     * Complete replacement scope set. At least one valid scope is required.
+     */
+    scopes: Array<string>;
+};
+
+/**
  * Request to update an OAuth provider (admin only).
  *
  * Fields use `Option<Option<T>>` where `null` explicitly clears the value.
@@ -13892,6 +14412,25 @@ export type UpdateOrganizationCustomSkillRequest = {
     description?: string | null;
     display_name?: string | null;
     status?: null | OrganizationCustomSkillStatus;
+};
+
+export type UpdateOrganizationEmployeeCollaborationPolicyRequest = {
+    enabled: boolean;
+    organization_artifact_write?: boolean;
+    organization_credential_use?: boolean;
+    organization_knowledge_read?: boolean;
+    organization_skill_use?: boolean;
+};
+
+export type UpdateOrganizationMemoryCapturePolicyRequest = {
+    allowed_agent_platforms?: Array<string>;
+    cache_ttl_seconds: number;
+    capture_assistant_responses: boolean;
+    capture_enabled: boolean;
+    capture_user_prompts: boolean;
+    max_transcript_bytes: number;
+    offline_grace_seconds: number;
+    retain_source_allowed: boolean;
 };
 
 export type UpdateOrganizationOtpPolicyRequest = {
@@ -14288,6 +14827,14 @@ export type UpsertFederatedResourceRequest = {
     status?: string;
 };
 
+export type UpsertOrganizationEmployeeCollaborationAssignmentRequest = {
+    allowed_task_labels?: Array<string>;
+    organization_artifact_write?: boolean;
+    organization_credential_use?: boolean;
+    organization_knowledge_read?: boolean;
+    organization_skill_use?: boolean;
+};
+
 /**
  * Debug view: usage_events entry for an endpoint
  */
@@ -14369,6 +14916,11 @@ export type UserMe = UserInfo & {
      * Present when /auth/me is authenticated by an API key.
      */
     api_key_id?: string | null;
+    /**
+     * Normalized least-privilege scopes for a restricted API key. Omitted for
+     * signed user sessions and unrestricted user API keys.
+     */
+    api_key_scopes?: Array<string> | null;
     api_key_type?: null | ApiKeyType;
     /**
      * The user's default organization ID for API calls requiring an organization context.
@@ -16385,6 +16937,46 @@ export type RevokeDefaultOrgApiKeyResponses = {
     200: unknown;
 };
 
+export type UpdateDefaultOrgApiKeyScopesData = {
+    body: UpdateApiKeyScopesRequest;
+    path: {
+        /**
+         * API key ID
+         */
+        key_id: string;
+    };
+    query?: never;
+    url: '/organizations/default/api-keys/{key_id}/scopes';
+};
+
+export type UpdateDefaultOrgApiKeyScopesErrors = {
+    /**
+     * Invalid scope set
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
+    /**
+     * API key not found
+     */
+    404: unknown;
+};
+
+export type UpdateDefaultOrgApiKeyScopesResponses = {
+    /**
+     * API key scopes replaced
+     */
+    200: DataResponseApiKeyInfo;
+};
+
+export type UpdateDefaultOrgApiKeyScopesResponse = UpdateDefaultOrgApiKeyScopesResponses[keyof UpdateDefaultOrgApiKeyScopesResponses];
+
 export type ListAgentCredentialSecretsData = {
     body?: never;
     path: {
@@ -16774,6 +17366,50 @@ export type RevokeOrgApiKeyResponses = {
      */
     200: unknown;
 };
+
+export type UpdateOrgApiKeyScopesData = {
+    body: UpdateApiKeyScopesRequest;
+    path: {
+        /**
+         * Organization ID
+         */
+        organization_id: string;
+        /**
+         * API key ID
+         */
+        key_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/api-keys/{key_id}/scopes';
+};
+
+export type UpdateOrgApiKeyScopesErrors = {
+    /**
+     * Invalid scope set
+     */
+    400: unknown;
+    /**
+     * Unauthorized
+     */
+    401: unknown;
+    /**
+     * A signed-in user session is required
+     */
+    403: unknown;
+    /**
+     * API key not found
+     */
+    404: unknown;
+};
+
+export type UpdateOrgApiKeyScopesResponses = {
+    /**
+     * API key scopes replaced
+     */
+    200: DataResponseApiKeyInfo;
+};
+
+export type UpdateOrgApiKeyScopesResponse = UpdateOrgApiKeyScopesResponses[keyof UpdateOrgApiKeyScopesResponses];
 
 export type ListAuditLogsData = {
     body?: never;
@@ -17543,6 +18179,162 @@ export type PublishCustomSkillRevisionResponses = {
 
 export type PublishCustomSkillRevisionResponse = PublishCustomSkillRevisionResponses[keyof PublishCustomSkillRevisionResponses];
 
+export type GetEmployeeCollaborationPolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration-policy';
+};
+
+export type GetEmployeeCollaborationPolicyErrors = {
+    /**
+     * User is not a member of the organization
+     */
+    403: unknown;
+};
+
+export type GetEmployeeCollaborationPolicyResponses = {
+    /**
+     * Organization employee collaboration policy
+     */
+    200: DataResponseOrganizationEmployeeCollaborationPolicy;
+};
+
+export type GetEmployeeCollaborationPolicyResponse = GetEmployeeCollaborationPolicyResponses[keyof GetEmployeeCollaborationPolicyResponses];
+
+export type UpdateEmployeeCollaborationPolicyData = {
+    body: UpdateOrganizationEmployeeCollaborationPolicyRequest;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration-policy';
+};
+
+export type UpdateEmployeeCollaborationPolicyErrors = {
+    /**
+     * Invalid policy or no current employee assignment
+     */
+    400: unknown;
+    /**
+     * Only a signed-in organization owner or administrator can update the policy
+     */
+    403: unknown;
+};
+
+export type UpdateEmployeeCollaborationPolicyResponses = {
+    /**
+     * Updated organization employee collaboration policy
+     */
+    200: DataResponseOrganizationEmployeeCollaborationPolicy;
+};
+
+export type UpdateEmployeeCollaborationPolicyResponse = UpdateEmployeeCollaborationPolicyResponses[keyof UpdateEmployeeCollaborationPolicyResponses];
+
+export type ListEmployeeCollaborationAssignmentsData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration/assignments';
+};
+
+export type ListEmployeeCollaborationAssignmentsErrors = {
+    /**
+     * Only a signed-in organization owner or administrator can list assignments
+     */
+    403: unknown;
+};
+
+export type ListEmployeeCollaborationAssignmentsResponses = {
+    /**
+     * Current managed employee collaboration assignments
+     */
+    200: DataResponseVecOrganizationEmployeeCollaborationAssignment;
+};
+
+export type ListEmployeeCollaborationAssignmentsResponse = ListEmployeeCollaborationAssignmentsResponses[keyof ListEmployeeCollaborationAssignmentsResponses];
+
+export type RevokeEmployeeCollaborationAssignmentData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+        /**
+         * Managed employee deployment ID
+         */
+        deployment_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration/assignments/{deployment_id}';
+};
+
+export type RevokeEmployeeCollaborationAssignmentErrors = {
+    /**
+     * Only a signed-in organization owner or administrator can manage assignments
+     */
+    403: unknown;
+};
+
+export type RevokeEmployeeCollaborationAssignmentResponses = {
+    /**
+     * Whether an active assignment was revoked
+     */
+    200: DataResponseBool;
+};
+
+export type RevokeEmployeeCollaborationAssignmentResponse = RevokeEmployeeCollaborationAssignmentResponses[keyof RevokeEmployeeCollaborationAssignmentResponses];
+
+export type UpsertEmployeeCollaborationAssignmentData = {
+    body: UpsertOrganizationEmployeeCollaborationAssignmentRequest;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+        /**
+         * Managed employee deployment ID
+         */
+        deployment_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration/assignments/{deployment_id}';
+};
+
+export type UpsertEmployeeCollaborationAssignmentErrors = {
+    /**
+     * Deployment is not a managed employee with a stable agent identity
+     */
+    400: unknown;
+    /**
+     * Only a signed-in organization owner or administrator can manage assignments
+     */
+    403: unknown;
+};
+
+export type UpsertEmployeeCollaborationAssignmentResponses = {
+    /**
+     * Created or updated employee collaboration assignment
+     */
+    200: DataResponseOrganizationEmployeeCollaborationAssignment;
+};
+
+export type UpsertEmployeeCollaborationAssignmentResponse = UpsertEmployeeCollaborationAssignmentResponses[keyof UpsertEmployeeCollaborationAssignmentResponses];
+
 export type ListInvitesData = {
     body?: never;
     path: {
@@ -17684,6 +18476,66 @@ export type AssignRoleResponses = {
      */
     200: unknown;
 };
+
+export type GetMemoryCapturePolicyData = {
+    body?: never;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/memory-capture-policy';
+};
+
+export type GetMemoryCapturePolicyErrors = {
+    /**
+     * User is not a member of the organization
+     */
+    403: unknown;
+};
+
+export type GetMemoryCapturePolicyResponses = {
+    /**
+     * Organization automatic memory-capture policy
+     */
+    200: DataResponseOrganizationMemoryCapturePolicy;
+};
+
+export type GetMemoryCapturePolicyResponse = GetMemoryCapturePolicyResponses[keyof GetMemoryCapturePolicyResponses];
+
+export type UpdateMemoryCapturePolicyData = {
+    body: UpdateOrganizationMemoryCapturePolicyRequest;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/memory-capture-policy';
+};
+
+export type UpdateMemoryCapturePolicyErrors = {
+    /**
+     * Invalid policy
+     */
+    400: unknown;
+    /**
+     * User is not allowed to update the organization
+     */
+    403: unknown;
+};
+
+export type UpdateMemoryCapturePolicyResponses = {
+    /**
+     * Updated organization automatic memory-capture policy
+     */
+    200: DataResponseOrganizationMemoryCapturePolicy;
+};
+
+export type UpdateMemoryCapturePolicyResponse = UpdateMemoryCapturePolicyResponses[keyof UpdateMemoryCapturePolicyResponses];
 
 export type ListOrgOauthProvidersData = {
     body?: never;

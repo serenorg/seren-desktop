@@ -15,6 +15,7 @@
       "!**/.worktrees/**/*",
       "!**/artifacts/**/*",
       "!**/src/api/generated/**/*",
+      "!**/src/generated/**/*",
       "!**/src-tauri/target/**/*",
       "!**/mcp-servers"
     ]

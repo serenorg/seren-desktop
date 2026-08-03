@@ -3,8 +3,8 @@
 import { type DefaultError, type InfiniteData, infiniteQueryOptions, type MutationOptions, queryOptions } from '@tanstack/solid-query';
 
 import { client } from '../client.gen';
-import { type Options, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentDescribeDeploymentTool, serenAgentGetDeploymentActivity, serenAgentGetDeploymentHealth, serenAgentGetDeploymentResources, serenAgentGetManagedDeployment, serenAgentHealth, serenAgentListDeployments, serenAgentListDeploymentToolGroups, serenAgentListDeploymentTools, serenAgentListManagedDeploymentRevisions, serenAgentPatchManagedDeploymentFiles, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
-import type { SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployError, SerenAgentDeployResponse, SerenAgentDescribeDeploymentToolData, SerenAgentDescribeDeploymentToolResponse, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityResponse, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthResponse, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentHealthData, SerenAgentHealthResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListDeploymentToolGroupsData, SerenAgentListDeploymentToolGroupsResponse, SerenAgentListDeploymentToolsData, SerenAgentListDeploymentToolsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunError, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
+import { type Options, serenAgentApplyRuntimePolicyReconciliation, serenAgentCapabilities, serenAgentDeleteManagedDeployment, serenAgentDeploy, serenAgentDescribeDeploymentTool, serenAgentGetDeploymentActivity, serenAgentGetDeploymentHealth, serenAgentGetDeploymentResources, serenAgentGetManagedDeployment, serenAgentHealth, serenAgentListDeployments, serenAgentListDeploymentToolGroups, serenAgentListDeploymentTools, serenAgentListManagedDeploymentRevisions, serenAgentPatchManagedDeploymentFiles, serenAgentPreviewManagedDeploymentRollback, serenAgentPreviewManagedDeploymentUpdate, serenAgentPreviewRuntimePolicyReconciliation, serenAgentPrivateModels, serenAgentRollbackManagedDeployment, serenAgentStartManagedDeployment, serenAgentStopManagedDeployment, serenAgentTestRun, serenAgentUpdateManagedDeployment } from '../sdk.gen';
+import type { SerenAgentApplyRuntimePolicyReconciliationData, SerenAgentApplyRuntimePolicyReconciliationResponse, SerenAgentCapabilitiesData, SerenAgentCapabilitiesResponse, SerenAgentDeleteManagedDeploymentData, SerenAgentDeleteManagedDeploymentResponse, SerenAgentDeployData, SerenAgentDeployError, SerenAgentDeployResponse, SerenAgentDescribeDeploymentToolData, SerenAgentDescribeDeploymentToolResponse, SerenAgentGetDeploymentActivityData, SerenAgentGetDeploymentActivityResponse, SerenAgentGetDeploymentHealthData, SerenAgentGetDeploymentHealthResponse, SerenAgentGetDeploymentResourcesData, SerenAgentGetDeploymentResourcesResponse, SerenAgentGetManagedDeploymentData, SerenAgentGetManagedDeploymentResponse, SerenAgentHealthData, SerenAgentHealthResponse, SerenAgentListDeploymentsData, SerenAgentListDeploymentsResponse, SerenAgentListDeploymentToolGroupsData, SerenAgentListDeploymentToolGroupsResponse, SerenAgentListDeploymentToolsData, SerenAgentListDeploymentToolsResponse, SerenAgentListManagedDeploymentRevisionsData, SerenAgentListManagedDeploymentRevisionsResponse, SerenAgentPatchManagedDeploymentFilesData, SerenAgentPatchManagedDeploymentFilesResponse, SerenAgentPreviewManagedDeploymentRollbackData, SerenAgentPreviewManagedDeploymentRollbackResponse, SerenAgentPreviewManagedDeploymentUpdateData, SerenAgentPreviewManagedDeploymentUpdateResponse, SerenAgentPreviewRuntimePolicyReconciliationData, SerenAgentPreviewRuntimePolicyReconciliationResponse, SerenAgentPrivateModelsData, SerenAgentPrivateModelsResponse, SerenAgentRollbackManagedDeploymentData, SerenAgentRollbackManagedDeploymentResponse, SerenAgentStartManagedDeploymentData, SerenAgentStartManagedDeploymentResponse, SerenAgentStopManagedDeploymentData, SerenAgentStopManagedDeploymentResponse, SerenAgentTestRunData, SerenAgentTestRunError, SerenAgentTestRunResponse, SerenAgentUpdateManagedDeploymentData, SerenAgentUpdateManagedDeploymentResponse } from '../types.gen';
 
 export type QueryKey<TOptions extends Options> = [
     Pick<TOptions, 'baseUrl' | 'body' | 'headers' | 'path' | 'query'> & {
@@ -323,6 +323,42 @@ export const serenAgentPreviewManagedDeploymentRollbackMutation = (options?: Par
     const mutationOptions: MutationOptions<SerenAgentPreviewManagedDeploymentRollbackResponse, DefaultError, Options<SerenAgentPreviewManagedDeploymentRollbackData>> = {
         mutationFn: async (fnOptions) => {
             const { data } = await serenAgentPreviewManagedDeploymentRollback({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Apply an eligible runtime-policy reconciliation as a normal managed
+ * deployment revision.
+ */
+export const serenAgentApplyRuntimePolicyReconciliationMutation = (options?: Partial<Options<SerenAgentApplyRuntimePolicyReconciliationData>>): MutationOptions<SerenAgentApplyRuntimePolicyReconciliationResponse, DefaultError, Options<SerenAgentApplyRuntimePolicyReconciliationData>> => {
+    const mutationOptions: MutationOptions<SerenAgentApplyRuntimePolicyReconciliationResponse, DefaultError, Options<SerenAgentApplyRuntimePolicyReconciliationData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenAgentApplyRuntimePolicyReconciliation({
+                ...options,
+                ...fnOptions,
+                throwOnError: true
+            });
+            return data;
+        }
+    };
+    return mutationOptions;
+};
+
+/**
+ * Preview safe reconciliation for a deployment created before canonical
+ * runtime-policy deadline metadata.
+ */
+export const serenAgentPreviewRuntimePolicyReconciliationMutation = (options?: Partial<Options<SerenAgentPreviewRuntimePolicyReconciliationData>>): MutationOptions<SerenAgentPreviewRuntimePolicyReconciliationResponse, DefaultError, Options<SerenAgentPreviewRuntimePolicyReconciliationData>> => {
+    const mutationOptions: MutationOptions<SerenAgentPreviewRuntimePolicyReconciliationResponse, DefaultError, Options<SerenAgentPreviewRuntimePolicyReconciliationData>> = {
+        mutationFn: async (fnOptions) => {
+            const { data } = await serenAgentPreviewRuntimePolicyReconciliation({
                 ...options,
                 ...fnOptions,
                 throwOnError: true

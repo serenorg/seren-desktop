@@ -1,0 +1,18 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Seren employee Cloud API types",
+    "version": "0.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "CloudRunCollaborationSelection": {
+        "$ref": "../../../openapi/openapi-seren-cloud.json#/components/schemas/CloudRunCollaborationSelection"
+      },
+      "CloudRunCollaborationTarget": {
+        "$ref": "../../../openapi/openapi-seren-cloud.json#/components/schemas/CloudRunCollaborationTarget"
+      }
+    }
+  }
+}

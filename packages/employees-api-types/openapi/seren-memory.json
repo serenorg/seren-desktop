@@ -1,0 +1,15 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Seren employee Memory API types",
+    "version": "0.0.0"
+  },
+  "paths": {},
+  "components": {
+    "schemas": {
+      "KnowledgeDomainResponse": {
+        "$ref": "../../../openapi/openapi-seren-memory.json#/components/schemas/KnowledgeDomainResponse"
+      }
+    }
+  }
+}

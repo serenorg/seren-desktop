@@ -524,7 +524,7 @@ export type AgentSkillsCapabilityPolicy = {
  */
 export type AgentSpec = {
     /**
-     * Seren Secrets agent identity this managed employee acts as when
+     * Seren Passwords agent identity this managed employee acts as when
      * resolving `seren-secrets://` references.
      */
     agent_identity_id?: string | null;
@@ -544,8 +544,14 @@ export type AgentSpec = {
     capability_policy?: null | AgentCapabilityPolicy;
     /**
      * Optional credential references resolved by the control plane at runtime.
-     * Reusable `org-secret://` and `user-secret://` records are managed
-     * through `/organizations/{organization_id}/agent-credential-secrets`.
+     * Accepts `seren-secrets://{vault_id}/{item_id}/{field}` for vault-held
+     * credentials, `control-plane://providers/{id-or-slug}` for control-plane
+     * provider credentials, and `org-secret://{key}` / `user-secret://{key}`
+     * for reusable credential-secret records managed through
+     * `/organizations/{organization_id}/agent-credential-secrets`.
+     * `seren-secrets://` references additionally require
+     * `secret_resolution_delegation`, which is signed client-side in the
+     * Employees UI and cannot be produced by an API key.
      */
     credentials?: Array<AgentCredentialRef> | null;
     /**
@@ -578,7 +584,7 @@ export type AgentSpec = {
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
     runtime_policy?: null | AgentRuntimePolicy;
     /**
-     * User-authorized Seren Secrets delegation used by the runtime to renew
+     * User-authorized Seren Passwords delegation used by the runtime to renew
      * deployment-scoped secret grants.
      */
     secret_resolution_delegation?: string | null;
@@ -608,12 +614,14 @@ export type AgentSpec = {
  * Partial update request for an existing managed `seren-agent` deployment.
  *
  * Mirrors the agent-level fields of `AgentSpec` as `Option<...>` for partial
- * update. The `workload` field replaces the entire `WorkloadSpec` when
- * present; partial-workload patching is intentionally out of scope.
+ * update. `workload_limits` patches only run limits while preserving the
+ * authoritative server-side workload, including encrypted secrets. The
+ * `workload` field remains a full replacement for callers changing other
+ * workload fields.
  */
 export type AgentSpecUpdate = {
     /**
-     * Updated Seren Secrets agent identity this managed employee acts as.
+     * Updated Seren Passwords agent identity this managed employee acts as.
      */
     agent_identity_id?: string | null;
     /**
@@ -660,7 +668,7 @@ export type AgentSpecUpdate = {
      */
     clear_runtime_policy?: boolean;
     /**
-     * Clear any existing Seren Secrets delegation.
+     * Clear any existing Seren Passwords delegation.
      */
     clear_secret_resolution_delegation?: boolean;
     /**
@@ -674,8 +682,10 @@ export type AgentSpecUpdate = {
     clear_tool_refs?: boolean;
     /**
      * Updated credential references. Replaces the entire previous list when
-     * present. Reusable `org-secret://` and `user-secret://` records are
-     * managed through the organization credential-secret API.
+     * present. Accepts `seren-secrets://{vault_id}/{item_id}/{field}`,
+     * `control-plane://providers/{id-or-slug}`, `org-secret://{key}`, and
+     * `user-secret://{key}`. `seren-secrets://` references require a client-signed
+     * `secret_resolution_delegation` created in the Employees UI.
      */
     credentials?: Array<AgentCredentialRef> | null;
     /**
@@ -704,7 +714,7 @@ export type AgentSpecUpdate = {
     private_output_policy?: null | ManagedAgentPrivateOutputPolicy;
     runtime_policy?: null | AgentRuntimePolicy;
     /**
-     * Updated user-authorized Seren Secrets delegation.
+     * Updated user-authorized Seren Passwords delegation.
      */
     secret_resolution_delegation?: string | null;
     session_database?: null | ManagedAgentSessionDatabase;
@@ -727,6 +737,7 @@ export type AgentSpecUpdate = {
      */
     visibility?: string | null;
     workload?: null | WorkloadSpec;
+    workload_limits?: null | WorkloadLimitsPatch;
 };
 
 export type AgentToolErrorRecoveryBackoffKind = 'none' | 'fixed' | 'exponential';
@@ -1362,7 +1373,7 @@ export type DataResponseManagedAgentDeploymentDetail = {
          */
         active_revision_id?: string | null;
         /**
-         * Seren Secrets agent identity this managed employee acts as when
+         * Seren Passwords agent identity this managed employee acts as when
          * resolving `seren-secrets://` references.
          */
         agent_identity_id?: string | null;
@@ -1852,6 +1863,174 @@ export type DataResponseManagedAgentHealthReport = {
         organization_id: string;
         status: ManagedAgentHealthStatus;
         summary: ManagedAgentHealthSummary;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentRuntimePolicyReconciliationPreview = {
+    /**
+     * Preview for safely reconciling a deployment created before runtime-policy
+     * deadline resolution became canonical.
+     */
+    data: {
+        apply_authorized: boolean;
+        current_effective_runtime_seconds?: number | null;
+        declared_runtime_seconds?: number | null;
+        deployment_id: string;
+        proposed_effective_runtime_seconds?: number | null;
+        reason: string;
+        required_api_key_scope: string;
+        status: ManagedAgentRuntimePolicyReconciliationStatus;
+        update_preview?: null | ManagedAgentDeploymentUpdatePreview;
+    };
+    pagination?: null | PaginationMeta;
+};
+
+/**
+ * Generic API response wrapper with optional pagination
+ *
+ * This wrapper provides a consistent structure for all API responses,
+ * making it easier for clients to handle responses uniformly. It supports
+ * both single resources and collections, with optional pagination metadata.
+ * Publisher endpoints use the same wrapper for non-streaming JSON success
+ * responses, including first-class publishers. Streaming endpoints such as
+ * SSE responses carry metering in response headers and are not wrapped.
+ * Payment-required and error responses are also not wrapped so clients can
+ * parse their existing wire contracts directly.
+ *
+ * # Response Structure
+ *
+ * ```json
+ * {
+ * "data": T,
+ * "pagination": { ... } // optional
+ * }
+ * ```
+ *
+ * # Examples
+ *
+ * ## Single Resource
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let project = Project {
+ * id: "123".to_string(),
+ * name: "My Project".to_string(),
+ * };
+ *
+ * let response = DataResponse::new(project);
+ * // Serializes to: {"data": {"id": "123", "name": "My Project"}}
+ * ```
+ *
+ * ## Collection with Pagination
+ *
+ * ```rust
+ * use seren_core::http::DataResponse;
+ * use seren_core::pagination::PaginationMeta;
+ * use serde::Serialize;
+ *
+ * #[derive(Serialize)]
+ * struct Project {
+ * id: String,
+ * name: String,
+ * }
+ *
+ * let projects: Vec<Project> = Vec::new();
+ * let pagination = PaginationMeta {
+ * total: 0,
+ * count: 0,
+ * limit: 20,
+ * offset: 0,
+ * has_more: false,
+ * };
+ *
+ * let response = DataResponse::with_pagination(projects, pagination);
+ * // Serializes to: {"data": [...], "pagination": {"total": 0, "count": 0, "limit": 20, "offset": 0, "has_more": false}}
+ * ```
+ */
+export type DataResponseManagedAgentRuntimePolicyReconciliationResult = {
+    data: {
+        applied: boolean;
+        preview: ManagedAgentRuntimePolicyReconciliationPreview;
+        revision_id?: string | null;
     };
     pagination?: null | PaginationMeta;
 };
@@ -2645,7 +2824,7 @@ export type ManagedAgentDeploymentDetail = {
      */
     active_revision_id?: string | null;
     /**
-     * Seren Secrets agent identity this managed employee acts as when
+     * Seren Passwords agent identity this managed employee acts as when
      * resolving `seren-secrets://` references.
      */
     agent_identity_id?: string | null;
@@ -2897,14 +3076,57 @@ export type ManagedAgentRunActivity = {
 
 export type ManagedAgentRuntimeAdapter = 'seren_agent';
 
+/**
+ * Preview for safely reconciling a deployment created before runtime-policy
+ * deadline resolution became canonical.
+ */
+export type ManagedAgentRuntimePolicyReconciliationPreview = {
+    apply_authorized: boolean;
+    current_effective_runtime_seconds?: number | null;
+    declared_runtime_seconds?: number | null;
+    deployment_id: string;
+    proposed_effective_runtime_seconds?: number | null;
+    reason: string;
+    required_api_key_scope: string;
+    status: ManagedAgentRuntimePolicyReconciliationStatus;
+    update_preview?: null | ManagedAgentDeploymentUpdatePreview;
+};
+
+export type ManagedAgentRuntimePolicyReconciliationResult = {
+    applied: boolean;
+    preview: ManagedAgentRuntimePolicyReconciliationPreview;
+    revision_id?: string | null;
+};
+
+export type ManagedAgentRuntimePolicyReconciliationStatus = 'eligible' | 'already_reconciled' | 'not_applicable' | 'conflict';
+
 export type ManagedAgentRuntimeResources = {
     alert_policy_configured: boolean;
     compute_backend: CloudDeploymentComputeBackend;
+    /**
+     * Declared runtime bound from `runtime_policy.resources`, when present.
+     */
+    configured_runtime_seconds?: number | null;
     deployment_network_policy_configured: boolean;
+    effective_cpu_request_millicores: number;
+    effective_memory_request_mib: number;
+    /**
+     * Canonical executor runtime bound after defaults and policy resolution.
+     */
+    effective_runtime_seconds?: number | null;
     filesystem_policy_configured: boolean;
+    /**
+     * Kubernetes Job deadline, including startup grace.
+     */
+    infrastructure_deadline_seconds?: number | null;
     llm_connection?: null | ManagedAgentLlmConnection;
     model_id?: string | null;
     network_policy_configured: boolean;
+    /**
+     * Reserved for controller-observed values once the controller reports them.
+     */
+    observed_cpu_request_millicores?: number | null;
+    observed_memory_request_mib?: number | null;
     private_output_policy: ManagedAgentPrivateOutputPolicy;
     process_policy_configured: boolean;
     runtime_adapter: ManagedAgentRuntimeAdapter;
@@ -2913,6 +3135,14 @@ export type ManagedAgentRuntimeResources = {
     runtime_policy_configured: boolean;
     runtime_resources?: null | AgentResourcePolicy;
     session_database?: null | ManagedAgentSessionDatabaseResource;
+    /**
+     * Infrastructure-only allowance for pod/bootstrap initialization.
+     */
+    startup_grace_seconds?: number | null;
+    /**
+     * Boundary covered by `effective_runtime_seconds`.
+     */
+    timeout_scope?: string | null;
 };
 
 export type ManagedAgentScheduleResources = {
@@ -3350,6 +3580,26 @@ export type WorkloadLimits = {
     /**
      * Maximum number of characters kept from any single tool output.
      */
+    max_tool_output_chars?: number | null;
+};
+
+/**
+ * Partial update for workload run limits.
+ *
+ * Each value field preserves the current value when omitted. Its matching
+ * `clear_*` flag explicitly removes the current limit and cannot be combined
+ * with a replacement value.
+ */
+export type WorkloadLimitsPatch = {
+    clear_context_budget_tokens?: boolean;
+    clear_max_iterations?: boolean;
+    clear_max_timeout_seconds?: boolean;
+    clear_max_tool_calls_per_run?: boolean;
+    clear_max_tool_output_chars?: boolean;
+    context_budget_tokens?: number | null;
+    max_iterations?: number | null;
+    max_timeout_seconds?: number | null;
+    max_tool_calls_per_run?: number | null;
     max_tool_output_chars?: number | null;
 };
 
@@ -3831,6 +4081,78 @@ export type SerenAgentPreviewManagedDeploymentRollbackResponses = {
 };
 
 export type SerenAgentPreviewManagedDeploymentRollbackResponse = SerenAgentPreviewManagedDeploymentRollbackResponses[keyof SerenAgentPreviewManagedDeploymentRollbackResponses];
+
+export type SerenAgentApplyRuntimePolicyReconciliationData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/managed/runtime-policy-reconciliation';
+};
+
+export type SerenAgentApplyRuntimePolicyReconciliationErrors = {
+    /**
+     * Deployment is not eligible
+     */
+    400: unknown;
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+    /**
+     * Stored timeout conflicts with the declared policy
+     */
+    409: unknown;
+};
+
+export type SerenAgentApplyRuntimePolicyReconciliationResponses = {
+    /**
+     * Runtime-policy reconciliation result
+     */
+    200: DataResponseManagedAgentRuntimePolicyReconciliationResult;
+};
+
+export type SerenAgentApplyRuntimePolicyReconciliationResponse = SerenAgentApplyRuntimePolicyReconciliationResponses[keyof SerenAgentApplyRuntimePolicyReconciliationResponses];
+
+export type SerenAgentPreviewRuntimePolicyReconciliationData = {
+    body?: never;
+    path: {
+        /**
+         * Deployment ID
+         */
+        id: string;
+    };
+    query?: never;
+    url: '/deployments/{id}/managed/runtime-policy-reconciliation/preview';
+};
+
+export type SerenAgentPreviewRuntimePolicyReconciliationErrors = {
+    /**
+     * Forbidden
+     */
+    403: unknown;
+    /**
+     * Deployment not found
+     */
+    404: unknown;
+};
+
+export type SerenAgentPreviewRuntimePolicyReconciliationResponses = {
+    /**
+     * Runtime-policy reconciliation preview
+     */
+    200: DataResponseManagedAgentRuntimePolicyReconciliationPreview;
+};
+
+export type SerenAgentPreviewRuntimePolicyReconciliationResponse = SerenAgentPreviewRuntimePolicyReconciliationResponses[keyof SerenAgentPreviewRuntimePolicyReconciliationResponses];
 
 export type SerenAgentGetDeploymentResourcesData = {
     body?: never;
