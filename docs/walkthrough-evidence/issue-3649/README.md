@@ -14,6 +14,12 @@ State: isolated local project, signed out (sign-in is not required for local LM 
 4. The picker previously exposed only `System default`, even though the live `lms ls --llm --json` inventory contained five chat models. The runtime would silently run the first downloaded model.
 5. Reopening Advanced controls did not retry LM Studio after any other provider catalog had populated.
 
+The exact base commit was run in the native macOS validation app. Its targeted DOM capture shows that the Models section reached LM Studio, while the live select assertion records its only option as the blank ID labeled `System default`.
+
+![Before: LM Studio reached with no named models](./lmstudio-before-empty-catalog.png)
+
+The pre-fix live assertion is recorded in [lmstudio-model-catalog-before-verification.json](./lmstudio-model-catalog-before-verification.json).
+
 ## Fixed walkthrough
 
 1. Launch the native app from the issue branch with isolated app data and Keychain state.
@@ -36,7 +42,7 @@ State: isolated local project, signed out (sign-in is not required for local LM 
 
 The exact option IDs and result flags are recorded in [lmstudio-model-catalog-verification.json](./lmstudio-model-catalog-verification.json).
 
-## Scrubbed screenshot
+## Scrubbed fixed screenshot
 
 Only the relevant Mission Control content is retained. Sidebar history, paths, identifiers, tokens, native window metadata, and screenshot metadata were removed.
 

@@ -1,0 +1,9 @@
+{
+  "serverStoppedBefore": true,
+  "serverStoppedAfter": true,
+  "liveDownloadedLlmCount": 5,
+  "renderedOptionIds": [
+    ""
+  ],
+  "renderedLabel": "System default"
+}
