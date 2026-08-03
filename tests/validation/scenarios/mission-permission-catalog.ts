@@ -8,6 +8,36 @@ import type { ScenarioContext } from "../../../scripts/validate-walkthrough";
 const settle = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+async function ensureMissionControlLaunchOpen(
+  ctx: ScenarioContext,
+): Promise<void> {
+  const missionControl = "[data-testid='titlebar-mission-control-button']";
+  const launchStart = "[data-testid='run-launch-start']";
+
+  try {
+    await ctx.client.waitFor(launchStart, 1_000);
+    return;
+  } catch {
+    // Mission Control is closed. Avoid toggling an already-open launch form off.
+  }
+
+  await ctx.client.waitFor(missionControl, 30_000);
+  await ctx.client.click(missionControl);
+  try {
+    await ctx.client.waitFor(launchStart, 30_000);
+  } catch (error) {
+    await ctx.writeArtifact(
+      "mission-launch-failure-text.json",
+      await ctx.client.dumpText("body"),
+    );
+    await ctx.writeArtifact(
+      "mission-launch-failure-native.json",
+      await ctx.client.nativeScreenshot(),
+    );
+    throw error;
+  }
+}
+
 const expectedModes = {
   "claude-code": ["", "default", "acceptEdits", "plan", "bypassPermissions"],
   codex: ["", "auto", "ask"],
@@ -36,9 +66,7 @@ export default async function run(ctx: ScenarioContext): Promise<void> {
     command: "setRootPath",
     path: projectPath,
   });
-  await ctx.client.click("[data-testid='titlebar-mission-control-button']");
-  await settle(500);
-  await ctx.client.waitFor("[data-testid='run-launch-start']", 10_000);
+  await ensureMissionControlLaunchOpen(ctx);
   await ctx.client.click("details > summary");
   await ctx.client.waitFor("[data-testid='run-permission-claude-code']", 10_000);
 
