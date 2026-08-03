@@ -603,6 +603,38 @@ async function buildToolCatalog(session) {
   return { tools, handlers };
 }
 
+function buildLmStudioModes(currentModeId) {
+  return {
+    currentModeId,
+    availableModes: [
+      {
+        modeId: "ask",
+        name: "Suggest",
+        description: "Ask before each local file or Seren MCP tool call",
+      },
+      {
+        modeId: "auto",
+        name: "Auto",
+        description: "Approve tool calls automatically for this session",
+      },
+    ],
+  };
+}
+
+function lmStudioModeFromApprovalPolicy(approvalPolicy) {
+  return approvalPolicy === "never" ? "auto" : "ask";
+}
+
+function buildLmStudioPermissionCatalog({ approvalPolicy } = {}) {
+  const state = buildLmStudioModes(
+    lmStudioModeFromApprovalPolicy(approvalPolicy),
+  );
+  return {
+    defaultModeId: state.currentModeId,
+    modes: state.availableModes,
+  };
+}
+
 function buildSessionStatus(session, status = session.status) {
   return {
     sessionId: session.id,
@@ -616,21 +648,7 @@ function buildSessionStatus(session, status = session.status) {
       currentModelId: session.currentModelId,
       availableModels: session.availableModelRecords,
     },
-    modes: {
-      currentModeId: session.currentModeId,
-      availableModes: [
-        {
-          modeId: "ask",
-          name: "Suggest",
-          description: "Ask before each local file or Seren MCP tool call",
-        },
-        {
-          modeId: "auto",
-          name: "Auto",
-          description: "Approve tool calls automatically for this session",
-        },
-      ],
-    },
+    modes: buildLmStudioModes(session.currentModeId),
     configOptions: [],
   };
 }
@@ -1838,6 +1856,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     setSessionModel,
     updateSessionConfigOption,
     listRemoteSessions,
+    getPermissionCatalog: buildLmStudioPermissionCatalog,
     testConnection,
     startServer,
     stopServer,

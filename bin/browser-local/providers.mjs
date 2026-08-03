@@ -458,7 +458,7 @@ function codexModes(session) {
       {
         modeId: "auto",
         name: "Auto",
-        description: "Automatically approve safe operations",
+        description: "Run tool actions without approval prompts",
       },
       {
         modeId: "ask",
@@ -1831,6 +1831,38 @@ export function createProviderHandlers({
     }
   }
 
+  function getPermissionCatalog({
+    agentType,
+    approvalPolicy,
+    sandboxMode,
+    networkEnabled,
+  }) {
+    const settings = { approvalPolicy, sandboxMode, networkEnabled };
+
+    if (agentType === "codex" || agentType === PAIRED_AGENT_TYPE) {
+      // Direct Codex and the paired executor both intentionally start with
+      // Codex's on-failure policy, independent of Claude's global default.
+      const defaultModeId = modeFromApprovalPolicy("on-failure");
+      const state = codexModes({ currentModeId: defaultModeId });
+      return { defaultModeId, modes: state.availableModes };
+    }
+
+    const runtime =
+      agentType === "claude-code"
+        ? claudeRuntime
+        : agentType === "gemini"
+          ? geminiRuntime
+          : agentType === "grok"
+            ? grokRuntime
+            : agentType === "lmstudio"
+              ? lmStudioRuntime
+              : null;
+    if (!runtime || typeof runtime.getPermissionCatalog !== "function") {
+      throw new Error(`Permission catalogs are not supported for ${agentType}.`);
+    }
+    return runtime.getPermissionCatalog(settings);
+  }
+
   async function spawnOwnedSession(callerParams) {
     // Every provider_spawn caller reaches this one function — the desktop
     // renderer, a paired role's inner spawn, an orchestrator one-shot, and the
@@ -2887,6 +2919,7 @@ export function createProviderHandlers({
     respondToDiffProposal,
     getAvailableAgents,
     getModelCatalog,
+    getPermissionCatalog,
     checkAgentAvailable,
     checkAgentAuthenticated,
     ensureAgentCli,

@@ -17,4 +17,12 @@ describe("provider model catalog contract", () => {
       expect(source).toContain("providerHandlers.getModelCatalog");
     }
   });
+
+  it("registers the permission catalog RPC in both local runtime entrypoints", () => {
+    for (const path of ["bin/provider-runtime.mjs", "bin/seren-desktop.mjs"]) {
+      const source = readSource(path);
+      expect(source).toContain('"provider_get_permission_catalog"');
+      expect(source).toContain("providerHandlers.getPermissionCatalog");
+    }
+  });
 });

@@ -269,6 +269,10 @@ function registerBrowserLocalHandlers() {
     providerHandlers.getModelCatalog,
   );
   registerHandler(
+    "provider_get_permission_catalog",
+    providerHandlers.getPermissionCatalog,
+  );
+  registerHandler(
     "provider_check_agent_available",
     providerHandlers.checkAgentAvailable,
   );

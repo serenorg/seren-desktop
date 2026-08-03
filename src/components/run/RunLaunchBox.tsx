@@ -6,14 +6,16 @@ import { createStore } from "solid-js/store";
 import { ProviderIcon } from "@/components/chat/ProviderIcon";
 import {
   createEmptyMissionModelCatalogs,
+  createEmptyMissionPermissionCatalogs,
   loadMissionModelCatalog,
+  loadMissionPermissionCatalog,
   MISSION_AGENT_DEFINITIONS,
   MISSION_AGENT_TYPES,
   MISSION_MODEL_TARGETS,
-  MISSION_PERMISSION_OPTIONS,
   type MissionAgentType,
   type MissionModelCatalog,
   type MissionModelTarget,
+  type MissionPermissionCatalog,
   missionAgentAllowed,
   missionAgentRequiresSignIn,
 } from "@/services/mission-agent-catalog";
@@ -67,12 +69,17 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
   const [permissions, setPermissions] = createStore<
     Record<MissionAgentType, string>
   >(recordFromValues(MISSION_AGENT_TYPES, () => ""));
+  const [permissionCatalogs, setPermissionCatalogs] = createStore<
+    Record<MissionAgentType, MissionPermissionCatalog>
+  >(createEmptyMissionPermissionCatalogs());
+  const [permissionsLoading, setPermissionsLoading] = createSignal(false);
   const [workspaceMode, setWorkspaceMode] = createSignal<
     "current" | "worktree" | "scratch"
   >("current");
   const [maxAttempts, setMaxAttempts] = createSignal(2);
 
   let loadedCatalogAuthState: boolean | null = null;
+  let permissionCatalogsLoaded = false;
 
   const agentDefinition = (agentType: MissionAgentType) => {
     const definition = MISSION_AGENT_DEFINITIONS.find(
@@ -119,12 +126,41 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
     }
   };
 
+  const loadPermissionCatalogs = async () => {
+    if (permissionCatalogsLoaded) return;
+    setPermissionsLoading(true);
+    try {
+      await Promise.all(
+        MISSION_AGENT_TYPES.map(async (agentType) => {
+          setPermissionCatalogs(
+            agentType,
+            await loadMissionPermissionCatalog(agentType),
+          );
+        }),
+      );
+      permissionCatalogsLoaded = MISSION_AGENT_TYPES.every(
+        (agentType) => permissionCatalogs[agentType].note === null,
+      );
+    } finally {
+      setPermissionsLoading(false);
+    }
+  };
+
   const selectedModelDescription = (target: MissionModelTarget) => {
     const selected = models[target];
     if (!selected) return modelCatalogs[target].note;
     return (
       modelCatalogs[target].models.find((model) => model.id === selected)
         ?.description ?? selected
+    );
+  };
+
+  const selectedPermissionDescription = (agentType: MissionAgentType) => {
+    const selected = permissions[agentType];
+    const catalog = permissionCatalogs[agentType];
+    return (
+      catalog.options.find((option) => option.value === selected)
+        ?.description ?? catalog.note
     );
   };
 
@@ -254,7 +290,9 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
         <details
           class="mt-5 border-t border-border/50 pt-4"
           onToggle={(event) => {
-            if (event.currentTarget.open) void loadModelCatalogs();
+            if (event.currentTarget.open) {
+              void Promise.all([loadModelCatalogs(), loadPermissionCatalogs()]);
+            }
           }}
         >
           <summary class="cursor-pointer text-xs font-medium text-muted-foreground transition hover:text-foreground">
@@ -435,8 +473,14 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
                 Permissions
               </legend>
               <p class="mt-1 text-[11px] leading-4 text-muted-foreground/75">
-                Choose how each runtime handles workspace actions.
+                Approval prompts are separate from Isolation and the Agent
+                Settings sandbox, which control file and network access.
               </p>
+              <Show when={permissionsLoading()}>
+                <span class="mt-1 block text-[10px] text-cyan-200/65">
+                  Loading runtime modes…
+                </span>
+              </Show>
               <div class="mt-3 grid gap-3">
                 <For each={selectedAgentTypes()}>
                   {(agentType) => {
@@ -446,7 +490,9 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
                       <label class="grid gap-1.5">
                         <span class="flex items-center gap-2 text-[10px] font-medium text-muted-foreground">
                           <ProviderIcon provider={agentType} size={13} />
-                          {agentDefinition(agentType).label}
+                          {agentType === "claude-codex"
+                            ? "Claude + Codex · Codex executor"
+                            : agentDefinition(agentType).label}
                         </span>
                         <select
                           data-testid={`run-permission-${agentType}`}
@@ -457,7 +503,7 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
                           }
                           class="min-w-0 rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10 disabled:cursor-not-allowed disabled:opacity-55"
                         >
-                          <For each={MISSION_PERMISSION_OPTIONS[agentType]}>
+                          <For each={permissionCatalogs[agentType].options}>
                             {(option) => (
                               <option value={option.value}>
                                 {option.label}
@@ -465,6 +511,20 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
                             )}
                           </For>
                         </select>
+                        <Show when={selectedPermissionDescription(agentType)}>
+                          {(description) => (
+                            <span class="text-[10px] leading-4 text-muted-foreground/65">
+                              {description()}
+                            </span>
+                          )}
+                        </Show>
+                        <Show when={permissionCatalogs[agentType].note}>
+                          {(note) => (
+                            <span class="text-[10px] leading-4 text-amber-200/70">
+                              {note()}
+                            </span>
+                          )}
+                        </Show>
                       </label>
                     );
                   }}

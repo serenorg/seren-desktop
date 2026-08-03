@@ -620,24 +620,32 @@ function buildModeState(currentModeId) {
       {
         modeId: "default",
         name: "Default",
-        description: "Standard behavior",
+        description: "Ask before actions unless a tool is already allowed",
       },
       {
         modeId: "acceptEdits",
         name: "Accept Edits",
-        description: "Auto-accept file edit operations",
+        description: "Auto-approve file edits and ask before other tools",
       },
       {
         modeId: "plan",
         name: "Plan Mode",
-        description: "Planning mode; no actual tool execution",
+        description: "Deny tool execution and return a plan",
       },
       {
         modeId: "bypassPermissions",
         name: "Bypass Permissions",
-        description: "Auto-approve all operations",
+        description: "Auto-approve all tools for this session",
       },
     ],
+  };
+}
+
+function buildPermissionCatalog({ approvalPolicy } = {}) {
+  const state = buildModeState(claudeModeFromApprovalPolicy(approvalPolicy));
+  return {
+    defaultModeId: state.currentModeId,
+    modes: state.availableModes,
   };
 }
 
@@ -3765,6 +3773,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     setModel,
     listSessionModels,
     listCliModels,
+    getPermissionCatalog: buildPermissionCatalog,
     setConfigOption,
     forkSession,
     buildSyntheticTranscript,

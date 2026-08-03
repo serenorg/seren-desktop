@@ -97,9 +97,9 @@ async function main(): Promise<void> {
     };
     const cliHome = process.env.SEREN_VALIDATION_CLI_HOME?.trim();
     if (cliHome) {
-      childEnv.HOME = cliHome;
+      childEnv.SEREN_VALIDATION_CLI_HOME = cliHome;
       console.log(
-        "[validate:walkthrough] using the signed-in host CLI home; app data remains isolated",
+        "[validate:walkthrough] exposing the signed-in host home to local provider probes only; app data and Keychain remain isolated",
       );
     }
     console.log(`[validate:walkthrough] scratch home ${validationHome}`);
