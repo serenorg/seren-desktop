@@ -2,6 +2,7 @@ import net from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildSerenPublisherRequest,
+  createGmailSendConfirmationTracker,
   createSerenMcpOAuthProxy,
   planSerenMcpRequest,
 } from "../../bin/browser-local/seren-mcp-oauth-proxy.mjs";
@@ -188,6 +189,9 @@ describe("native Codex Seren MCP OAuth routing", () => {
   });
 
   it("preserves an explicit selector and fails closed while ambiguous or initializing", () => {
+    const confirmation = createGmailSendConfirmationTracker();
+    confirmation.setUserTurnId("turn-1");
+    confirmation.noteProfileVerified("conn-confirmed");
     expect(
       planSerenMcpRequest(
         { publishers: {}, ambiguous: { gmail: "Choose an account" } },
@@ -213,6 +217,7 @@ describe("native Codex Seren MCP OAuth routing", () => {
           connection_id: "conn-auto",
           _seren_auto_connection_id: true,
         }),
+        confirmation,
       ),
     ).toMatchObject({
       kind: "publisher",
@@ -235,11 +240,29 @@ describe("native Codex Seren MCP OAuth routing", () => {
 
     expect(
       planSerenMcpRequest(
+        { publishers: { gmail: "conn-auto" }, ambiguous: {} },
+        callPublisher({
+          publisher: "gmail",
+          tool: "post_send",
+          connection_id: "conn-confirmed",
+        }),
+        confirmation,
+      ),
+    ).toMatchObject({
+      kind: "error",
+      response: { result: { isError: true } },
+    });
+
+    confirmation.setUserTurnId("turn-2");
+
+    expect(
+      planSerenMcpRequest(
         { publishers: {}, ambiguous: {}, available: true },
         callPublisher({
           publisher: "gmail",
           tool: "post_send",
         }),
+        confirmation,
       ),
     ).toMatchObject({
       kind: "error",
@@ -255,6 +278,7 @@ describe("native Codex Seren MCP OAuth routing", () => {
           path: "/drafts/draft-safe/send?mode=send",
           connection_id: "conn-confirmed",
         }),
+        confirmation,
       ),
     ).toMatchObject({
       kind: "publisher",
@@ -334,6 +358,113 @@ describe("native Codex Seren MCP OAuth routing", () => {
         publisher: "gmail",
         connectionId: "conn-selected",
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await proxy.close();
+    }
+  });
+
+  it("blocks a native Gmail send until profile verification is followed by a later human turn", async () => {
+    const originalFetch = globalThis.fetch;
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { body: { emailAddress: "selected@example.test" } },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "message-safe" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    globalThis.fetch = upstreamFetch as typeof fetch;
+    const proxy = await createSerenMcpOAuthProxy({
+      gatewayUrl: "https://mcp.invalid/mcp",
+      apiUrl: "https://api.invalid",
+    });
+    const call = async (args: Record<string, unknown>) => {
+      const response = await originalFetch(proxy.url, {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer desktop-key",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(callPublisher(args)),
+      });
+      const event = (await response.text())
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      return JSON.parse(event?.slice(6) ?? "null");
+    };
+
+    try {
+      proxy.setRouting({
+        publishers: { gmail: "conn-selected" },
+        ambiguous: {},
+        accounts: {
+          gmail: {
+            providerSlug: "google",
+            providerName: "Google",
+            activeConnectionId: "conn-selected",
+            selectionSource: "thread",
+            connections: [
+              {
+                connectionId: "conn-selected",
+                label: "selected@example.test",
+                isDefault: true,
+              },
+            ],
+          },
+        },
+        userTurnId: "turn-1",
+      });
+      const profile = await call({
+        publisher: "gmail",
+        tool: "get_profile",
+        connection_id: "conn-selected",
+        tool_args: {},
+      });
+      const sameTurnSend = await call({
+        publisher: "gmail",
+        tool: "post_send",
+        connection_id: "conn-selected",
+        tool_args: {
+          to: ["recipient@example.test"],
+          subject: "Account confirmation regression",
+          body: "Safe test body",
+        },
+      });
+
+      expect(profile.result.isError).toBe(false);
+      expect(sameTurnSend.result.isError).toBe(true);
+      expect(upstreamFetch).toHaveBeenCalledTimes(1);
+
+      proxy.setRouting({
+        publishers: { gmail: "conn-selected" },
+        ambiguous: {},
+        userTurnId: "turn-2",
+      });
+      const laterTurnSend = await call({
+        publisher: "gmail",
+        tool: "post_send",
+        connection_id: "conn-selected",
+        tool_args: {
+          to: ["recipient@example.test"],
+          subject: "Account confirmation regression",
+          body: "Safe test body",
+        },
+      });
+
+      expect(laterTurnSend.result.isError).toBe(false);
+      expect(upstreamFetch).toHaveBeenCalledTimes(2);
     } finally {
       globalThis.fetch = originalFetch;
       await proxy.close();

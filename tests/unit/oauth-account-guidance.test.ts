@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOAuthAccountConfirmationInstruction,
+  extractGmailProfileEmail,
+  gmailProfileMatchesConnection,
   isGmailSendTool,
   OAUTH_ACCOUNT_GUIDANCE_HEADER,
 } from "@/lib/agent/oauth-account-guidance";
@@ -57,6 +59,7 @@ describe("OAuth account confirmation guidance (#3589)", () => {
       "The original request to send is not sender confirmation",
     );
     expect(guidance).toContain("gmail/get_profile");
+    expect(guidance).toContain("same human turn");
     expect(guidance).toContain("top-level connection_id");
     expect(guidance).toContain("Never expose");
   });
@@ -70,5 +73,35 @@ describe("OAuth account confirmation guidance (#3589)", () => {
         available: true,
       }),
     ).toBeNull();
+  });
+
+  it("accepts only a profile identity that matches the selected connected account", () => {
+    expect(
+      extractGmailProfileEmail(
+        [
+          {
+            type: "text",
+            text: JSON.stringify({
+              data: { body: { emailAddress: "primary@example.test" } },
+            }),
+          },
+        ],
+      ),
+    ).toBe("primary@example.test");
+    expect(
+      gmailProfileMatchesConnection(
+        routing,
+        "conn-primary",
+        "PRIMARY@example.test",
+      ),
+    ).toBe(true);
+    expect(
+      gmailProfileMatchesConnection(
+        routing,
+        "conn-primary",
+        "secondary@example.test",
+      ),
+    ).toBe(false);
+    expect(extractGmailProfileEmail({ status: "ok" })).toBeNull();
   });
 });

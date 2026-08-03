@@ -619,9 +619,24 @@ created if missing.",
             system_parts.push(skill_content.to_string());
         }
         // Tone and behavior rules — must match JS path TONE_INSTRUCTIONS in
-        // src/services/chat.ts. Appended last so the model reads them after
-        // the tool inventory it is allowed to use.
+        // src/services/chat.ts.
         system_parts.push(TONE_INSTRUCTIONS.to_string());
+
+        // Providers disagree about whether later `role: "system"` messages
+        // retain system priority. Merge dynamic system context (memory,
+        // compacted summaries, and safety guidance such as connected-account
+        // confirmation) into the one primary system message so every model
+        // receives the same instruction hierarchy.
+        for message in conversation_context {
+            if message.get("role").and_then(|role| role.as_str()) != Some("system") {
+                continue;
+            }
+            if let Some(content) = message.get("content").and_then(|content| content.as_str()) {
+                if !content.trim().is_empty() {
+                    system_parts.push(content.to_string());
+                }
+            }
+        }
         let system_content = system_parts.join("\n\n");
 
         messages.push(serde_json::json!({
@@ -631,6 +646,11 @@ created if missing.",
 
         // Conversation history
         for msg in conversation_context {
+            if msg.get("role").and_then(|role| role.as_str()) == Some("system")
+                && msg.get("content").and_then(|content| content.as_str()).is_some()
+            {
+                continue;
+            }
             messages.push(msg.clone());
         }
 
@@ -2564,6 +2584,59 @@ mod tests {
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[1]["content"], "previous message");
         assert_eq!(messages[2]["content"], "Hello world");
+    }
+
+    #[test]
+    fn merges_dynamic_system_context_into_primary_system_prompt() {
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "meta-llama/llama-3.3-70b-instruct".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            project_root: None,
+        };
+        let dynamic_guidance =
+            "# Seren connected-account confirmation\n\nConfirm the Gmail sender and stop.";
+        let context = vec![
+            serde_json::json!({"role": "system", "content": dynamic_guidance}),
+            serde_json::json!({"role": "user", "content": "Earlier request"}),
+            serde_json::json!({"role": "assistant", "content": "Earlier response"}),
+        ];
+
+        let body = worker.build_request_body(
+            "Send the message",
+            &context,
+            &routing,
+            "",
+            &[],
+            &[],
+            None,
+        );
+        let messages = body["messages"].as_array().unwrap();
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|message| message["role"] == "system")
+                .count(),
+            1,
+            "providers must receive one authoritative system message"
+        );
+        assert!(
+            messages[0]["content"]
+                .as_str()
+                .unwrap()
+                .contains(dynamic_guidance),
+            "dynamic account guidance must retain system priority"
+        );
+        assert_eq!(messages[1]["content"], "Earlier request");
+        assert_eq!(messages[2]["content"], "Earlier response");
+        assert_eq!(messages[3]["content"], "Send the message");
     }
 
     #[test]

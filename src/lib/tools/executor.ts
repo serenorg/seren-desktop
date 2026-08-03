@@ -3,7 +3,11 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { isGmailSendTool } from "@/lib/agent/oauth-account-guidance";
+import {
+  extractGmailProfileEmail,
+  gmailProfileMatchesConnection,
+  isGmailSendTool,
+} from "@/lib/agent/oauth-account-guidance";
 import { mcpClient } from "@/lib/mcp/client";
 import { isOAuthTokenError } from "@/lib/oauth-tool-errors";
 import type { ToolCall, ToolResult } from "@/lib/providers/types";
@@ -25,6 +29,11 @@ import {
 import { startShellProgressListener } from "@/services/shell-progress";
 import { x402Service } from "@/services/x402";
 import { conversationStore } from "@/stores/conversation.store";
+import {
+  hasConfirmedGmailSenderForTurn,
+  markGmailSenderConfirmed,
+  noteGmailSenderProfileVerified,
+} from "@/stores/gmail-send-confirmation.store";
 import { setThreadOAuthConnectionId } from "@/stores/oauth-account.store";
 import { parseGatewayToolName, parseMcpToolName } from "./definitions";
 
@@ -1452,31 +1461,49 @@ async function executeGatewayTool(
 ): Promise<ToolResult> {
   try {
     let callArgs = args;
+    const threadId = conversationId ?? conversationStore.activeConversationId;
+    const tracksGmailSenderConfirmation =
+      publisherSlug.toLowerCase() === "gmail" &&
+      (toolName.toLowerCase() === "get_profile" ||
+        isGmailSendTool(publisherSlug, toolName));
+    const userTurnId =
+      threadId && tracksGmailSenderConfirmation
+        ? ([...(conversationStore.getMessagesFor?.(threadId) ?? [])]
+            .reverse()
+            .find((message) => message.role === "user")?.id ?? null)
+        : null;
     const explicitConnectionId =
       typeof args.connection_id === "string" && args.connection_id.trim()
         ? args.connection_id.trim()
         : null;
+    let dispatchedConnectionId = explicitConnectionId;
+    const gmailSendIsBlocked = (
+      connectionId: string | null | undefined,
+    ): boolean =>
+      isGmailSendTool(publisherSlug, toolName) &&
+      (!connectionId ||
+        !hasConfirmedGmailSenderForTurn(threadId, connectionId, userTurnId));
+    const blockedGmailSendResult = (): ToolResult => ({
+      tool_call_id: toolCallId,
+      content:
+        "Gmail send blocked: first call gmail/get_profile with the intended account's top-level connection_id, name the verified sender, ask the user to confirm or change it, and wait for a later reply from the user. A model-supplied selector cannot confirm a sender on the same human turn.",
+      is_error: true,
+    });
 
-    if (isGmailSendTool(publisherSlug, toolName) && !explicitConnectionId) {
-      return {
-        tool_call_id: toolCallId,
-        content:
-          "Gmail send blocked: name the currently active sender account, ask the user to confirm or change it, wait for a later reply, then retry with the confirmed account's top-level connection_id.",
-        is_error: true,
-      };
+    if (gmailSendIsBlocked(explicitConnectionId)) {
+      return blockedGmailSendResult();
     }
 
     const persistExplicitSelection = async (
       isError: boolean,
     ): Promise<void> => {
-      if (isError || !explicitConnectionId) return;
-      const threadId = conversationId ?? conversationStore.activeConversationId;
+      if (isError || !dispatchedConnectionId) return;
       if (!threadId) return;
       const resolution = await resolveOAuthProviderForPublisher(publisherSlug);
       setThreadOAuthConnectionId(
         threadId,
         resolution.providerSlug,
-        explicitConnectionId,
+        dispatchedConnectionId,
       );
     };
 
@@ -1497,7 +1524,14 @@ async function executeGatewayTool(
     const authHandle = auth.handle;
 
     if (auth.connectionId) {
+      dispatchedConnectionId = auth.connectionId;
       callArgs = { ...args, connection_id: auth.connectionId };
+    }
+    // The approval UI can select a different connected account. Re-check the
+    // actual dispatch selector so approving account A cannot authorize an
+    // unverified account B after the model-facing guard has passed.
+    if (gmailSendIsBlocked(dispatchedConnectionId)) {
+      return blockedGmailSendResult();
     }
 
     const resolvedArgs = await resolveGatewayOAuthConnectionArgs(
@@ -1521,6 +1555,36 @@ async function executeGatewayTool(
       callArgs,
       authHandle,
     );
+
+    if (
+      !response.is_error &&
+      publisherSlug.toLowerCase() === "gmail" &&
+      toolName.toLowerCase() === "get_profile" &&
+      dispatchedConnectionId
+    ) {
+      const profileEmail = extractGmailProfileEmail(response.result);
+      const routing = await computeAgentOAuthRouting(threadId);
+      if (
+        !profileEmail ||
+        !gmailProfileMatchesConnection(
+          routing,
+          dispatchedConnectionId,
+          profileEmail,
+        )
+      ) {
+        return {
+          tool_call_id: toolCallId,
+          content:
+            "Gmail sender verification failed: get_profile did not return the email address for the selected connected account. No sender confirmation was recorded.",
+          is_error: true,
+        };
+      }
+      noteGmailSenderProfileVerified(
+        threadId,
+        dispatchedConnectionId,
+        userTurnId,
+      );
+    }
 
     // Check if this is a payment proxy response (requires client-side signing)
     if (response.is_error && response.payment_proxy) {
@@ -1642,6 +1706,12 @@ async function executeGatewayTool(
           await settleLeaseSpend(reservationId, charge.micros);
         }
         await persistExplicitSelection(retryResponse.is_error);
+        if (
+          !retryResponse.is_error &&
+          isGmailSendTool(publisherSlug, toolName)
+        ) {
+          markGmailSenderConfirmed(threadId, dispatchedConnectionId);
+        }
 
         const retryContent =
           typeof retryResponse.result === "string"
@@ -1676,6 +1746,12 @@ async function executeGatewayTool(
           await settleLeaseSpend(reservationId, charge.micros);
         }
         await persistExplicitSelection(retryResponse.is_error);
+        if (
+          !retryResponse.is_error &&
+          isGmailSendTool(publisherSlug, toolName)
+        ) {
+          markGmailSenderConfirmed(threadId, dispatchedConnectionId);
+        }
 
         const retryContent =
           typeof retryResponse.result === "string"
@@ -1704,6 +1780,9 @@ async function executeGatewayTool(
     }
 
     await persistExplicitSelection(response.is_error);
+    if (!response.is_error && isGmailSendTool(publisherSlug, toolName)) {
+      markGmailSenderConfirmed(threadId, dispatchedConnectionId);
+    }
 
     return {
       tool_call_id: toolCallId,

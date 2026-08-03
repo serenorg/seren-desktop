@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   emit: vi.fn(),
   listen: vi.fn(),
   invoke: vi.fn(),
+  getMessagesFor: vi.fn(),
   startShellProgressListener: vi.fn(),
   handlePaymentRequired: vi.fn(),
 }));
@@ -25,6 +26,7 @@ vi.mock("@/services/publisher-oauth", () => ({
 vi.mock("@/stores/conversation.store", () => ({
   conversationStore: {
     activeConversationId: "thread-1",
+    getMessagesFor: mocks.getMessagesFor,
   },
 }));
 
@@ -53,6 +55,16 @@ describe("tool executor OAuth account routing", () => {
     const { setThreadOAuthConnectionId } = await import(
       "@/stores/oauth-account.store"
     );
+    const { resetGmailSenderConfirmationsForTests } = await import(
+      "@/stores/gmail-send-confirmation.store"
+    );
+    resetGmailSenderConfirmationsForTests();
+    mocks.getMessagesFor.mockImplementation((threadId: string) => [
+      {
+        id: `${threadId}-user-turn-1`,
+        role: "user",
+      },
+    ]);
     setThreadOAuthConnectionId("thread-1", "google", null);
     setThreadOAuthConnectionId("thread-2", "google", null);
     mocks.computeAgentOAuthRouting.mockResolvedValue({
@@ -156,12 +168,135 @@ describe("tool executor OAuth account routing", () => {
     expect(mocks.callGatewayTool).not.toHaveBeenCalled();
   });
 
+  it("rejects a model-supplied selector on the same human turn", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.callGatewayTool.mockResolvedValueOnce({
+      result: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            data: { emailAddress: "selected@example.test" },
+          }),
+        },
+      ],
+      is_error: false,
+    });
+
+    const profile = await executeTool({
+      id: "tool-call-profile-same-turn",
+      type: "function",
+      function: {
+        name: "gateway__gmail__get_profile",
+        arguments: JSON.stringify({
+          connection_id: "conn-google-copied",
+        }),
+      },
+    });
+    const send = await executeTool({
+      id: "tool-call-send-same-turn",
+      type: "function",
+      function: {
+        name: "gateway__gmail__post_messages_send",
+        arguments: JSON.stringify({
+          connection_id: "conn-google-copied",
+          to: ["recipient@example.test"],
+          subject: "Account confirmation regression",
+          body: "Safe test body",
+        }),
+      },
+    });
+
+    expect(profile.is_error).toBe(false);
+    expect(send.is_error).toBe(true);
+    expect(send.content).toContain("same human turn");
+    expect(mocks.callGatewayTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not checkpoint a profile identity that mismatches the selected account", async () => {
+    const { executeTool } = await import("@/lib/tools/executor");
+    mocks.computeAgentOAuthRouting.mockResolvedValue({
+      publishers: { gmail: "conn-google-selected" },
+      ambiguous: {},
+      accounts: {
+        gmail: {
+          providerSlug: "google",
+          providerName: "Google",
+          activeConnectionId: "conn-google-selected",
+          selectionSource: "thread",
+          connections: [
+            {
+              connectionId: "conn-google-selected",
+              label: "selected@example.test",
+              isDefault: true,
+            },
+          ],
+        },
+      },
+      available: true,
+    });
+    mocks.callGatewayTool.mockResolvedValueOnce({
+      result: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            data: { emailAddress: "different@example.test" },
+          }),
+        },
+      ],
+      is_error: false,
+    });
+
+    const profile = await executeTool({
+      id: "tool-call-profile-mismatch",
+      type: "function",
+      function: {
+        name: "gateway__gmail__get_profile",
+        arguments: JSON.stringify({
+          connection_id: "conn-google-selected",
+        }),
+      },
+    });
+    mocks.getMessagesFor.mockReturnValue([
+      { id: "thread-1-user-turn-1", role: "user" },
+      { id: "thread-1-user-turn-2", role: "user" },
+    ]);
+    const send = await executeTool({
+      id: "tool-call-send-after-mismatch",
+      type: "function",
+      function: {
+        name: "gateway__gmail__post_messages_send",
+        arguments: JSON.stringify({
+          connection_id: "conn-google-selected",
+          to: ["recipient@example.test"],
+          subject: "Profile mismatch regression",
+          body: "Safe test body",
+        }),
+      },
+    });
+
+    expect(profile.is_error).toBe(true);
+    expect(profile.content).toContain("verification failed");
+    expect(send.is_error).toBe(true);
+    expect(mocks.callGatewayTool).toHaveBeenCalledTimes(1);
+  });
+
   it("persists a successful explicit chat selection to the owning thread", async () => {
     const [{ executeTool }, { getThreadOAuthConnectionId }] =
       await Promise.all([
         import("@/lib/tools/executor"),
         import("@/stores/oauth-account.store"),
       ]);
+    mocks.callGatewayTool.mockResolvedValueOnce({
+      result: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            data: { emailAddress: "selected@example.test" },
+          }),
+        },
+      ],
+      is_error: false,
+    });
 
     const result = await executeTool(
       {
@@ -185,6 +320,38 @@ describe("tool executor OAuth account routing", () => {
 
   it("forwards a top-level selector through built-in call_publisher sends", async () => {
     const { executeTool } = await import("@/lib/tools/executor");
+    mocks.callGatewayTool.mockResolvedValueOnce({
+      result: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            data: { emailAddress: "selected@example.test" },
+          }),
+        },
+      ],
+      is_error: false,
+    });
+
+    await executeTool(
+      {
+        id: "tool-call-generic-profile",
+        type: "function",
+        function: {
+          name: "seren__call_publisher",
+          arguments: JSON.stringify({
+            publisher: "gmail",
+            tool: "get_profile",
+            connection_id: "conn-google-confirmed",
+            tool_args: {},
+          }),
+        },
+      },
+      "thread-2",
+    );
+    mocks.getMessagesFor.mockImplementation((threadId: string) => [
+      { id: `${threadId}-user-turn-1`, role: "user" },
+      { id: `${threadId}-user-turn-2`, role: "user" },
+    ]);
 
     const result = await executeTool(
       {
