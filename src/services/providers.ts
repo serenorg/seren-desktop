@@ -905,12 +905,21 @@ export async function getAvailableAgents(): Promise<AgentInfo[]> {
 
 /** Read the installed agent CLI's own model catalog without starting a turn. */
 export async function getAgentModelCatalog(
-  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+  agentType: Exclude<AgentType, "claude-codex">,
   cwd: string,
+  options: {
+    lmStudioBaseUrl?: string;
+    lmStudioApiKey?: string;
+  } = {},
 ): Promise<AgentModelCatalogEntry[]> {
   return invokeProvider<AgentModelCatalogEntry[]>(
     "provider_get_model_catalog",
-    { agentType, cwd },
+    {
+      agentType,
+      cwd,
+      lmStudioBaseUrl: options.lmStudioBaseUrl,
+      lmStudioApiKey: options.lmStudioApiKey ?? null,
+    },
     { timeoutMs: 120_000 },
   );
 }

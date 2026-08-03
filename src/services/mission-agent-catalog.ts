@@ -18,7 +18,6 @@ import {
   type AgentType,
   getAgentModelCatalog,
   getAgentPermissionCatalog,
-  testLmStudioConnection,
 } from "@/services/providers";
 import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { authStore } from "@/stores/auth.store";
@@ -142,6 +141,32 @@ export function createEmptyMissionModelCatalogs(): Record<
   return Object.fromEntries(
     MISSION_MODEL_TARGETS.map((target) => [target, { models: [], note: null }]),
   ) as unknown as Record<MissionModelTarget, MissionModelCatalog>;
+}
+
+export function missionModelTargetsToLoad(
+  loadedAuthState: boolean | null,
+  authenticated: boolean,
+  catalogs: Record<MissionModelTarget, MissionModelCatalog>,
+): readonly MissionModelTarget[] {
+  if (
+    loadedAuthState !== authenticated ||
+    !MISSION_MODEL_TARGETS.some((target) => catalogs[target].models.length > 0)
+  ) {
+    return MISSION_MODEL_TARGETS;
+  }
+  return catalogs.lmstudio.models.length === 0 ? ["lmstudio"] : [];
+}
+
+export function resolveMissionModelSelection(
+  target: MissionModelTarget,
+  currentModelId: string,
+  catalog: MissionModelCatalog,
+): string {
+  if (target !== "lmstudio") return currentModelId;
+  if (catalog.models.some((model) => model.id === currentModelId)) {
+    return currentModelId;
+  }
+  return catalog.models[0]?.id ?? "";
 }
 
 export function createEmptyMissionPermissionCatalogs(): Record<
@@ -380,26 +405,23 @@ export async function loadMissionModelCatalog(
 
   if (target === "lmstudio") {
     try {
-      const result = await testLmStudioConnection(
-        settingsStore.get("lmStudioBaseUrl"),
-        settingsStore.get("lmStudioApiKey"),
-      );
-      const models = (result.models ?? []).map((model) => ({
-        id: model.modelId,
-        name: model.name,
-        description: model.description,
-      }));
+      const models = (
+        await getAgentModelCatalog("lmstudio", cwd, {
+          lmStudioBaseUrl: settingsStore.get("lmStudioBaseUrl"),
+          lmStudioApiKey: settingsStore.get("lmStudioApiKey"),
+        })
+      ).map(toMissionModel);
       return {
         models: mergeMissionModels(models),
         note:
           models.length > 0
             ? null
-            : "Start LM Studio and load a model to pin one here.",
+            : "Download a chat model in LM Studio to use it here.",
       };
     } catch {
       return {
         models: [],
-        note: "Start LM Studio to load models downloaded on this device.",
+        note: "The LM Studio model catalog could not be loaded. Reopen Advanced controls to retry.",
       };
     }
   }

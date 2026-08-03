@@ -2,7 +2,7 @@
 // ABOUTME: Pins URL handling, OpenAI tool-call normalization, and MCP credential separation.
 
 import { readSource } from "./source-text";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // @ts-ignore - browser-local runtime is plain ESM.
 import * as lmStudioRuntime from "../../bin/browser-local/lmstudio-runtime.mjs";
 
@@ -10,6 +10,7 @@ const {
   buildLmStudioChatCompletionBodyForContextBudget,
   buildLmStudioPromptForContextBudget,
   buildLmsExecInvocation,
+  discoverLmStudioModels,
   isLmStudioContextOverflowError,
   isLmStudioModelToolIncompatible,
   isLoopbackLmStudioBaseUrl,
@@ -18,6 +19,7 @@ const {
   lmStudioWsBaseUrl,
   markLmStudioModelToolIncompatible,
   normalizeLmStudioBaseUrl,
+  normalizeLmStudioDownloadedModels,
   normalizeOpenAiToolName,
   normalizeToolCalls,
   prepareLmStudioMessagesForContextBudget,
@@ -56,6 +58,14 @@ const {
     args: string[],
     platform?: NodeJS.Platform,
   ) => { command: string; args: string[] };
+  discoverLmStudioModels: (
+    options: { baseUrl?: string; apiKey?: string },
+    dependencies?: {
+      probe?: (...args: unknown[]) => Promise<boolean>;
+      listFromSdk?: (baseUrl: string) => Promise<unknown[]>;
+      listFromLms?: () => Promise<unknown[]>;
+    },
+  ) => Promise<unknown[]>;
   isLmStudioContextOverflowError: (message: unknown) => boolean;
   isLmStudioModelToolIncompatible: (
     session: {
@@ -77,6 +87,9 @@ const {
   lmStudioHttpBaseUrl: (value: string) => string;
   lmStudioWsBaseUrl: (value: string) => string;
   normalizeLmStudioBaseUrl: (value: string) => string;
+  normalizeLmStudioDownloadedModels: (
+    models: Array<Record<string, unknown>>,
+  ) => Array<{ modelId: string; name: string; description?: string }>;
   normalizeOpenAiToolName: (value: string) => string;
   normalizeToolCalls: (
     accumulator: Map<
@@ -112,6 +125,83 @@ describe("LM Studio runtime helpers", () => {
     expect(isLoopbackLmStudioBaseUrl("http://localhost:1234")).toBe(true);
     expect(isLoopbackLmStudioBaseUrl("http://127.0.0.1:1234")).toBe(true);
     expect(isLoopbackLmStudioBaseUrl("http://192.168.1.20:1234")).toBe(false);
+  });
+
+  it("normalizes downloaded LLMs and excludes non-chat models", () => {
+    expect(
+      normalizeLmStudioDownloadedModels([
+        {
+          type: "llm",
+          modelKey: " qwen/local-model ",
+          displayName: "Local model",
+          paramsString: "7B",
+          quantization: { name: "Q4_K_M" },
+          sizeBytes: 4 * 1024 * 1024 * 1024,
+        },
+        {
+          type: "embedding",
+          modelKey: "embedding-model",
+          displayName: "Embedding model",
+        },
+      ]),
+    ).toEqual([
+      {
+        modelId: "qwen/local-model",
+        name: "Local model",
+        description: "7B • Q4_K_M • 4.0 GB",
+      },
+    ]);
+  });
+
+  it("uses the live SDK catalog when the configured server is reachable", async () => {
+    const listFromSdk = vi.fn(async () => [{ modelId: "sdk-model" }]);
+    const listFromLms = vi.fn(async () => [{ modelId: "cli-model" }]);
+
+    await expect(
+      discoverLmStudioModels(
+        { baseUrl: "http://localhost:1234" },
+        {
+          probe: vi.fn(async () => true),
+          listFromSdk,
+          listFromLms,
+        },
+      ),
+    ).resolves.toEqual([{ modelId: "sdk-model" }]);
+    expect(listFromSdk).toHaveBeenCalledWith("http://localhost:1234");
+    expect(listFromLms).not.toHaveBeenCalled();
+  });
+
+  it("falls back to lms for a stopped loopback server without starting it", async () => {
+    const listFromSdk = vi.fn(async () => [{ modelId: "sdk-model" }]);
+    const listFromLms = vi.fn(async () => [{ modelId: "cli-model" }]);
+
+    await expect(
+      discoverLmStudioModels(
+        { baseUrl: "http://127.0.0.1:1234" },
+        {
+          probe: vi.fn(async () => false),
+          listFromSdk,
+          listFromLms,
+        },
+      ),
+    ).resolves.toEqual([{ modelId: "cli-model" }]);
+    expect(listFromSdk).not.toHaveBeenCalled();
+    expect(listFromLms).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose local models for an unreachable LAN server", async () => {
+    const listFromLms = vi.fn(async () => [{ modelId: "cli-model" }]);
+
+    await expect(
+      discoverLmStudioModels(
+        { baseUrl: "http://192.168.1.20:1234" },
+        {
+          probe: vi.fn(async () => false),
+          listFromLms,
+        },
+      ),
+    ).rejects.toThrow("not reachable");
+    expect(listFromLms).not.toHaveBeenCalled();
   });
 
   it("maps MCP names into OpenAI function names", () => {

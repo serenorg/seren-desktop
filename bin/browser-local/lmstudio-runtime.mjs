@@ -327,9 +327,15 @@ async function waitForServer(baseUrl, apiKey, timeoutMs = 15_000) {
 }
 
 function modelDescription(model) {
+  const quantization =
+    typeof model.quantization === "string"
+      ? model.quantization
+      : typeof model.quantization?.name === "string"
+        ? model.quantization.name
+        : null;
   const parts = [
     model.paramsString,
-    typeof model.quantization === "string" ? model.quantization : null,
+    quantization,
     typeof model.sizeBytes === "number"
       ? `${(model.sizeBytes / 1024 / 1024 / 1024).toFixed(1)} GB`
       : null,
@@ -337,15 +343,77 @@ function modelDescription(model) {
   return parts.length > 0 ? parts.join(" • ") : undefined;
 }
 
-async function listDownloadedModels(client) {
-  const models = await client.system.listDownloadedModels("llm");
+export function normalizeLmStudioDownloadedModels(models) {
+  if (!Array.isArray(models)) return [];
   return models
+    .filter((model) => model?.type == null || model.type === "llm")
     .map((model) => ({
-      modelId: model.modelKey,
-      name: model.displayName ?? model.modelKey,
+      modelId: typeof model.modelKey === "string" ? model.modelKey.trim() : "",
+      name:
+        typeof model.displayName === "string" && model.displayName.trim().length > 0
+          ? model.displayName.trim()
+          : typeof model.modelKey === "string"
+            ? model.modelKey.trim()
+            : "",
       description: modelDescription(model),
     }))
     .filter((model) => typeof model.modelId === "string" && model.modelId.length > 0);
+}
+
+async function listDownloadedModels(client) {
+  return normalizeLmStudioDownloadedModels(
+    await client.system.listDownloadedModels("llm"),
+  );
+}
+
+async function listDownloadedModelsFromSdk(baseUrl) {
+  const client = createClient(baseUrl);
+  try {
+    return await listDownloadedModels(client);
+  } finally {
+    await client[Symbol.asyncDispose]?.().catch(() => {});
+  }
+}
+
+async function listDownloadedModelsFromLms() {
+  const binary = resolveLmsBinary();
+  if (!(await isLmsInstalled())) {
+    throw new Error(
+      "LM Studio is not installed. Install LM Studio from https://lmstudio.ai/download.",
+    );
+  }
+  const output = await execText(binary, ["ls", "--llm", "--json"]);
+  let models;
+  try {
+    models = JSON.parse(output);
+  } catch {
+    throw new Error("LM Studio returned an invalid JSON model catalog.");
+  }
+  if (!Array.isArray(models)) {
+    throw new Error("LM Studio returned an invalid model catalog.");
+  }
+  return normalizeLmStudioDownloadedModels(models);
+}
+
+export async function discoverLmStudioModels(
+  { baseUrl, apiKey } = {},
+  {
+    probe = probeServer,
+    listFromSdk = listDownloadedModelsFromSdk,
+    listFromLms = listDownloadedModelsFromLms,
+  } = {},
+) {
+  const resolvedBaseUrl = normalizeLmStudioBaseUrl(baseUrl);
+  const resolvedApiKey = trimToNull(apiKey);
+  if (await probe(resolvedBaseUrl, resolvedApiKey, 3_000)) {
+    return listFromSdk(resolvedBaseUrl);
+  }
+  if (!isLoopbackLmStudioBaseUrl(resolvedBaseUrl)) {
+    throw new Error(
+      `LM Studio server is not reachable at ${resolvedBaseUrl}. Start it on that machine and try again.`,
+    );
+  }
+  return listFromLms();
 }
 
 function safeJsonParse(value, fallback = {}) {
@@ -1821,6 +1889,10 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     }
   }
 
+  async function getModelCatalog({ baseUrl, apiKey }) {
+    return discoverLmStudioModels({ baseUrl, apiKey });
+  }
+
   async function startServer({ baseUrl, apiKey }) {
     const resolvedBaseUrl = normalizeLmStudioBaseUrl(baseUrl);
     if (!isLoopbackLmStudioBaseUrl(resolvedBaseUrl)) {
@@ -1856,6 +1928,7 @@ export function createLmStudioRuntime({ emit, runtimeMode = "provider-runtime" }
     setSessionModel,
     updateSessionConfigOption,
     listRemoteSessions,
+    getModelCatalog,
     getPermissionCatalog: buildLmStudioPermissionCatalog,
     testConnection,
     startServer,

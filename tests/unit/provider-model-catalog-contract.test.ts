@@ -25,4 +25,16 @@ describe("provider model catalog contract", () => {
       expect(source).toContain("providerHandlers.getPermissionCatalog");
     }
   });
+
+  it("routes LM Studio through its read-only runtime catalog", () => {
+    const providerSource = readSource("bin/browser-local/providers.mjs");
+    const lmStudioSource = readSource(
+      "bin/browser-local/lmstudio-runtime.mjs",
+    );
+
+    expect(providerSource).toContain('agentType === "lmstudio"');
+    expect(providerSource).toContain("lmStudioRuntime.getModelCatalog");
+    expect(lmStudioSource).toContain('["ls", "--llm", "--json"]');
+    expect(lmStudioSource).toContain("discoverLmStudioModels");
+  });
 });

@@ -18,6 +18,8 @@ import {
   type MissionPermissionCatalog,
   missionAgentAllowed,
   missionAgentRequiresSignIn,
+  missionModelTargetsToLoad,
+  resolveMissionModelSelection,
 } from "@/services/mission-agent-catalog";
 import { authStore } from "@/stores/auth.store";
 import { fileTreeState } from "@/stores/fileTree";
@@ -99,25 +101,25 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
     );
 
   const loadModelCatalogs = async () => {
-    if (
-      loadedCatalogAuthState === authStore.isAuthenticated &&
-      MISSION_MODEL_TARGETS.some(
-        (target) => modelCatalogs[target].models.length > 0,
-      )
-    ) {
-      return;
-    }
+    const targets = missionModelTargetsToLoad(
+      loadedCatalogAuthState,
+      authStore.isAuthenticated,
+      modelCatalogs,
+    );
+    if (targets.length === 0) return;
     setCatalogsLoading(true);
     loadedCatalogAuthState = authStore.isAuthenticated;
     try {
       await Promise.all(
-        MISSION_MODEL_TARGETS.map(async (target) => {
-          setModelCatalogs(
+        targets.map(async (target) => {
+          const catalog = await loadMissionModelCatalog(
             target,
-            await loadMissionModelCatalog(
-              target,
-              fileTreeState.rootPath ?? ".",
-            ),
+            fileTreeState.rootPath ?? ".",
+          );
+          setModelCatalogs(target, catalog);
+          setModels(
+            target,
+            resolveMissionModelSelection(target, models[target], catalog),
           );
         }),
       );
@@ -211,7 +213,20 @@ export const RunLaunchBox: Component<RunLaunchBoxProps> = (props) => {
         }
         class="min-w-0 rounded-lg border border-border/70 bg-slate-950/60 px-3 py-2 text-xs text-foreground outline-none transition focus:border-cyan-300/60 focus:ring-2 focus:ring-cyan-300/10"
       >
-        <option value="">System default</option>
+        <Show
+          when={
+            pickerProps.target !== "lmstudio" ||
+            modelCatalogs[pickerProps.target].models.length === 0
+          }
+        >
+          <option value="">
+            {pickerProps.target === "lmstudio"
+              ? catalogsLoading()
+                ? "Loading downloaded models…"
+                : "No downloaded chat models"
+              : "System default"}
+          </option>
+        </Show>
         <For each={modelCatalogs[pickerProps.target].models}>
           {(model) => <option value={model.id}>{model.name}</option>}
         </For>

@@ -1,0 +1,23 @@
+{
+  "serverStoppedBefore": true,
+  "serverStoppedAfter": true,
+  "expectedIds": [
+    "qwen/qwen3.6-27b",
+    "ornith-1.0-35b",
+    "gemma-3-1b-it-glm-4.7-flash-heretic-uncensored-thinking_gguf",
+    "google/gemma-4-e4b",
+    "gemma-4-12b-obliterated"
+  ],
+  "renderedIds": [
+    "qwen/qwen3.6-27b",
+    "ornith-1.0-35b",
+    "gemma-3-1b-it-glm-4.7-flash-heretic-uncensored-thinking_gguf",
+    "google/gemma-4-e4b",
+    "gemma-4-12b-obliterated"
+  ],
+  "exactOrder": true,
+  "allOptionsSelected": true,
+  "advancedControlsRefreshes": 1,
+  "pinnedDefaultId": "qwen/qwen3.6-27b",
+  "opaqueSystemDefaultPresent": false
+}

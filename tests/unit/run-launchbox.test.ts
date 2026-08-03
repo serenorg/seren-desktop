@@ -38,7 +38,9 @@ describe("RunLaunchBox", () => {
     expect(launchBoxSource).toContain('data-testid="run-isolation-mode"');
     expect(launchBoxSource).toContain('data-testid="run-max-attempts"');
     expect(launchBoxSource).toContain("run-model-${agentType}");
-    expect(launchBoxSource).toContain('<option value="">System default</option>');
+    expect(launchBoxSource).toContain('pickerProps.target !== "lmstudio"');
+    expect(launchBoxSource).toContain("No downloaded chat models");
+    expect(launchBoxSource).toContain("resolveMissionModelSelection");
     expect(launchBoxSource).toContain("run-model-claude-codex-planner");
     expect(launchBoxSource).toContain("run-model-claude-codex-executor");
     expect(launchBoxSource).not.toContain("Pin an exact runtime model ID");

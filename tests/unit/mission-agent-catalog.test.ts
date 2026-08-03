@@ -54,7 +54,6 @@ vi.mock("@/services/private-models", () => ({
 vi.mock("@/services/providers", () => ({
   getAgentModelCatalog,
   getAgentPermissionCatalog,
-  testLmStudioConnection: vi.fn(async () => ({ ok: true, models: [] })),
 }));
 vi.mock("@/services/seren-model-catalog", () => ({
   getLiveSerenModelCatalog: vi.fn(async () => []),
@@ -79,7 +78,10 @@ import {
   loadMissionPermissionCatalog,
   loadMissionModelCatalog,
   MISSION_AGENT_TYPES,
+  MISSION_MODEL_TARGETS,
   mergeMissionModels,
+  missionModelTargetsToLoad,
+  resolveMissionModelSelection,
 } from "@/services/mission-agent-catalog";
 
 describe("Mission Control agent catalog", () => {
@@ -107,6 +109,7 @@ describe("Mission Control agent catalog", () => {
         loadMissionModelCatalog("grok", "/workspace"),
         loadMissionModelCatalog("claude-codex:planner", "/workspace"),
         loadMissionModelCatalog("claude-codex:executor", "/workspace"),
+        loadMissionModelCatalog("lmstudio", "/workspace"),
       ]),
     ).resolves.toEqual([
       {
@@ -137,9 +140,54 @@ describe("Mission Control agent catalog", () => {
         models: [{ id: "codex-cli-model", name: "codex CLI model" }],
         note: null,
       },
+      {
+        models: [{ id: "lmstudio-cli-model", name: "lmstudio CLI model" }],
+        note: null,
+      },
     ]);
 
-    expect(getAgentModelCatalog).toHaveBeenCalledTimes(4);
+    expect(getAgentModelCatalog).toHaveBeenCalledTimes(5);
+    expect(getAgentModelCatalog).toHaveBeenCalledWith(
+      "lmstudio",
+      "/workspace",
+      {
+        lmStudioBaseUrl: "http://localhost:1234",
+        lmStudioApiKey: "",
+      },
+    );
+  });
+
+  it("pins the first downloaded LM Studio model as the runtime default", () => {
+    const catalog = {
+      models: [
+        { id: "first-model", name: "First model" },
+        { id: "second-model", name: "Second model" },
+      ],
+      note: null,
+    };
+
+    expect(resolveMissionModelSelection("lmstudio", "", catalog)).toBe(
+      "first-model",
+    );
+    expect(
+      resolveMissionModelSelection("lmstudio", "second-model", catalog),
+    ).toBe("second-model");
+    expect(resolveMissionModelSelection("codex", "", catalog)).toBe("");
+  });
+
+  it("retries only an unavailable LM Studio catalog after the initial load", () => {
+    const catalogs = createEmptyMissionModelCatalogs();
+    catalogs.codex.models = [{ id: "codex-model", name: "Codex model" }];
+
+    expect(missionModelTargetsToLoad(null, false, catalogs)).toEqual(
+      MISSION_MODEL_TARGETS,
+    );
+    expect(missionModelTargetsToLoad(false, false, catalogs)).toEqual([
+      "lmstudio",
+    ]);
+
+    catalogs.lmstudio.models = [{ id: "local-model", name: "Local model" }];
+    expect(missionModelTargetsToLoad(false, false, catalogs)).toEqual([]);
   });
 
   it("deduplicates runtime and built-in choices without changing priority", () => {
