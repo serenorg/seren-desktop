@@ -79,16 +79,25 @@ export const MissionControlPanel: Component = () => {
       else unlisten = cleanup;
     });
 
+  });
+
+  // The launch form can appear after mount — hydrateLatest clears a settled
+  // run's stale snapshot and the fallback branch renders — so the overlay
+  // observer attaches from the region's ref, not a one-shot mount hook.
+  const attachLaunchScrollRegion = (element: HTMLDivElement) => {
+    launchScrollRegion = element;
     queueMicrotask(() => {
-      const region = launchScrollRegion;
-      if (!region || disposed) return;
+      if (disposed || launchScrollRegion !== element || !element.isConnected) {
+        return;
+      }
+      launchResizeObserver?.disconnect();
       updateLaunchScroll();
       launchResizeObserver = new ResizeObserver(updateLaunchScroll);
-      launchResizeObserver.observe(region);
-      const content = region.firstElementChild;
+      launchResizeObserver.observe(element);
+      const content = element.firstElementChild;
       if (content) launchResizeObserver.observe(content);
     });
-  });
+  };
 
   onCleanup(() => {
     disposed = true;
@@ -108,7 +117,7 @@ export const MissionControlPanel: Component = () => {
         fallback={
           <div class="relative h-full min-h-0">
             <div
-              ref={launchScrollRegion}
+              ref={attachLaunchScrollRegion}
               data-testid="mission-launch-scroll-region"
               data-scrollable={launchScroll().visible ? "true" : "false"}
               tabindex="0"

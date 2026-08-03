@@ -62,6 +62,11 @@ describe("RunLaunchBox", () => {
     );
     expect(missionControlSource).toContain("new ResizeObserver");
     expect(missionControlSource).toContain("onScroll={updateLaunchScroll}");
+    // The overlay observer must attach whenever the launch region renders —
+    // the form can appear after mount, when hydrateLatest clears a settled
+    // run's stale snapshot, and a one-shot mount hook missed it. #3618
+    expect(missionControlSource).toContain("ref={attachLaunchScrollRegion}");
+    expect(missionControlSource).not.toContain("ref={launchScrollRegion}");
   });
 
   it("sends every editable launch policy to the store", async () => {
