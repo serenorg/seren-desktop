@@ -443,6 +443,34 @@ function isNativeAgentType(agentType: string): agentType is AgentType {
 }
 
 /**
+ * Hosted-model tasks share the native agents' turn cap: a stalled Gateway
+ * stream must fail the attempt and free its dispatch slot instead of holding
+ * the run open forever. The expired stream is abandoned to settle on its own;
+ * only the attempt's outcome is bounded here.
+ */
+function withHostedTaskDeadline(work: Promise<string>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `hosted-model task produced no result within ${Math.round(TURN_WAIT_TIMEOUT_MS / 60_000)} minutes`,
+        ),
+      );
+    }, TURN_WAIT_TIMEOUT_MS);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
  * Use the signed-in Seren model when a launch-box assignment is not backed by
  * a local CLI, or when a local CLI cannot start. The assignment remains the
  * durable source of truth; this fallback keeps a run honest by recording the
@@ -568,23 +596,17 @@ async function dispatchTask(
     let fallbackDetail: string | null = null;
 
     if (assignment.agent_type === "seren") {
-      response = await runSerenChatTask(
-        snapshot.run.objective,
-        task,
-        assignment.model_id,
+      response = await withHostedTaskDeadline(
+        runSerenChatTask(snapshot.run.objective, task, assignment.model_id),
       );
     } else if (assignment.agent_type === "seren-private") {
-      response = await runSerenPrivateTask(
-        snapshot.run.objective,
-        task,
-        assignment.model_id,
+      response = await withHostedTaskDeadline(
+        runSerenPrivateTask(snapshot.run.objective, task, assignment.model_id),
       );
     } else if (!isNativeAgentType(assignment.agent_type)) {
       fallbackDetail = `assignment ${assignment.agent_type} uses the signed-in Seren chat model because no local runtime supports that label`;
-      response = await runSerenChatTask(
-        snapshot.run.objective,
-        task,
-        assignment.model_id,
+      response = await withHostedTaskDeadline(
+        runSerenChatTask(snapshot.run.objective, task, assignment.model_id),
       );
     } else {
       try {
@@ -608,7 +630,9 @@ async function dispatchTask(
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         fallbackDetail = `${assignment.agent_type} local session unavailable; used the signed-in Seren chat model: ${detail}`;
-        response = await runSerenChatTask(snapshot.run.objective, task);
+        response = await withHostedTaskDeadline(
+          runSerenChatTask(snapshot.run.objective, task),
+        );
       }
     }
 
