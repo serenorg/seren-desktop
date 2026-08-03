@@ -3217,7 +3217,7 @@ export const agentStore = {
       (resolvedAgentType === "codex"
         ? "Codex Agent"
         : resolvedAgentType === "gemini"
-          ? "Gemini Agent"
+          ? "Antigravity Agent"
           : resolvedAgentType === "grok"
             ? "Grok Agent"
             : resolvedAgentType === "claude-codex"

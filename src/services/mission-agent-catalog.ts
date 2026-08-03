@@ -70,9 +70,9 @@ export const MISSION_AGENT_DEFINITIONS: readonly MissionAgentDefinition[] = [
   },
   {
     id: "gemini",
-    label: "Gemini",
+    label: "Antigravity",
     source: "Google",
-    description: "Gemini CLI coding agent",
+    description: "Google's Antigravity coding agent",
     defaultSelected: false,
   },
   {

@@ -18,7 +18,7 @@ pub async fn check_cli_installed(tool: CliTool) -> Result<bool, String> {
     let bin_name = match tool {
         CliTool::Claude => "claude",
         CliTool::Codex => "codex",
-        CliTool::Gemini => "gemini",
+        CliTool::Gemini => "agy",
     };
 
     // Try to run --version command
@@ -48,7 +48,7 @@ fn manual_install_url(tool: &CliTool) -> &'static str {
     match tool {
         CliTool::Claude => "https://code.claude.com/docs/en/installation",
         CliTool::Codex => "https://developers.openai.com/codex/cli/",
-        CliTool::Gemini => "https://github.com/google-gemini/gemini-cli",
+        CliTool::Gemini => "https://antigravity.google/docs/cli/getting-started",
     }
 }
 

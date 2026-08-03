@@ -13,6 +13,10 @@ const acpSource = readFileSync(
   resolve("bin/browser-local/acp-runtime.mjs"),
   "utf-8",
 );
+const antigravitySource = readFileSync(
+  resolve("bin/browser-local/gemini-runtime.mjs"),
+  "utf-8",
+);
 
 /** Slice a top-level `async function <name>(` body, bounded by the next
  * `\n  async function ` (sibling closure methods share indent-2). */
@@ -73,5 +77,20 @@ describe("#2304 — ACP cancelPrompt escalates to a hard kill when the agent doe
       body,
       "the kill must be gated on the turn not settling (currentPrompt liveness).",
     ).toContain("currentPrompt");
+  });
+});
+
+describe("#3648 — Antigravity cancelPrompt terminates its process-per-turn child", () => {
+  const body = sliceAsyncFn(
+    antigravitySource,
+    "async function cancelPrompt({ sessionId })",
+  );
+
+  it("marks the active turn cancelled before killing the child", () => {
+    expect(body, "Antigravity cancelPrompt body must be non-empty").not.toBe("");
+    const cancelledAt = body.indexOf("session.cancelled = true");
+    const killAt = body.indexOf("killChildTree(session.process)");
+    expect(cancelledAt).toBeGreaterThan(-1);
+    expect(killAt).toBeGreaterThan(cancelledAt);
   });
 });

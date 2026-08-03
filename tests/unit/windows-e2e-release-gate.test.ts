@@ -547,12 +547,16 @@ describe("Windows production e2e release gate", () => {
     expect(cliSetupAt).toBeLessThan(appHarnessAt);
     expect(taskUserRunner).toContain("@anthropic-ai/claude-code@latest");
     expect(taskUserRunner).toContain("@openai/codex@latest");
-    expect(taskUserRunner).toContain("@google/gemini-cli@latest");
+    expect(taskUserRunner).toContain(
+      "manifests/windows_amd64.json",
+    );
+    expect(taskUserRunner).toContain("Get-FileHash");
+    expect(taskUserRunner).toContain("SHA512");
+    expect(taskUserRunner).toContain('"agy.exe"');
     expect(taskUserRunner).toContain("@xai-official/grok@latest");
     for (const [label, binary] of [
       ["Claude Code", "claude.cmd"],
       ["Codex", "codex.cmd"],
-      ["Gemini", "gemini.cmd"],
       ["Grok", "grok.cmd"],
     ]) {
       expect(taskUserRunner).toContain(

@@ -1,11 +1,11 @@
 // ABOUTME: Critical regression guards for #1480 — Gemini Agent bottom controls.
-// ABOUTME: Guards locked agent controls and Gemini ACP model-catalog passthrough.
+// ABOUTME: Guards locked agent controls and Antigravity model-catalog passthrough.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-// @ts-expect-error - acp-runtime.mjs is a plain ESM harness without type declarations
-import { _applyAcpModelState } from "../../bin/browser-local/acp-runtime.mjs";
+// @ts-expect-error - browser-local runtime is plain ESM without type declarations
+import { normalizeAntigravityModels } from "../../bin/browser-local/gemini-runtime.mjs";
 
 const agentChatTsx = readFileSync(
   resolve("src/components/chat/AgentChat.tsx"),
@@ -27,44 +27,27 @@ describe("Gemini Agent #1480 — bottom-control regression guards", () => {
     expect(matches.length).toBe(2);
   });
 
-  it("uses the model catalog returned by Gemini session/new verbatim", () => {
-    const session = {
-      currentModelId: "stale-model",
-      availableModels: [{ modelId: "stale-model", name: "Stale" }],
-      cliModels: [],
-    };
-
+  it("uses the model catalog returned by agy models verbatim", () => {
     expect(
-      _applyAcpModelState(session, {
-        currentModelId: "gemini-cli-current",
-        availableModels: [
-          {
-            modelId: "gemini-cli-current",
-            name: "Gemini CLI current",
-            description: "Returned by the installed CLI",
-          },
-          { modelId: "gemini-cli-next", name: "Gemini CLI next" },
-        ],
-      }),
-    ).toBe(true);
-    expect(session).toEqual({
-      currentModelId: "gemini-cli-current",
-      availableModels: [
+      normalizeAntigravityModels(
+        JSON.stringify({
+          models: [
+            {
+              modelId: "gemini-cli-current",
+              name: "Gemini CLI current",
+              description: "Returned by the installed CLI",
+            },
+            { modelId: "gemini-cli-next", name: "Gemini CLI next" },
+          ],
+        }),
+      ),
+    ).toEqual([
         {
           modelId: "gemini-cli-current",
           name: "Gemini CLI current",
           description: "Returned by the installed CLI",
         },
         { modelId: "gemini-cli-next", name: "Gemini CLI next" },
-      ],
-      cliModels: [
-        {
-          modelId: "gemini-cli-current",
-          name: "Gemini CLI current",
-          description: "Returned by the installed CLI",
-        },
-        { modelId: "gemini-cli-next", name: "Gemini CLI next" },
-      ],
-    });
+      ]);
   });
 });

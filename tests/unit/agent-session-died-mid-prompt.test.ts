@@ -11,7 +11,6 @@ const agentChatSource = readSource("src/components/chat/AgentChat.tsx");
 const claudeRuntimeSource = readSource("bin/browser-local/claude-runtime.mjs");
 const codexRuntimeSource = readSource("bin/browser-local/providers.mjs");
 const geminiRuntimeSource = readSource("bin/browser-local/gemini-runtime.mjs");
-const acpRuntimeSource = readSource("bin/browser-local/acp-runtime.mjs");
 
 describe("#1805 — death-string catalog matches what runtimes emit", () => {
   // The error event handler's session-death detection MUST stay in sync with
@@ -42,14 +41,10 @@ describe("#1805 — death-string catalog matches what runtimes emit", () => {
     );
   });
 
-  it("Gemini runtime emits the documented death strings", () => {
+  it("Antigravity runtime emits a documented mid-prompt death string", () => {
     expect(geminiRuntimeSource).toContain(
-      '"Gemini agent stopped before request completed."',
+      "Antigravity stopped while prompt was active",
     );
-    expect(acpRuntimeSource).toContain(
-      '"Session terminated before request completed."',
-    );
-    expect(acpRuntimeSource).toContain("stoppedBeforeRequestMessage");
   });
 });
 

@@ -360,7 +360,7 @@ export const ThreadTabBar: Component = () => {
                 <span class="text-[13px] w-[18px] text-center shrink-0">
                   ✨
                 </span>
-                <div class="flex-1 min-w-0 font-medium">Gemini</div>
+                <div class="flex-1 min-w-0 font-medium">Antigravity</div>
                 <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>

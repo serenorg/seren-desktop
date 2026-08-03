@@ -1,5 +1,5 @@
-// ABOUTME: Critical regression guards for the Gemini Agent integration (#1471).
-// ABOUTME: Asserts wiring across runtime, agent registry, dispatcher, and OAuth-removal sites.
+// ABOUTME: Critical regression guards for Antigravity behind the durable Gemini agent ID.
+// ABOUTME: Asserts runtime, registry, dispatcher, UI, and OAuth boundaries.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,8 +17,8 @@ const geminiRuntimeMjs = readFileSync(
   resolve("bin/browser-local/gemini-runtime.mjs"),
   "utf-8",
 );
-const acpRuntimeMjs = readFileSync(
-  resolve("bin/browser-local/acp-runtime.mjs"),
+const antigravityBinaryMjs = readFileSync(
+  resolve("bin/browser-local/antigravity-binary.mjs"),
   "utf-8",
 );
 const agentStoreTs = readFileSync(
@@ -74,77 +74,56 @@ describe("Gemini Agent — runtime wiring (#1471)", () => {
 
 });
 
-describe("Gemini Agent — registry definition (#1471)", () => {
+describe("Antigravity Agent — registry definition (#3648)", () => {
   it("agent-registry.mjs defines a 'gemini' entry", () => {
     expect(agentRegistryMjs).toContain("gemini: {");
     expect(agentRegistryMjs).toContain('type: "gemini"');
-    expect(agentRegistryMjs).toContain('packageName: "@google/gemini-cli"');
+    expect(agentRegistryMjs).toContain('name: "Antigravity"');
+    expect(agentRegistryMjs).toContain('command: "agy"');
   });
 
-  it("agent-registry.mjs uses ensureGlobalNpmPackage for gemini install", () => {
-    // Same install pattern as Codex — npm global, not the Claude native installer.
+  it("uses the verified native installer, never the retired Gemini npm package", () => {
     const geminiSection = agentRegistryMjs.slice(
       agentRegistryMjs.indexOf("gemini: {"),
     );
-    expect(geminiSection).toContain("ensureGlobalNpmPackage");
-    expect(geminiSection).toContain('command: "gemini"');
+    expect(geminiSection).toContain("ensureAntigravityCli");
+    expect(geminiSection).toContain("launchInteractiveCommand");
+    expect(geminiSection).not.toContain("@google/gemini-cli");
+    expect(antigravityBinaryMjs).toContain('createHash("sha512")');
+    expect(antigravityBinaryMjs).toContain("storage.googleapis.com");
   });
 });
 
-describe("Gemini Agent — shared ACP client (#1471, #3084)", () => {
-  it("keeps createGeminiRuntime as a thin adapter over the shared factory", () => {
+describe("Antigravity Agent — structured headless runtime (#3648)", () => {
+  it("keeps the serialized gemini route while removing the deprecated ACP transport", () => {
     expect(geminiRuntimeMjs).toContain("export function createGeminiRuntime");
-    expect(geminiRuntimeMjs).toContain(
-      'import { createAcpRuntime } from "./acp-runtime.mjs"',
-    );
-    expect(geminiRuntimeMjs).toContain("adapter: GEMINI_ADAPTER");
-    // Must expose hasSession so providers.mjs fallback chain works.
-    expect(acpRuntimeMjs).toContain("hasSession(sessionId)");
-    // Public RPC surface.
-    expect(acpRuntimeMjs).toContain("spawnSession");
-    expect(acpRuntimeMjs).toContain("sendPrompt");
-    expect(acpRuntimeMjs).toContain("cancelPrompt");
-    expect(acpRuntimeMjs).toContain("terminateSession");
-    expect(acpRuntimeMjs).toContain("respondToPermission");
+    expect(geminiRuntimeMjs).toContain('agentType: "gemini"');
+    expect(geminiRuntimeMjs).not.toContain("createAcpRuntime");
+    expect(geminiRuntimeMjs).not.toContain('"--acp"');
   });
 
-  it("spawns gemini-cli with the --acp flag", () => {
-    // The whole point of this PR — gemini-cli must be invoked in ACP mode,
-    // not interactive TUI mode.
-    expect(geminiRuntimeMjs).toContain('"--acp"');
+  it("spawns Antigravity stream-json and resumes its conversation ID", () => {
+    expect(geminiRuntimeMjs).toContain('"--output-format"');
+    expect(geminiRuntimeMjs).toContain('"stream-json"');
+    expect(geminiRuntimeMjs).toContain('"--conversation"');
+    expect(geminiRuntimeMjs).toContain("session.agentSessionId");
   });
 
-  it("speaks ACP method names verbatim from the schema", () => {
-    // Catches accidental rename to e.g. "session/newSession" or "newSession".
-    expect(acpRuntimeMjs).toContain('"initialize"');
-    expect(acpRuntimeMjs).toContain('"session/new"');
-    expect(acpRuntimeMjs).toContain('"session/prompt"');
-    expect(acpRuntimeMjs).toContain('"session/cancel"');
-    expect(acpRuntimeMjs).toContain('"session/request_permission"');
-  });
-
-  it("translates ACP session/update notifications to provider:// events", () => {
-    // The session/update branch must handle each ACP update type and emit
-    // the existing provider:// events the desktop already knows.
-    expect(acpRuntimeMjs).toContain('"agent_message_chunk"');
-    expect(acpRuntimeMjs).toContain('"agent_thought_chunk"');
-    expect(acpRuntimeMjs).toContain('"tool_call"');
-    expect(acpRuntimeMjs).toContain('"tool_call_update"');
-    expect(acpRuntimeMjs).toContain('"plan"');
-    expect(acpRuntimeMjs).toContain('"provider://message-chunk"');
-    expect(acpRuntimeMjs).toContain('"provider://tool-call"');
-    expect(acpRuntimeMjs).toContain('"provider://prompt-complete"');
-  });
-
-  it("declares an ACP protocol version constant", () => {
-    expect(acpRuntimeMjs).toContain("ACP_PROTOCOL_VERSION");
+  it("translates typed stream events to the existing provider event surface", () => {
+    expect(geminiRuntimeMjs).toContain('type === "init"');
+    expect(geminiRuntimeMjs).toContain('type === "step_update"');
+    expect(geminiRuntimeMjs).toContain('type === "result"');
+    expect(geminiRuntimeMjs).toContain('"provider://message-chunk"');
+    expect(geminiRuntimeMjs).toContain('"provider://tool-call"');
+    expect(geminiRuntimeMjs).toContain('"provider://prompt-complete"');
   });
 });
 
 describe("Gemini Agent — agent.store.ts wiring (#1471)", () => {
   it("agentDisplayName has a 'gemini' case", () => {
-    // Whitespace-tolerant: case "gemini": ... return "Gemini";
-    expect(bootstrapContextTs).toMatch(/case\s+"gemini":\s*\n\s*return\s+"Gemini"/);
+    expect(bootstrapContextTs).toMatch(
+      /case\s+"gemini":\s*\n\s*return\s+"Antigravity"/,
+    );
   });
 
   it("CLI ensure dispatcher routes gemini to providerService.ensureGeminiCli", () => {
@@ -194,18 +173,20 @@ describe("LM Studio Agent — thread.store.ts auto-detect (#2451)", () => {
 });
 
 describe("Gemini Agent — UI surface (#1471)", () => {
-  it("ThreadTabBar '+ New' menu includes a Gemini button", () => {
+  it("ThreadTabBar '+ New' menu includes an Antigravity button", () => {
     // Label dropped the "Agent" suffix in #1832 once the chip vocabulary was added —
     // the chip + section header now convey the kind. Wiring = testid + handler.
     expect(threadTabBarTsx).toContain("allowsGeminiAgent");
     expect(threadTabBarTsx).toContain('data-testid="new-gemini-agent"');
     expect(threadTabBarTsx).toContain('handleNewAgent("gemini")');
+    expect(threadTabBarTsx).toContain("Antigravity");
   });
 
-  it("ThreadSidebar agent launcher includes a Gemini button", () => {
+  it("ThreadSidebar agent launcher includes an Antigravity button", () => {
     expect(threadSidebarTsx).toContain("allowsGeminiAgent");
     expect(threadSidebarTsx).toContain('data-testid="new-gemini-agent"');
     expect(threadSidebarTsx).toContain('handleNewAgent("gemini")');
+    expect(threadSidebarTsx).toContain("Antigravity");
     // Helper still routes to threadStore.createAgentThread under the hood.
     expect(threadSidebarTsx).toMatch(
       /threadStore\.createAgentThread\(\s*agentType\s*,\s*cwd\s*\)/,

@@ -335,8 +335,7 @@ export const CONFIGURABLE_PROVIDERS: ProviderId[] = ["anthropic", "openai"];
 
 /**
  * List of provider IDs that support OAuth.
- * Currently empty — Gemini OAuth was removed in favor of the Gemini Agent
- * (gemini-cli via ACP), which handles its own auth.
+ * Currently empty — Google coding-agent auth is handled by Antigravity CLI.
  */
 export const OAUTH_PROVIDERS: ProviderId[] = [];
 
