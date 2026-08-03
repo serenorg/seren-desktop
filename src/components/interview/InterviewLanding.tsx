@@ -14,8 +14,11 @@ import {
 import {
   catalogAssetUrl,
   clusterLabel,
+  INTAKE_PERSISTENCE_RETRY_MESSAGE,
+  INTAKE_SCHEDULING_RETRY_MESSAGE,
   nextInterviewSelection,
   resolveInterviewEmployeeSlug,
+  runPersistedIntakeHandoff,
 } from "@/components/interview/interviewLandingModel";
 import { openExternalLink } from "@/lib/external-link";
 import {
@@ -133,17 +136,23 @@ export const InterviewLanding: Component<InterviewLandingProps> = (props) => {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      await submitGeneralEmployeeIntake({
-        selectedEmployeeSlug: selectedSlug(),
-        goals: goals(),
-        requirements: requirements(),
-        tools: tools(),
-        discussionNotes: discussionNotes(),
-      });
-      setStep("complete");
-      await openExternalLink(EMPLOYEE_INTAKE_CALENDLY_URL);
-    } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : String(error));
+      const result = await runPersistedIntakeHandoff(
+        () =>
+          submitGeneralEmployeeIntake({
+            selectedEmployeeSlug: selectedSlug(),
+            goals: goals(),
+            requirements: requirements(),
+            tools: tools(),
+            discussionNotes: discussionNotes(),
+          }),
+        () => setStep("complete"),
+        () => openExternalLink(EMPLOYEE_INTAKE_CALENDLY_URL),
+      );
+      if (result === "scheduling-open-failed") {
+        setSubmitError(INTAKE_SCHEDULING_RETRY_MESSAGE);
+      }
+    } catch {
+      setSubmitError(INTAKE_PERSISTENCE_RETRY_MESSAGE);
     } finally {
       setSubmitting(false);
     }
