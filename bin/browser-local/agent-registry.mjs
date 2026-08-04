@@ -958,18 +958,13 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         try {
           return await ensureAntigravityCli({ emit });
         } catch (error) {
+          // The recovery card is driven by the npm update path, which cannot
+          // reinstall a native binary — a card here would offer a Retry that
+          // throws. The install-progress message and the thrown error are what
+          // reach the user. #3665
           emit?.("provider://cli-install-progress", {
             stage: "action_required",
-            message:
-              "Antigravity needs your attention before Seren can use it.",
-          });
-          emit?.("provider://cli-update-action-required", {
-            label: "Antigravity",
-            bareCommand: "agy",
-            packageName: "antigravity-cli",
-            reason: "installation_required",
-            actions: ["retry", "open_official_instructions"],
-            officialInstructionsUrl: ANTIGRAVITY_INSTALL_URL,
+            message: `Antigravity could not be installed automatically. Install it from ${ANTIGRAVITY_INSTALL_URL}, then start Antigravity again.`,
           });
           throw error;
         }
