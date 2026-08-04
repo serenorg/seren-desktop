@@ -2,7 +2,7 @@
 // ABOUTME: Gives each conversation its Privacy Mode and per-path exclusion controls.
 
 import type { Component } from "solid-js";
-import { createMemo, For, Show } from "solid-js";
+import { createMemo, createSignal, For, Show } from "solid-js";
 import { privacyStore } from "@/stores/privacy.store";
 import { settingsState, settingsStore } from "@/stores/settings.store";
 import { threadStore } from "@/stores/thread.store";
@@ -24,6 +24,9 @@ interface Destination {
 export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
   props,
 ) => {
+  const [dismissedConversationIds, setDismissedConversationIds] = createSignal<
+    ReadonlySet<string>
+  >(new Set());
   const conversation = createMemo(() =>
     props.conversationId
       ? threadStore.findConversation(props.conversationId)
@@ -129,6 +132,20 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
     privacyStore.setConversationPrivacy(id, { privileged: checked });
   };
 
+  const controlsDismissed = () => {
+    const id = props.conversationId;
+    return (
+      props.variant === "controls" &&
+      Boolean(id && dismissedConversationIds().has(id))
+    );
+  };
+
+  const dismissControls = () => {
+    const id = props.conversationId;
+    if (!id) return;
+    setDismissedConversationIds((dismissed) => new Set(dismissed).add(id));
+  };
+
   // In controls mode there is nothing actionable to show without a
   // conversation to scope the switches to.
   if (props.variant === "controls" && !props.conversationId) {
@@ -138,6 +155,7 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
   return (
     <section
       class="w-full max-w-[560px] overflow-hidden rounded-xl border border-border bg-surface-2 text-foreground shadow-[0_18px_50px_rgba(0,0,0,0.24)]"
+      hidden={controlsDismissed()}
       data-testid="data-destinations-panel"
       aria-label="Privacy"
     >
@@ -201,9 +219,23 @@ export const DataDestinationsPanel: Component<DataDestinationsPanelProps> = (
         <div
           class={`bg-surface-3/40 px-4 py-3 ${props.variant === "controls" ? "" : "border-t border-border"}`}
         >
-          <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Conversation controls
-          </p>
+          <div class="flex items-center justify-between gap-3">
+            <p class="m-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Conversation controls
+            </p>
+            <Show when={props.variant === "controls"}>
+              <button
+                type="button"
+                class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-transparent bg-transparent p-0 text-lg leading-none text-muted-foreground transition-colors hover:border-border hover:bg-surface-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary"
+                onClick={dismissControls}
+                title="Dismiss conversation controls"
+                aria-label="Dismiss conversation controls"
+                data-testid="dismiss-conversation-controls"
+              >
+                &times;
+              </button>
+            </Show>
+          </div>
           <div class="mt-2 grid gap-2 sm:grid-cols-2">
             <div class="sm:col-span-2 rounded-lg border border-border-strong bg-surface-3 px-3 py-2.5 shadow-[inset_3px_0_0_var(--primary)]">
               <label class="flex cursor-pointer items-start gap-2">
