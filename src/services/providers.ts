@@ -941,8 +941,7 @@ export async function getAgentPermissionCatalog(
 }
 
 /**
- * Ensure Claude Code CLI is installed. Missing installs surface an explicit
- * official-instructions recovery action instead of running a remote script.
+ * Ensure Claude Code CLI is installed through Seren's verified managed path.
  */
 export async function ensureClaudeCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
@@ -952,8 +951,7 @@ export async function ensureClaudeCli(): Promise<string> {
 
 /**
  * Ensure Codex CLI (`@openai/codex`) is installed and meets the minimum version.
- * Missing installs require official manual setup; upgrades are verified before
- * success is reported.
+ * Missing installs and upgrades are verified before success is reported.
  */
 export async function ensureCodexCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
@@ -972,7 +970,7 @@ export type CliUpdateOutcome = {
 
 export type CliUpdateActionRequired = {
   label: string;
-  bareCommand: "claude" | "codex";
+  bareCommand: "claude" | "codex" | "grok";
   packageName: string;
   from?: string | null;
   to?: string | null;
@@ -983,7 +981,7 @@ export type CliUpdateActionRequired = {
 
 /** Retry one supported CLI update through the verified runtime path. */
 export async function retryCliUpdate(
-  bareCommand: "claude" | "codex",
+  bareCommand: "claude" | "codex" | "grok",
 ): Promise<CliUpdateOutcome> {
   return invokeProvider<CliUpdateOutcome>("provider_retry_cli_update", {
     bareCommand,
@@ -1008,7 +1006,7 @@ export async function ensureGeminiCli(): Promise<string> {
   });
 }
 
-/** Ensure the official Grok Build CLI is installed in the embedded runtime. */
+/** Ensure the official Grok Build CLI is installed in Seren's managed prefix. */
 export async function ensureGrokCli(): Promise<string> {
   return invokeProvider<string>("provider_ensure_agent_cli", {
     agentType: "grok",

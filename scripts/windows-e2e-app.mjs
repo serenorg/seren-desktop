@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { chromium } from "@playwright/test";
@@ -34,11 +36,8 @@ const WINDOWS_BOUNDED_BLOCKED_AGENT_TYPES = new Set([
 ]);
 const WINDOWS_BOUNDED_BLOCK_REASON =
   "cannot prevent reads outside the selected project";
-// npm-backed CLIs are installed and version-checked by the disposable Windows
-// test-user setup before the app starts. Exercise the production resolver for
-// every corresponding provider here without requiring credentials or turning
-// provider_ensure_agent_cli back into an installer. LM Studio is excluded:
-// its `lms` CLI ships with the separately installed LM Studio application.
+// Exercise automatic production provisioning for every CLI-backed agent. LM
+// Studio is excluded because its `lms` CLI ships with the external desktop app.
 const CLI_COMPATIBILITY_AGENT_TYPES = [
   "codex",
   "claude-code",
@@ -46,6 +45,27 @@ const CLI_COMPATIBILITY_AGENT_TYPES = [
   "gemini",
   "grok",
 ];
+const LIVE_AGENT_TYPES = [
+  "codex",
+  "claude-code",
+  PAIRED_AGENT_TYPE,
+  "gemini",
+  "grok",
+  "lmstudio",
+];
+const AGENT_LAUNCHER_ROWS = [
+  { type: "claude-code", testId: "new-claude-agent", label: "Claude Code" },
+  { type: "codex", testId: "new-codex-agent", label: "Codex" },
+  { type: PAIRED_AGENT_TYPE, testId: "new-claude-codex-agent", label: "Claude + Codex" },
+  { type: "gemini", testId: "new-gemini-agent", label: "Antigravity" },
+  { type: "grok", testId: "new-grok-agent", label: "Grok" },
+  { type: "lmstudio", testId: "new-lmstudio-agent", label: "LM Studio Agent" },
+];
+const CLI_LAUNCHER_ROWS = [
+  { cliKind: "claude", testId: "new-claude-cli", label: "Claude Code" },
+  { cliKind: "codex", testId: "new-codex-cli", label: "Codex" },
+];
+const ARTIFACT_DIR = requiredEnv("SEREN_E2E_ARTIFACT_DIR");
 // Every shipped subscription coding-agent journey is certified, not one
 // env-selected type (#2375). Override with a comma list for ad-hoc runs.
 const AGENT_JOURNEYS = (
@@ -913,9 +933,100 @@ async function verifyAgentCliCompatibility(ws) {
   for (const agentType of CLI_COMPATIBILITY_AGENT_TYPES) {
     await ensureAgentCli(ws, agentType);
   }
+  verifyManagedCliArtifacts();
   logStage(
     `all provider CLI resolution checks passed: ${CLI_COMPATIBILITY_AGENT_TYPES.join(", ")}`,
   );
+}
+
+function readCliVersion(binary) {
+  assert(existsSync(binary), `Seren did not create managed CLI binary ${path.basename(binary)}`);
+  const output = execFileSync(binary, ["--version"], {
+    encoding: "utf8",
+    shell: binary.endsWith(".cmd"),
+    timeout: 120_000,
+    windowsHide: true,
+  });
+  const version = String(output).match(/\b\d+\.\d+\.\d+\b/)?.[0];
+  assert(version, `${path.basename(binary)} did not report a semantic version`);
+  return version;
+}
+
+function verifyManagedCliArtifacts() {
+  const appData = requiredEnv("APPDATA");
+  const localAppData = requiredEnv("LOCALAPPDATA");
+  const binaries = {
+    claude: path.join(appData, "Seren", "cli-tools", "claude.cmd"),
+    codex: path.join(appData, "Seren", "cli-tools", "codex.cmd"),
+    grok: path.join(appData, "Seren", "cli-tools", "grok.cmd"),
+    antigravity: path.join(localAppData, "agy", "bin", "agy.exe"),
+  };
+  const versions = Object.fromEntries(
+    Object.entries(binaries).map(([name, binary]) => [name, readCliVersion(binary)]),
+  );
+  logStage(`Seren-managed CLI versions verified: ${JSON.stringify(versions)}`);
+}
+
+async function verifyLiveAgentRosterAndLaunchers(ws, page) {
+  const agents = await rpcWithTimeout(
+    ws,
+    "provider_get_available_agents",
+    {},
+    PROVIDER_RPC_TIMEOUT_MS,
+    "live agent roster",
+  );
+  const liveTypes = Array.isArray(agents)
+    ? agents.map((agent) => agent?.type).filter(Boolean)
+    : [];
+  assert(
+    liveTypes.length === LIVE_AGENT_TYPES.length &&
+      LIVE_AGENT_TYPES.every((type) => liveTypes.includes(type)),
+    `live agent roster mismatch: ${liveTypes.join(", ")}`,
+  );
+
+  await page.getByTestId("new-thread-button").click();
+  for (const target of AGENT_LAUNCHER_ROWS) {
+    const row = page.getByTestId(target.testId);
+    await row.waitFor({ state: "visible", timeout: 20_000 });
+    assert((await row.innerText()).includes(target.label), `${target.type} launcher label mismatch`);
+    await row.screenshot({ path: path.join(ARTIFACT_DIR, `launcher-${target.type}.png`) });
+  }
+  for (const target of CLI_LAUNCHER_ROWS) {
+    const row = page.getByTestId(target.testId);
+    await row.waitFor({ state: "visible", timeout: 20_000 });
+    assert((await row.innerText()).includes(target.label), `${target.cliKind} CLI label mismatch`);
+    await row.screenshot({
+      path: path.join(ARTIFACT_DIR, `launcher-${target.cliKind}-cli.png`),
+    });
+  }
+  assert(
+    (await page.getByTestId("cli-update-action-required").count()) === 0,
+    "launcher exposed a user-intervention control",
+  );
+
+  for (const [index, target] of CLI_LAUNCHER_ROWS.entries()) {
+    await page.getByTestId(target.testId).click();
+    await page.getByTestId("terminal-launch-mode-toggle").waitFor({
+      state: "visible",
+      timeout: 20_000,
+    });
+    await sleep(2_000);
+    const buffers = await tauriInvoke(page, "terminal_list_buffers");
+    const terminal = Array.isArray(buffers)
+      ? buffers.filter((buffer) => buffer?.cliKind === target.cliKind).at(-1)
+      : null;
+    assert(
+      terminal?.status === "running",
+      `${target.cliKind} terminal did not stay running after automatic provisioning`,
+    );
+    await page.getByTestId("terminal-launch-mode-toggle").screenshot({
+      path: path.join(ARTIFACT_DIR, `running-${target.cliKind}-cli.png`),
+    });
+    if (index < CLI_LAUNCHER_ROWS.length - 1) {
+      await page.getByTestId("new-thread-button").click();
+    }
+  }
+  logStage(`live registry and launcher parity verified: ${liveTypes.join(", ")}`);
 }
 
 // A raw spawn/prompt failure carries a generic message; the runtime also emits
@@ -1330,6 +1441,7 @@ async function exerciseAgentRuntime(page) {
   const buffer = createRuntimeBuffer(ws);
   try {
     await verifyAgentCliCompatibility(ws);
+    await verifyLiveAgentRosterAndLaunchers(ws, page);
     for (const journey of AGENT_JOURNEYS) {
       if (WINDOWS_BOUNDED_BLOCKED_AGENT_TYPES.has(journey)) {
         await runBlockedWindowsBoundedJourney(ws, journey);

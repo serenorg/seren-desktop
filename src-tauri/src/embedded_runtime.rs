@@ -430,7 +430,8 @@ pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &
 
     // Keep the user's order, but append missing common locations.
     // GUI apps don't source shell profiles so CLI install directories
-    // (e.g., ~/.claude/bin, %APPDATA%\npm) are typically missing from PATH.
+    // (e.g., Seren's managed CLI directory, ~/.claude/bin, %APPDATA%\npm)
+    // are typically missing from PATH.
     {
         use std::collections::HashSet;
 
@@ -441,6 +442,7 @@ pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &
         {
             let home = std::env::var("HOME").unwrap_or_default();
             if !home.is_empty() {
+                common_bins.push(format!("{}/.seren/cli-tools/bin", home));
                 common_bins.push(format!("{}/.claude/bin", home));
                 common_bins.push(format!("{}/.local/bin", home));
             }
@@ -479,6 +481,7 @@ pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &
             // npm global installs land here
             let appdata = std::env::var("APPDATA").unwrap_or_default();
             if !appdata.is_empty() {
+                common_bins.push(format!("{}\\Seren\\cli-tools", appdata));
                 common_bins.push(format!("{}\\npm", appdata));
             }
         }

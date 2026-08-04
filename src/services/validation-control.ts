@@ -195,6 +195,7 @@ const READ_STATE_ALLOWLIST = new Set([
   "list_capability_leases",
   "list_pending_approvals",
   "provider_get_available_agents",
+  "terminal_list_buffers",
 ]);
 
 async function readState(

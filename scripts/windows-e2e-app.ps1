@@ -402,6 +402,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:SEREN_E2E_API_BASE) -and $env:SEREN_E
 }
 $env:SEREN_E2E_API_BASE = "https://api.serendb.com"
 $env:SEREN_E2E_CDP_ENDPOINT = "http://127.0.0.1:$RemoteDebugPort"
+$env:SEREN_E2E_ARTIFACT_DIR = $e2eLogDir
 
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
   $InstallDir = Get-DefaultInstallDir

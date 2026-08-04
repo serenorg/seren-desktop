@@ -1073,21 +1073,28 @@ function subscribeToCliScanRejections(): void {
  */
 function applyCliUpdateAction(payload: unknown, notify = true): void {
   const event = payload as Partial<providerService.CliUpdateActionRequired>;
-  if (event.bareCommand !== "claude" && event.bareCommand !== "codex") {
-    return;
-  }
+  const updateSources = {
+    claude: {
+      packageName: "@anthropic-ai/claude-code",
+      instructionsOrigin: "https://code.claude.com/",
+    },
+    codex: {
+      packageName: "@openai/codex",
+      instructionsOrigin: "https://developers.openai.com/",
+    },
+    grok: {
+      packageName: "@xai-official/grok",
+      instructionsOrigin: "https://docs.x.ai/",
+    },
+  } as const;
+  if (!event.bareCommand || !(event.bareCommand in updateSources)) return;
   const bareCommand = event.bareCommand;
-  const expectedPackage =
-    bareCommand === "claude" ? "@anthropic-ai/claude-code" : "@openai/codex";
-  const expectedInstructionsOrigin =
-    bareCommand === "claude"
-      ? "https://code.claude.com/"
-      : "https://developers.openai.com/";
+  const source = updateSources[bareCommand];
   const officialInstructionsUrl = event.officialInstructionsUrl;
   if (
-    event.packageName !== expectedPackage ||
+    event.packageName !== source.packageName ||
     typeof officialInstructionsUrl !== "string" ||
-    !officialInstructionsUrl.startsWith(expectedInstructionsOrigin)
+    !officialInstructionsUrl.startsWith(source.instructionsOrigin)
   ) {
     return;
   }
@@ -1752,7 +1759,7 @@ export interface AgentState {
   /** Pending manual recovery for a failed or unverifiable CLI update. */
   cliUpdateActionRequired: {
     label: string;
-    bareCommand: "claude" | "codex";
+    bareCommand: "claude" | "codex" | "grok";
     packageName: string;
     from: string | null;
     to: string | null;
@@ -7159,7 +7166,9 @@ export const agentStore = {
     const url = state.cliUpdateActionRequired?.officialInstructionsUrl;
     if (
       url &&
-      /^https:\/\/(code\.claude\.com|developers\.openai\.com)\//.test(url)
+      /^https:\/\/(code\.claude\.com|developers\.openai\.com|docs\.x\.ai)\//.test(
+        url,
+      )
     ) {
       void openExternalLink(url);
     }

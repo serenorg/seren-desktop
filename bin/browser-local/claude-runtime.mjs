@@ -35,6 +35,7 @@ import {
 } from "./synthetic-transcript.mjs";
 import { providerLogPrefix } from "./logging.mjs";
 import { createAdmissionGate } from "./session-admission.mjs";
+import { managedCliBinary } from "./cli-paths.mjs";
 
 /**
  * Resolve the full path to the `claude` binary.
@@ -67,6 +68,8 @@ function resolveClaudeBinary() {
     const appData = process.env.APPDATA ?? "";
     const nodeDir = path.dirname(process.execPath);
     const candidates = [
+      // Seren's verified copy must outrank a stale user-managed install.
+      managedCliBinary("claude"),
       // Native installer (install.ps1) places the binary here
       path.join(home, ".local", "bin", "claude.exe"),
       // Older native installer location
@@ -108,6 +111,8 @@ function resolveClaudeBinary() {
   const nodeDir = path.dirname(process.execPath);
   const prefix = path.dirname(nodeDir);
   const candidates = [
+    // Seren's verified copy must outrank a stale user-managed install.
+    managedCliBinary("claude"),
     path.join(home, ".claude", "bin", "claude"),
     path.join(home, ".local", "bin", "claude"),
     // npm global install via embedded runtime's npm
@@ -3103,13 +3108,14 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
           /bad cpu type in executable/i.test(spawnError.message ?? "");
         let errorMessage;
         if (spawnError.code === "ENOENT") {
-          errorMessage = `Claude Code CLI not found at "${claudeBin}". Install it from https://claude.ai/download`;
+          errorMessage =
+            `Seren could not start Claude Code at "${claudeBin}". ` +
+            "Seren will repair the managed CLI automatically.";
         } else if (isBadArch) {
           errorMessage =
             `Claude Code CLI at "${claudeBin}" is the wrong CPU type for this Mac ` +
-            `(host arch: ${process.arch}). Install Rosetta 2 with ` +
-            `'softwareupdate --install-rosetta --agree-to-license', or delete that ` +
-            `binary and let Seren reinstall via npm on next launch.`;
+            `(host arch: ${process.arch}). Seren will replace it with the correct ` +
+            "managed CLI automatically.";
         } else {
           errorMessage = `Failed to start Claude Code: ${spawnError.message}`;
         }

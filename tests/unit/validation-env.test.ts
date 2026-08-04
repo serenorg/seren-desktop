@@ -102,6 +102,24 @@ describe("validation environment", () => {
     expect(defaults.RUSTUP_HOME).toBe(path.join("/real-home", ".rustup"));
   });
 
+  it("isolates Windows profile and app-data roots for clean CLI provisioning", () => {
+    const env = validationChildEnv({
+      baseEnv: {},
+      port: 1422,
+      repoRoot: "/repo",
+      realHome: "/real-home",
+      platform: "win32",
+    });
+
+    expect(env.USERPROFILE).toBe(env.HOME);
+    expect(env.APPDATA).toBe(
+      path.join(env.HOME as string, "AppData", "Roaming"),
+    );
+    expect(env.LOCALAPPDATA).toBe(
+      path.join(env.HOME as string, "AppData", "Local"),
+    );
+  });
+
   it("sets the pnpm store only when one is provided", () => {
     const withStore = validationChildEnv({
       baseEnv: {},

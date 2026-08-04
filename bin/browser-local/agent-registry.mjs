@@ -19,15 +19,16 @@ import {
   isBelowBaseline,
   loadState,
   runInstalledVersion,
+  saveState,
 } from "./cli-updater.mjs";
 import {
-  ANTIGRAVITY_INSTALL_URL,
   checkAntigravityAuthenticated,
   clearAntigravityAuthCache,
   ensureAntigravityCli,
   resolveAntigravityBinary,
 } from "./antigravity-binary.mjs";
 import { resolveGrokBinary } from "./grok-binary.mjs";
+import { managedCliBinary, managedCliPrefix } from "./cli-paths.mjs";
 
 // LM Studio support is loaded lazily so a missing LM Studio dependency (e.g.
 // @lmstudio/sdk) never crashes the registry, which every agent relies on for
@@ -365,88 +366,37 @@ function resolveNpmCliScript() {
   return null;
 }
 
-async function ensureGlobalNpmPackage({ emit, command, packageName, label }) {
-  if (await isCommandAvailable(command)) {
-    return command;
+const AGENT_CLI_PROVISIONING = Object.freeze({
+  codex: { kind: "npm", target: "codex" },
+  "claude-code": { kind: "npm", target: "claude" },
+  "claude-codex": {
+    kind: "derived",
+    dependencies: ["claude-code", "codex"],
+  },
+  gemini: { kind: "verified-artifact", target: "antigravity" },
+  grok: { kind: "npm", target: "grok" },
+  lmstudio: { kind: "external-app", target: "lmstudio" },
+});
+
+function assertAgentCliProvisioningComplete(definitions, provisioning) {
+  const definitionTypes = Object.keys(definitions).sort();
+  const provisioningTypes = Object.keys(provisioning).sort();
+  if (JSON.stringify(definitionTypes) !== JSON.stringify(provisioningTypes)) {
+    throw new Error(
+      `Agent CLI provisioning is incomplete: registry=${definitionTypes.join(",")} ` +
+        `provisioning=${provisioningTypes.join(",")}`,
+    );
   }
-
-  emit("provider://cli-install-progress", {
-    stage: "installing",
-    message: `Installing ${label} CLI...`,
-  });
-
-  // Invoke node with npm-cli.js directly to avoid shell wrapper shims that
-  // break execFile() after Tauri replaces bin/npm symlinks with shell scripts.
-  const npmCliScript = resolveNpmCliScript();
-  if (npmCliScript) {
-    await new Promise((resolvePromise, rejectPromise) => {
-      execFile(
-        process.execPath,
-        [npmCliScript, "install", "-g", packageName],
-        (error, stdout, stderr) => {
-          if (error) {
-            rejectPromise(new Error(stderr || error.message));
-            return;
-          }
-          resolvePromise(stdout.trim());
-        },
+  for (const [agentType, entry] of Object.entries(provisioning)) {
+    if (
+      entry.kind === "derived" &&
+      entry.dependencies.some((dependency) => !definitions[dependency])
+    ) {
+      throw new Error(
+        `Agent CLI provisioning for ${agentType} references an unknown dependency.`,
       );
-    });
-  } else {
-    // Fallback: try npm directly, for a dev checkout where symlinks are intact.
-    // Node refuses to exec a .cmd shim without a shell, so Windows needs one.
-    const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-    await new Promise((resolvePromise, rejectPromise) => {
-      execFile(
-        npmCommand,
-        ["install", "-g", packageName],
-        { shell: process.platform === "win32" },
-        (error, stdout, stderr) => {
-          if (error) {
-            rejectPromise(new Error(stderr || error.message));
-            return;
-          }
-          resolvePromise(stdout.trim());
-        },
-      );
-    });
+    }
   }
-
-  emit("provider://cli-install-progress", {
-    stage: "complete",
-    message: `${label} CLI installed successfully`,
-  });
-
-  return command;
-}
-
-const CLI_INSTALL_INSTRUCTIONS = {
-  "@anthropic-ai/claude-code":
-    "https://code.claude.com/docs/en/installation",
-  "@openai/codex": "https://developers.openai.com/codex/cli/",
-  "@xai-official/grok": "https://docs.x.ai/build/overview",
-};
-
-function emitCliActionRequired(
-  emit,
-  { label, bareCommand, packageName, from = null, to = null, reason },
-) {
-  const officialInstructionsUrl = CLI_INSTALL_INSTRUCTIONS[packageName];
-  emit?.("provider://cli-install-progress", {
-    stage: "action_required",
-    message: `${label} needs your attention before Seren can use it.`,
-  });
-  emit?.("provider://cli-update-action-required", {
-    label,
-    bareCommand,
-    packageName,
-    from,
-    to,
-    reason,
-    actions: ["retry", "open_official_instructions"],
-    officialInstructionsUrl,
-  });
-  return officialInstructionsUrl;
 }
 
 /**
@@ -455,7 +405,7 @@ function emitCliActionRequired(
  * the Codex (#2904) and Claude Code (#3443) spawn paths so both degrade
  * identically: an at-or-above-baseline install returns immediately with no
  * network access; a below-baseline install triggers a blocking verified
- * update and fails closed — with an actionable retry/instructions handoff —
+ * update and fails closed without asking the user to manage installations
  * when the update cannot be confirmed (offline, scan rejection, stale shim).
  *
  * `_runInstalledVersion` / `_backgroundUpdateCli` are test seams; production
@@ -491,14 +441,49 @@ async function ensureCliBaselineViaUpdater(
       );
       return resolved;
     }
-    const url = emitCliActionRequired(emit, {
+    emit("provider://cli-install-progress", {
+      stage: "installing",
+      message: `Installing ${label} CLI automatically...`,
+    });
+    const outcome = await _backgroundUpdateCli({
       label,
       bareCommand,
       packageName,
-      reason: "installation_required",
+      resolvedPath: bareCommand,
+      npmCliScript: resolveNpmCliScript(),
+      force: true,
+      installIfMissing: true,
+      installPrefix: managedCliPrefix(),
+      resolveInstalledPath: resolveBinary,
+      onUpdated: ({ label: updatedLabel, from, to }) =>
+        emit?.("provider://cli-updated", {
+          label: updatedLabel,
+          from,
+          to,
+        }),
+      onScanRejected: (event) =>
+        emit?.("provider://cli-scan-rejected", event),
+      onActionRequired: (event) =>
+        emit?.("provider://cli-update-action-required", event),
     });
+    resolved = resolveBinary();
+    const installedAfterProvision = await _runInstalledVersion(
+      resolved,
+      bareCommand,
+    );
+    if (
+      installedAfterProvision &&
+      !isBelowBaseline(installedAfterProvision, baseline)
+    ) {
+      emit("provider://cli-install-progress", {
+        stage: "complete",
+        message: `${label} CLI installed successfully`,
+      });
+      return resolved;
+    }
     throw new Error(
-      `${label} CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
+      `Seren could not install ${label} automatically. Seren will retry ` +
+        `automatically. (${outcome.outcome})`,
     );
   }
   if (!isBelowBaseline(installed, baseline)) {
@@ -517,6 +502,8 @@ async function ensureCliBaselineViaUpdater(
     packageName,
     npmCliScript: resolveNpmCliScript(),
     force: true,
+    installPrefix: managedCliPrefix(),
+    resolveInstalledPath: resolveBinary,
     onUpdated: ({ label, from, to }) =>
       emit?.("provider://cli-updated", { label, from, to }),
     onScanRejected: (event) =>
@@ -534,8 +521,8 @@ async function ensureCliBaselineViaUpdater(
   ) {
     throw new Error(
       `${label} CLI is still ${updated ?? "unknown"}; Seren requires ${baseline} ` +
-        `or newer. Update it from ${CLI_INSTALL_INSTRUCTIONS[packageName]}, ` +
-        `then retry. (${outcome.outcome})`,
+        `or newer and will retry the verified update automatically. ` +
+        `(${outcome.outcome})`,
     );
   }
 
@@ -596,41 +583,44 @@ async function ensureClaudeCodeCli(emit) {
       existsSync(resolvedPath) &&
       binaryRunsOnHost(resolvedPath)
     ) {
-      // Custom PATH installs are outside every channel the updater manages
-      // (classifyInstallChannel calls them unresolved), so no auto-update
-      // is attempted. Still refuse to spawn a CLI that is determinately
-      // below the baseline: it would reject the default model id with a
-      // far less actionable error (#3443). An unprobeable version stays
-      // permissive so a working custom setup is not blocked.
+      // Custom PATH installs are outside every channel the updater manages.
+      // If one is determinately stale, provision Seren's verified managed
+      // copy rather than pushing an update decision back to the user.
       const baseline = CLI_MIN_VERSION_BASELINE["@anthropic-ai/claude-code"];
       const installed = await runInstalledVersion(resolvedPath, "claude");
       if (isBelowBaseline(installed, baseline)) {
-        const url = emitCliActionRequired(emit, {
+        return ensureCliBaselineViaUpdater(emit, {
           label: "Claude Code",
           bareCommand: "claude",
           packageName: "@anthropic-ai/claude-code",
-          from: installed,
-          to: baseline,
-          reason: "update_required",
+          resolveBinary: resolveInstalledClaudeBinary,
+          allowUnprobeableInstall: true,
         });
-        throw new Error(
-          `Claude Code CLI is ${installed}; Seren requires ${baseline} or newer. ` +
-            `Update it from ${url}, then retry.`,
-        );
       }
       return "claude";
     }
   }
 
-  const url = emitCliActionRequired(emit, {
+  return ensureCliBaselineViaUpdater(emit, {
     label: "Claude Code",
     bareCommand: "claude",
     packageName: "@anthropic-ai/claude-code",
-    reason: "installation_required",
+    resolveBinary: resolveInstalledClaudeBinary,
+    allowUnprobeableInstall: true,
   });
-  throw new Error(
-    `Claude Code CLI is not installed. Install it from ${url}, then retry.`,
-  );
+}
+
+async function ensureGrokCliViaUpdater(emit) {
+  const resolved = resolveGrokBinary();
+  if (resolved !== "grok") return resolved;
+  if (await isCommandAvailable("grok")) return "grok";
+  return ensureCliBaselineViaUpdater(emit, {
+    label: "Grok",
+    bareCommand: "grok",
+    packageName: "@xai-official/grok",
+    resolveBinary: resolveGrokBinary,
+    allowUnprobeableInstall: true,
+  });
 }
 
 /**
@@ -652,6 +642,8 @@ export function resolveInstalledClaudeBinary() {
     const programFilesX86 =
       process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
+      // Seren's verified copy must outrank a stale user-managed install.
+      managedCliBinary("claude"),
       // Native installer location (install.ps1 puts it here)
       path.join(home, ".local", "bin", "claude.exe"),
       // Older native installer location
@@ -679,6 +671,8 @@ export function resolveInstalledClaudeBinary() {
     const nodeDir = path.dirname(process.execPath);
     const prefix = path.dirname(nodeDir);
     const candidates = [
+      // Seren's verified copy must outrank a stale user-managed install.
+      managedCliBinary("claude"),
       path.join(home, ".claude", "bin", "claude"),
       path.join(home, ".local", "bin", "claude"),
       // npm global install via embedded runtime's npm
@@ -765,6 +759,8 @@ export function resolveInstalledCodexBinary() {
     const programFilesX86 =
       process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)";
     const candidates = [
+      // Seren-managed verified npm install.
+      managedCliBinary("codex"),
       ...(appData ? [path.join(appData, "npm", "codex.cmd")] : []),
       ...(appData ? [path.join(appData, "npm", "codex.ps1")] : []),
       path.join(nodeDir, "codex.cmd"),
@@ -785,6 +781,8 @@ export function resolveInstalledCodexBinary() {
     const nodeDir = path.dirname(process.execPath);
     const prefix = path.dirname(nodeDir);
     const candidates = [
+      // Seren-managed verified npm install.
+      managedCliBinary("codex"),
       path.join(prefix, "bin", "codex"),
       path.join(home, ".local", "bin", "codex"),
       // System npm prefix /usr/local — Intel macOS + most Linux distros. The
@@ -812,7 +810,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "OpenAI Codex via direct App Server integration",
       command: "codex",
       async getAvailability() {
-        const installed = await isCommandAvailable("codex");
+        const installed = resolveInstalledCodexBinary() !== "codex";
         return {
           type: "codex",
           name: "Codex",
@@ -824,7 +822,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Codex CLI is not installed. Seren will open the official installation instructions when you start this agent.",
+                  "Seren is preparing the Codex CLI automatically.",
               }),
         };
       },
@@ -849,7 +847,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "Anthropic Claude Code via direct provider runtime",
       command: "claude",
       async getAvailability() {
-        const installed = await isCommandAvailable("claude");
+        const installed = resolveInstalledClaudeBinary() !== "claude";
         return {
           type: "claude-code",
           name: "Claude Code",
@@ -861,7 +859,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Claude Code CLI is not installed. Seren will open the official installation instructions when you start this agent.",
+                  "Seren is preparing the Claude Code CLI automatically.",
               }),
         };
       },
@@ -888,8 +886,8 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       description: "Paired workflow — Claude plans and reviews, Codex executes",
       command: "claude",
       async getAvailability() {
-        const claudeInstalled = await isCommandAvailable("claude");
-        const codexInstalled = await isCommandAvailable("codex");
+        const claudeInstalled = resolveInstalledClaudeBinary() !== "claude";
+        const codexInstalled = resolveInstalledCodexBinary() !== "codex";
         const missing = [
           ...(claudeInstalled ? [] : ["Claude Code"]),
           ...(codexInstalled ? [] : ["Codex"]),
@@ -905,7 +903,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           ...(missing.length === 0
             ? {}
             : {
-                unavailableReason: `${missing.join(" and ")} CLI${missing.length > 1 ? "s are" : " is"} not installed. Seren will provide official installation instructions when you start this agent.`,
+                unavailableReason: `Seren is preparing the ${missing.join(" and ")} CLI${missing.length > 1 ? "s" : ""} automatically.`,
               }),
         };
       },
@@ -947,7 +945,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Antigravity CLI is not installed yet. Seren can install Google's verified binary on first launch.",
+                  "Seren is preparing the Antigravity CLI automatically.",
               }),
         };
       },
@@ -958,13 +956,12 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         try {
           return await ensureAntigravityCli({ emit });
         } catch (error) {
-          // The recovery card is driven by the npm update path, which cannot
-          // reinstall a native binary — a card here would offer a Retry that
-          // throws. The install-progress message and the thrown error are what
-          // reach the user. #3665
+          // Installation remains Seren-owned. Report a retryable preparation
+          // failure without handing a download decision to the user. #3680
           emit?.("provider://cli-install-progress", {
             stage: "action_required",
-            message: `Antigravity could not be installed automatically. Install it from ${ANTIGRAVITY_INSTALL_URL}, then start Antigravity again.`,
+            message:
+              "Seren could not prepare Antigravity yet and will retry automatically.",
           });
           throw error;
         }
@@ -999,7 +996,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Grok CLI is not installed yet. Seren can install it automatically on first launch.",
+                  "Seren is preparing the Grok CLI automatically.",
               }),
         };
       },
@@ -1007,37 +1004,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         return true;
       },
       async ensureCli() {
-        const resolved = resolveGrokBinary();
-        if (resolved !== "grok") {
-          return resolved;
-        }
-        await ensureGlobalNpmPackage({
-          emit,
-          command: "grok",
-          packageName: "@xai-official/grok",
-          label: "Grok",
-        });
-        const installed = resolveGrokBinary();
-        if (installed !== "grok") {
-          return installed;
-        }
-        // A user-managed grok outside the paths resolveGrokBinary knows is
-        // still spawnable, so PATH decides before we give up.
-        if (await isCommandAvailable("grok")) {
-          return "grok";
-        }
-        // Returning the bare command here spawned an ENOENT that surfaced as
-        // "Grok agent stopped before request completed", which says nothing
-        // about a missing install. Mirrors Claude/Codex. #3154
-        const url = emitCliActionRequired(emit, {
-          label: "Grok",
-          bareCommand: "grok",
-          packageName: "@xai-official/grok",
-          reason: "installation_required",
-        });
-        throw new Error(
-          `Grok CLI is not installed in a verifiable location. Install it from ${url}, then retry.`,
-        );
+        return ensureGrokCliViaUpdater(emit);
       },
       launchLogin() {
         const resolved = resolveGrokBinary();
@@ -1099,6 +1066,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       },
     },
   };
+  assertAgentCliProvisioningComplete(definitions, AGENT_CLI_PROVISIONING);
 
   function getDefinition(agentType) {
     const definition = definitions[agentType];
@@ -1108,16 +1076,28 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     return definition;
   }
 
-  // Fire-and-forget background update checks for bundled CLIs (#1637).
-  // TTL-gated to 24h inside backgroundUpdateCli and same-channel only. Any
-  // verification failure emits one deduplicated recovery event. Do not await
-  // here — registry init must not block on npm.
+  // Fire-and-forget automatic provisioning and background update checks for
+  // every Seren-managed CLI. Installed CLIs remain TTL-gated; missing CLIs
+  // bypass the TTL and install into Seren's writable per-user prefix. Do not
+  // await here — registry init must not block on downloads.
   const npmCliScript = resolveNpmCliScript();
   const persistedUpdaterState = loadState();
-  let pendingCliUpdateAction = [
-    persistedUpdaterState["pendingAction:codex"],
-    persistedUpdaterState["pendingAction:claude"],
-  ]
+  const managedNpmTargets = Object.values(AGENT_CLI_PROVISIONING)
+    .filter((entry) => entry.kind === "npm")
+    .map((entry) => entry.target);
+  let removedStaleInstallAction = false;
+  const persistedActions = managedNpmTargets.map((target) => {
+    const key = `pendingAction:${target}`;
+    const action = persistedUpdaterState[key];
+    if (action?.reason === "installation_required") {
+      persistedUpdaterState[key] = null;
+      removedStaleInstallAction = true;
+      return null;
+    }
+    return action;
+  });
+  if (removedStaleInstallAction) saveState(persistedUpdaterState);
+  let pendingCliUpdateAction = persistedActions
     .filter(Boolean)
     .sort((left, right) => (right.at ?? 0) - (left.at ?? 0))[0] ?? null;
   const onUpdated = async ({ label, bareCommand, from, to }) => {
@@ -1184,7 +1164,18 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       packageName: "@anthropic-ai/claude-code",
       resolvePath: resolveInstalledClaudeBinary,
     },
+    grok: {
+      label: "Grok",
+      bareCommand: "grok",
+      packageName: "@xai-official/grok",
+      resolvePath: resolveGrokBinary,
+    },
   };
+  for (const target of new Set(managedNpmTargets)) {
+    if (!cliUpdateConfigs[target]) {
+      throw new Error(`Missing managed npm CLI provisioner for ${target}.`);
+    }
+  }
   const runCliUpdate = async (bareCommand, { force = false } = {}) => {
     const config = cliUpdateConfigs[bareCommand];
     if (!config) {
@@ -1197,6 +1188,9 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       packageName: config.packageName,
       npmCliScript,
       force,
+      installIfMissing: true,
+      installPrefix: managedCliPrefix(),
+      resolveInstalledPath: config.resolvePath,
       onUpdated,
       onScanRejected,
       onActionRequired,
@@ -1211,8 +1205,26 @@ export function createBrowserLocalAgentRegistry({ emit }) {
     }
     return result;
   };
-  void runCliUpdate("codex");
-  void runCliUpdate("claude");
+  for (const target of new Set(managedNpmTargets)) {
+    void runCliUpdate(target);
+  }
+  const verifiedArtifactProvisioners = {
+    antigravity: () => ensureAntigravityCli({ emit }),
+  };
+  const verifiedArtifactTargets = Object.values(AGENT_CLI_PROVISIONING)
+    .filter((entry) => entry.kind === "verified-artifact")
+    .map((entry) => entry.target);
+  for (const target of new Set(verifiedArtifactTargets)) {
+    const provision = verifiedArtifactProvisioners[target];
+    if (!provision) {
+      throw new Error(`Missing verified artifact CLI provisioner for ${target}.`);
+    }
+    void provision().catch((error) => {
+      console.warn(
+        `[agent-registry] ${target} automatic provisioning will retry: ${error?.message ?? String(error)}`,
+      );
+    });
+  }
 
   return {
     async getAvailableAgents() {
@@ -1260,11 +1272,13 @@ export function createBrowserLocalAgentRegistry({ emit }) {
   };
 }
 
-// Exported for regression tests. A package missing from this map makes its
-// ensureCli failure interpolate `undefined` in place of the install URL,
-// which is the unhelpful error #3154 was filed about.
-export { CLI_INSTALL_INSTRUCTIONS as _CLI_INSTALL_INSTRUCTIONS };
 // Exported for regression tests of the spawn-path baseline gate (#2904,
 // #3443). Production callers go through ensureCodexCliViaUpdater /
 // ensureClaudeCodeCli.
 export { ensureCliBaselineViaUpdater as _ensureCliBaselineViaUpdater };
+// Exported for a completeness guard: every locally enumerated agent must state
+// whether Seren provisions it, derives it, or depends on an external app.
+export { AGENT_CLI_PROVISIONING as _AGENT_CLI_PROVISIONING };
+export {
+  assertAgentCliProvisioningComplete as _assertAgentCliProvisioningComplete,
+};

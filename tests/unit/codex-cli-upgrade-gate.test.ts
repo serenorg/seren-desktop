@@ -11,8 +11,14 @@ const agentRegistrySource = readFileSync(
 
 describe("#2904 Codex CLI upgrade gate", () => {
   it("Codex ensureCli uses the blocking updater before provider spawn", () => {
-    const codexDefStart = agentRegistrySource.indexOf("codex: {");
-    const claudeDefStart = agentRegistrySource.indexOf('"claude-code": {');
+    const registryStart = agentRegistrySource.indexOf(
+      "export function createBrowserLocalAgentRegistry",
+    );
+    const codexDefStart = agentRegistrySource.indexOf("codex: {", registryStart);
+    const claudeDefStart = agentRegistrySource.indexOf(
+      '"claude-code": {',
+      codexDefStart,
+    );
     const codexDefinition = agentRegistrySource.slice(
       codexDefStart,
       claudeDefStart,

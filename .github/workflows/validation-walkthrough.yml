@@ -6,7 +6,9 @@ on:
     paths:
       - "src/**"
       - "src-tauri/**"
+      - "bin/browser-local/**"
       - "scripts/validate-walkthrough.ts"
+      - "scripts/validation-env.ts"
       - "scripts/validation-dev.ts"
       - "scripts/validation-slots.ts"
       - "tests/unit/validation-slots.test.ts"
@@ -18,8 +20,12 @@ on:
 jobs:
   walkthrough:
     if: contains(github.event.pull_request.labels.*.name, 'needs-validation')
-    runs-on: macos-latest
-    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
@@ -29,13 +35,22 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Install Linux desktop dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev libwayland-dev libegl-dev libgbm-dev xvfb dbus-x11 gnome-keyring
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run validation walkthrough
-        run: pnpm validate:walkthrough app-ready
+      - name: Run automatic CLI walkthrough (macOS / Windows)
+        if: matrix.os != 'ubuntu-latest'
+        run: pnpm validate:walkthrough automatic-cli-provisioning
+      - name: Run automatic CLI walkthrough (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a pnpm validate:walkthrough automatic-cli-provisioning
       - name: Upload validation artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: validation-walkthrough
+          name: validation-walkthrough-${{ matrix.os }}
           path: artifacts/validation-walkthrough

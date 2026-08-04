@@ -19,9 +19,11 @@ export function validationChildEnv(inputs: {
   repoRoot: string;
   realHome: string;
   pnpmStoreDir?: string | null;
+  platform?: NodeJS.Platform;
 }): NodeJS.ProcessEnv {
   const validationHome = validationHomeForSlot(inputs.repoRoot, inputs.port);
   const validationIdentifier = `com.serendb.desktop.validation.slot${inputs.port}`;
+  const platform = inputs.platform ?? process.platform;
   const env: NodeJS.ProcessEnv = {
     ...inputs.baseEnv,
     HOME: validationHome,
@@ -41,8 +43,17 @@ export function validationChildEnv(inputs: {
   // macOS Foundation resolves Tauri's app-data directory from
   // CFFIXED_USER_HOME rather than HOME. Keep the validation app's database,
   // discovery token, and keychain in the same per-slot sandbox after a restart.
-  if (process.platform === "darwin") {
+  if (platform === "darwin") {
     env.CFFIXED_USER_HOME = validationHome;
+  }
+
+  // Windows resolves both Seren's app state and its managed npm prefix from
+  // USERPROFILE/APPDATA rather than HOME. Point all three at the disposable
+  // slot so a hosted-runner walkthrough proves a genuinely clean first run.
+  if (platform === "win32") {
+    env.USERPROFILE = validationHome;
+    env.APPDATA = path.join(validationHome, "AppData", "Roaming");
+    env.LOCALAPPDATA = path.join(validationHome, "AppData", "Local");
   }
 
   if (inputs.pnpmStoreDir != null) {

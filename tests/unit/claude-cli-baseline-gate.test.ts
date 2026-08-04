@@ -43,9 +43,10 @@ describe("#3443 claude-code spawn wiring enforces the baseline", () => {
     expect(helper).toContain("ensureCliBaselineViaUpdater(emit");
     expect(helper).toContain('packageName: "@anthropic-ai/claude-code"');
     expect(helper).toContain("resolveBinary: resolveInstalledClaudeBinary");
-    // Custom PATH installs cannot be auto-updated, but a determinately
-    // below-baseline one must still be refused with an actionable error.
+    // A determinately stale custom PATH install is replaced by Seren's
+    // verified managed copy without a manual update handoff.
     expect(helper).toContain("isBelowBaseline(installed, baseline)");
+    expect(agentRegistrySource).toContain("installIfMissing: true");
     // A large JS CLI can outlive the version-probe timeout on a slow
     // machine; failing closed there turned a slow disk into "not
     // installed" and broke the v3.75.0 release gate (#3471).
@@ -136,26 +137,50 @@ describe("#3443 shared baseline gate decision logic", () => {
     ).rejects.toThrow(/still 2\.1\.100; Seren requires 2\.1\.197/);
   });
 
-  it("hands off with installation_required when no version can be probed", async () => {
+  it("automatically provisions a missing CLI with no action-required handoff (#3680)", async () => {
     const events: EmittedEvent[] = [];
-    const updaterCalls: unknown[] = [];
-    await expect(
-      ensureCliBaselineViaUpdater(makeEmit(events), {
-        ...CLAUDE_BASELINE_CONFIG,
-        resolveBinary: () => "claude",
-        _runInstalledVersion: async () => null,
-        _backgroundUpdateCli: async (options: unknown) => {
-          updaterCalls.push(options);
-          return { outcome: "success" };
-        },
-      }),
-    ).rejects.toThrow(/not installed in a verifiable location/);
+    const updaterCalls: Array<Record<string, unknown>> = [];
+    const resolved = ["claude", "/managed/bin/claude"];
+    let versionCalls = 0;
+    const result = await ensureCliBaselineViaUpdater(makeEmit(events), {
+      ...CLAUDE_BASELINE_CONFIG,
+      resolveBinary: () => resolved.shift() ?? "/managed/bin/claude",
+      _runInstalledVersion: async () =>
+        versionCalls++ === 0 ? null : "2.1.221",
+      _backgroundUpdateCli: async (options: Record<string, unknown>) => {
+        updaterCalls.push(options);
+        return { outcome: "success" };
+      },
+    });
 
-    expect(updaterCalls).toHaveLength(0);
-    const action = events.find(
-      (event) => event.name === "provider://cli-update-action-required",
-    );
-    expect(action?.payload.reason).toBe("installation_required");
+    expect(result).toBe("/managed/bin/claude");
+    expect(updaterCalls).toHaveLength(1);
+    expect(updaterCalls[0]).toMatchObject({
+      force: true,
+      installIfMissing: true,
+    });
+    expect(updaterCalls[0].installPrefix).toEqual(expect.any(String));
+    expect(
+      events.some(
+        (event) => event.name === "provider://cli-update-action-required",
+      ),
+    ).toBe(false);
+  });
+
+  it("uses a verified first install when the updater's cold health probe times out (#3680)", async () => {
+    const resolved = ["claude", "/managed/bin/claude"];
+    let versionCalls = 0;
+    const result = await ensureCliBaselineViaUpdater(makeEmit([]), {
+      ...CLAUDE_BASELINE_CONFIG,
+      resolveBinary: () => resolved.shift() ?? "/managed/bin/claude",
+      _runInstalledVersion: async () =>
+        versionCalls++ === 0 ? null : "2.1.221",
+      _backgroundUpdateCli: async () => ({
+        outcome: "skipped:verification_required",
+      }),
+    });
+
+    expect(result).toBe("/managed/bin/claude");
   });
 
   it("spawns a resolved install permissively when the probe fails and the CLI opts in (#3471)", async () => {
@@ -177,26 +202,19 @@ describe("#3443 shared baseline gate decision logic", () => {
     expect(events).toHaveLength(0);
   });
 
-  it("still hands off an UNRESOLVED install even when the CLI opts in (#3471)", async () => {
-    await expect(
-      ensureCliBaselineViaUpdater(makeEmit([]), {
-        ...CLAUDE_BASELINE_CONFIG,
-        resolveBinary: () => "claude",
-        allowUnprobeableInstall: true,
-        _runInstalledVersion: async () => null,
-        _backgroundUpdateCli: async () => ({ outcome: "success" }),
-      }),
-    ).rejects.toThrow(/not installed in a verifiable location/);
-  });
+  it("repairs an unprobeable strict CLI automatically — the Codex contract (#3680)", async () => {
+    const resolved = ["/broken/bin/codex", "/managed/bin/codex"];
+    let versionCalls = 0;
+    const result = await ensureCliBaselineViaUpdater(makeEmit([]), {
+      label: "Codex",
+      bareCommand: "codex",
+      packageName: "@openai/codex",
+      resolveBinary: () => resolved.shift() ?? "/managed/bin/codex",
+      _runInstalledVersion: async () =>
+        versionCalls++ === 0 ? null : "0.146.0",
+      _backgroundUpdateCli: async () => ({ outcome: "success" }),
+    });
 
-  it("keeps the strict handoff for CLIs that do not opt in — the Codex contract (#2904)", async () => {
-    await expect(
-      ensureCliBaselineViaUpdater(makeEmit([]), {
-        ...CLAUDE_BASELINE_CONFIG,
-        resolveBinary: () => "/fake/bin/codex",
-        _runInstalledVersion: async () => null,
-        _backgroundUpdateCli: async () => ({ outcome: "success" }),
-      }),
-    ).rejects.toThrow(/not installed in a verifiable location/);
+    expect(result).toBe("/managed/bin/codex");
   });
 });

@@ -578,72 +578,19 @@ try {
   # app's full tree, so this completes in seconds. The tight timeout turns a
   # hung install into a fast failure instead of a 20-minute stall. #3136
   Invoke-LoggedNative "pnpm install" "pnpm" @("install", "--frozen-lockfile") 300
-  # #3096 intentionally removed provider-startup installation. The release
-  # user is disposable and starts empty, so provision its real CLI prerequisites
-  # explicitly as test setup using the vendors' documented npm packages. This
-  # must remain outside provider_ensure_agent_cli: production startup should
-  # continue to hand a missing CLI to the user for review/manual installation.
-  `$agentCliPackages = @(
-    @{ Label = "Claude Code"; Package = "@anthropic-ai/claude-code@latest"; Binary = "claude.cmd" },
-    @{ Label = "Codex"; Package = "@openai/codex@latest"; Binary = "codex.cmd" },
-    @{ Label = "Grok"; Package = "@xai-official/grok@latest"; Binary = "grok.cmd" }
-  )
-  # The installed app resolves agent CLIs from the real default npm global
-  # prefix (%APPDATA%\npm), NOT this portable toolchain Node's own dir, which is
-  # where a zip Node otherwise plants its globals. Pin the prefix to %APPDATA%\npm
-  # so the app's production resolver (resolveInstalledCodexBinary, candidate #1)
-  # finds them exactly as on a real MSI-Node user profile. Without this the box
-  # installed codex-cli 0.145.0 into the scratch Node dir, the app could not see
-  # it, and the codex journey died with "not installed in a verifiable location"
-  # while build+publish were correctly skipped (run 30159367572).
-  `$appDataNpmPrefix = Join-Path `$env:APPDATA "npm"
-  New-Item -ItemType Directory -Path `$appDataNpmPrefix -Force | Out-Null
-  `$env:npm_config_prefix = `$appDataNpmPrefix
-  `$agentCliInstallArgs = @("install", "--global", "--no-audit", "--no-fund") + @(
-    `$agentCliPackages | ForEach-Object { `$_.Package }
-  )
-  Invoke-LoggedNative "Install e2e agent CLIs" "npm" `$agentCliInstallArgs 1200
-  `$npmGlobalPrefix = [string](& npm prefix --global | Select-Object -Last 1)
-  `$npmGlobalPrefix = `$npmGlobalPrefix.Trim()
-  if ([string]::IsNullOrWhiteSpace(`$npmGlobalPrefix)) {
-    throw "npm did not report a global prefix after installing the e2e agent CLIs"
-  }
-  foreach (`$agentCli in `$agentCliPackages) {
-    `$cliPath = Join-Path `$npmGlobalPrefix `$agentCli.Binary
-    if (-not (Test-Path -LiteralPath `$cliPath)) {
-      throw "Required `$(`$agentCli.Label) e2e agent CLI was not installed at the npm global prefix"
+  # This temporary Windows profile is intentionally born without coding-agent
+  # binaries. The installed Seren app must provision every managed CLI itself;
+  # test setup must never mask a regression by preinstalling them first.
+  foreach (`$commandName in @("claude", "codex", "grok", "agy")) {
+    if (Get-Command `$commandName -ErrorAction SilentlyContinue) {
+      throw "Clean Windows e2e profile unexpectedly resolves `$commandName before Seren starts"
     }
-    Invoke-LoggedNative "Verify `$(`$agentCli.Label) CLI" `$cliPath @("--version") 120
   }
-
-  # Antigravity is a native Google binary, not an npm package. Match the
-  # production installer: trust only Google's platform manifest/storage path
-  # and verify SHA-512 before the release gate launches the app.
-  `$agyManifestOrigin = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
-  `$agyManifest = Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json" -UseBasicParsing -TimeoutSec 60
-  `$agyArtifactUri = [Uri][string]`$agyManifest.url
-  if (
-    `$agyArtifactUri.Scheme -ne "https" -or
-    `$agyArtifactUri.Host -ne "storage.googleapis.com" -or
-    -not `$agyArtifactUri.AbsolutePath.StartsWith("/antigravity-public/antigravity-cli/")
-  ) {
-    throw "Antigravity manifest selected an untrusted artifact URL"
+  `$managedCliPrefix = Join-Path `$env:APPDATA "Seren\cli-tools"
+  if (Test-Path -LiteralPath `$managedCliPrefix) {
+    throw "Clean Windows e2e profile already contains Seren-managed agent CLIs"
   }
-  `$agyBinDir = Join-Path `$env:LOCALAPPDATA "agy\bin"
-  `$agyPath = Join-Path `$agyBinDir "agy.exe"
-  New-Item -ItemType Directory -Path `$agyBinDir -Force | Out-Null
-  `$previousProgress = `$ProgressPreference
-  `$ProgressPreference = "SilentlyContinue"
-  try {
-    Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath -UseBasicParsing -TimeoutSec 300
-  } finally {
-    `$ProgressPreference = `$previousProgress
-  }
-  `$agyHash = (Get-FileHash -LiteralPath `$agyPath -Algorithm SHA512).Hash.ToLowerInvariant()
-  if (`$agyHash -ne ([string]`$agyManifest.sha512).ToLowerInvariant()) {
-    throw "Antigravity release checksum verification failed"
-  }
-  Invoke-LoggedNative "Verify Antigravity CLI" `$agyPath @("--version") 120
+  Write-TaskLog "Confirmed clean profile; Seren must provision every managed agent CLI automatically"
   Invoke-LoggedNative "Playwright Chromium install" "pnpm" @("exec", "playwright", "install", "chromium") 600
   `$harnessArgs = @(
     "-NoProfile",
