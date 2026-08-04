@@ -129,14 +129,55 @@ export async function readAntigravityVersion(binary = resolveAntigravityBinary()
   }
 }
 
+export function isAntigravityAuthError(message) {
+  const normalized = String(message ?? "").toLowerCase();
+  return (
+    normalized.includes("please sign in") ||
+    normalized.includes("sign-in required") ||
+    normalized.includes("authentication required") ||
+    normalized.includes("not authenticated") ||
+    normalized.includes("not logged in") ||
+    normalized.includes("no valid oauth token") ||
+    normalized.includes("no valid refresh token") ||
+    normalized.includes("failed to load token")
+  );
+}
+
+// `agy models` is the only way to observe Antigravity's auth state, and it is a
+// network round-trip that every agent-roster query would otherwise pay. Cache
+// the verdict briefly so the roster is not gated on Google, and hold the last
+// verdict when the CLI fails for a reason other than authentication — a slow or
+// offline network must not report a signed-in user as signed out. #3663
+const AUTH_CACHE_TTL_MS = 60_000;
+const authCache = new Map();
+
+export function clearAntigravityAuthCache() {
+  authCache.clear();
+}
+
 export async function checkAntigravityAuthenticated(
   binary = resolveAntigravityBinary(),
+  { now = Date.now } = {},
 ) {
   if (binary === "agy") return false;
+  const checkedAt = now();
+  const cached = authCache.get(binary);
+  if (cached && checkedAt - cached.checkedAt < AUTH_CACHE_TTL_MS) {
+    return cached.authenticated;
+  }
+
   try {
     await execFileText(binary, ["models"], 8_000);
+    authCache.set(binary, { authenticated: true, checkedAt });
     return true;
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!isAntigravityAuthError(message) && cached) {
+      // Unreachable or slow, not signed out. Keep the known verdict and let
+      // the next query past the TTL settle it.
+      return cached.authenticated;
+    }
+    authCache.set(binary, { authenticated: false, checkedAt });
     return false;
   }
 }

@@ -23,6 +23,7 @@ import {
 import {
   ANTIGRAVITY_INSTALL_URL,
   checkAntigravityAuthenticated,
+  clearAntigravityAuthCache,
   ensureAntigravityCli,
   resolveAntigravityBinary,
 } from "./antigravity-binary.mjs";
@@ -975,6 +976,9 @@ export function createBrowserLocalAgentRegistry({ emit }) {
       },
       launchLogin() {
         const resolved = resolveAntigravityBinary();
+        // Sign-in changes the verdict the cached probe recorded, so drop it
+        // and let the next query observe the new state immediately. #3663
+        clearAntigravityAuthCache();
         launchInteractiveCommand(resolved !== "agy" ? resolved : "agy");
       },
       async checkAuthenticated() {
