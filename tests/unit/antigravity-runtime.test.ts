@@ -67,6 +67,17 @@ describe("Antigravity resumable headless contract", () => {
     ]);
   });
 
+  it("does not cap a turn when the session carries no explicit timeout", () => {
+    // Desktop sessions always leave timeoutSecs undefined: an agent may think,
+    // wait for approval, or work for a long stretch, and killing it is never
+    // right. `--print-timeout` bounds the whole turn and the CLI defaults to
+    // 5m when the flag is absent, so the flag must be present and large. #3662
+    const args = buildAntigravityArgs({}, "Refactor the module");
+    const timeout = args[args.indexOf("--print-timeout") + 1];
+
+    expect(timeout).toBe("8760h");
+  });
+
   it("preserves every model printed by the authenticated CLI", () => {
     expect(
       normalizeAntigravityModels(
