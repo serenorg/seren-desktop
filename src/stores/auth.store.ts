@@ -81,6 +81,23 @@ type EnsureApiKeyResult =
  * Fresh installs create one. Existing installs reconcile the server-side scope
  * record so keys minted by an older Desktop build cannot remain under-scoped.
  */
+/**
+ * The skill key is needed only by skill child processes and the Claude memory
+ * interceptor — never by sign-in or the chat path. Its failure must not reach
+ * `ensureApiKey`'s result, because a 403 there clears the session and raises
+ * the blocking sign-in modal. Retries on the next refresh. #3677
+ */
+async function provisionSkillApiKey(): Promise<void> {
+  try {
+    await ensureSkillApiKey();
+  } catch (error) {
+    console.warn(
+      "[Auth Store] Skill API key provisioning failed; skills and Claude memory will retry on next refresh:",
+      error,
+    );
+  }
+}
+
 export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
   try {
     const existingKey = await getSerenApiKey();
@@ -104,7 +121,7 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
           "[Auth Store] Stored API key scopes are current",
         );
       }
-      await ensureSkillApiKey();
+      await provisionSkillApiKey();
       return { ok: true };
     }
 
@@ -117,7 +134,7 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
     verboseRuntimeConsole.debug(
       "[Auth Store] API key created and stored successfully",
     );
-    await ensureSkillApiKey();
+    await provisionSkillApiKey();
     return { ok: true };
   } catch (error) {
     console.error("[Auth Store] Failed to ensure API key:", error);

@@ -13,6 +13,7 @@ const {
   createApiKeyMock,
   getDesktopApiKeyStatusMock,
   repairDesktopApiKeyMock,
+  ensureSkillApiKeyMock,
   authLogoutMock,
   initializeGatewayMock,
   resetGatewayMock,
@@ -41,6 +42,7 @@ const {
     createApiKeyMock: vi.fn(async () => "seren-api-key-fresh"),
     getDesktopApiKeyStatusMock: vi.fn(),
     repairDesktopApiKeyMock: vi.fn(),
+    ensureSkillApiKeyMock: vi.fn(async () => {}),
     authLogoutMock: vi.fn(async () => {}),
     initializeGatewayMock: vi.fn(async () => {}),
     resetGatewayMock: vi.fn(async () => {}),
@@ -81,6 +83,7 @@ vi.mock("@/services/auth", () => ({
 vi.mock("@/services/desktop-api-access", () => ({
   getDesktopApiKeyStatus: getDesktopApiKeyStatusMock,
   repairDesktopApiKey: repairDesktopApiKeyMock,
+  ensureSkillApiKey: ensureSkillApiKeyMock,
 }));
 
 vi.mock("@/api", () => ({
@@ -332,6 +335,27 @@ describe("auth.store #2497 — API key provisioning failure handling", () => {
       expect(authStore.isAuthenticated).toBe(false);
       expect(authStore.signInModalRequested).toBe(true);
       expect(storeSerenApiKeyMock).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const status of [403, 500]) {
+    it(`skill key failure (HTTP ${status}) keeps the session signed in`, async () => {
+      // The skill key serves skill child processes and the Claude memory
+      // interceptor only. A 403 on the Desktop key legitimately forces
+      // re-sign-in; the same status on this secondary key must not. #3677
+      storedKeyRef.value = null;
+      ensureSkillApiKeyMock.mockRejectedValueOnce(
+        Object.assign(new Error(`Forbidden (returned HTTP ${status})`), {
+          status,
+        }),
+      );
+
+      await setAuthenticated({ id: "u1", email: "u@test", name: "U" });
+
+      expect(authStore.isAuthenticated).toBe(true);
+      expect(authStore.signInModalRequested).toBe(false);
+      // The Desktop key still provisioned normally.
+      expect(storeSerenApiKeyMock).toHaveBeenCalled();
     });
   }
 
