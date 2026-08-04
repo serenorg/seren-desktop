@@ -329,13 +329,34 @@ export async function installAntigravity({
   return target;
 }
 
+// Every Antigravity spawn calls through here, so two concurrent first-run
+// spawns would otherwise run two installs against the same staged path and
+// one would fail on a vanished rename. Share a single install instead. #3665
+let installInFlight = null;
+
 export async function ensureAntigravityCli({ emit } = {}) {
   const resolved = resolveAntigravityBinary();
   const installedVersion = await readAntigravityVersion(resolved);
   if (isAntigravityVersionSupported(installedVersion)) {
     return resolved;
   }
-  return installAntigravity({ emit });
+  if (installedVersion === null && resolved !== "agy") {
+    // A resolved install whose version probe fails is usable, not missing:
+    // on an IO-starved machine the probe can time out for a healthy binary,
+    // and failing closed here forces a full re-download — or fails the spawn
+    // outright when offline. Matches the Claude policy from #3471.
+    console.warn(
+      `[antigravity] version probe failed at ${resolved}; spawning without the baseline check`,
+    );
+    return resolved;
+  }
+
+  if (!installInFlight) {
+    installInFlight = installAntigravity({ emit }).finally(() => {
+      installInFlight = null;
+    });
+  }
+  return installInFlight;
 }
 
 export const _validateAntigravityManifest = validateManifest;
