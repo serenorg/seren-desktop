@@ -78,7 +78,6 @@ export const MissionControlPanel: Component = () => {
       if (disposed) cleanup();
       else unlisten = cleanup;
     });
-
   });
 
   // The launch form can appear after mount — hydrateLatest clears a settled

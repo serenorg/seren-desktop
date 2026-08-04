@@ -243,7 +243,7 @@ export type DataResponsePurchaseResponse = {
 export type DataResponseSkillAgentGrant = {
     data: {
         agent_identity_id: string;
-        allowed_task_classes: Array<string>;
+        allowed_task_labels: Array<string>;
         created_at: string;
         grant_generation: number;
         granted_by_user_id: string;
@@ -439,7 +439,7 @@ export type DataResponseVecFileListing = {
 export type DataResponseVecSkillAgentGrant = {
     data: Array<{
         agent_identity_id: string;
-        allowed_task_classes: Array<string>;
+        allowed_task_labels: Array<string>;
         created_at: string;
         grant_generation: number;
         granted_by_user_id: string;
@@ -762,7 +762,7 @@ export type SkillAccess = {
 
 export type SkillAgentGrant = {
     agent_identity_id: string;
-    allowed_task_classes: Array<string>;
+    allowed_task_labels: Array<string>;
     created_at: string;
     grant_generation: number;
     granted_by_user_id: string;
@@ -1029,7 +1029,7 @@ export type UpsertOrgFolderRequest = {
 };
 
 export type UpsertSkillAgentGrantRequest = {
-    allowed_task_classes?: Array<string>;
+    allowed_task_labels?: Array<string>;
     skill_version_id: string;
 };
 

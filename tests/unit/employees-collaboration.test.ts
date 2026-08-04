@@ -1,3 +1,6 @@
+// ABOUTME: Contract tests for organization employee collaboration settings.
+// ABOUTME: Covers save ordering and the enable-without-assignment refusal.
+
 import {
   collaborationRunPayload,
   saveOrganizationCollaborationSettings,
