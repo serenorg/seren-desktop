@@ -1,5 +1,5 @@
 // ABOUTME: Model selector dropdown for choosing AI models in chat.
-// ABOUTME: Shows the searchable OpenRouter catalog with provider filtering.
+// ABOUTME: Shows the searchable live SerenModels catalog with provider filtering.
 
 import type { Component } from "solid-js";
 import {
@@ -18,7 +18,6 @@ import {
   type ProviderId,
   type ProviderModel,
 } from "@/lib/providers";
-import { type Model, modelsService } from "@/services/models";
 import {
   allowsSerenPrivateAgent,
   allowsSerenPublicModels,
@@ -68,7 +67,6 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
   const [draftProvider, setDraftProvider] = createSignal<ProviderId | null>(
     null,
   );
-  const [catalogModels, setCatalogModels] = createSignal<Model[]>([]);
   const [isLoadingModels, setIsLoadingModels] = createSignal(false);
   const [privateModels, setPrivateModels] = createSignal<ProviderModel[]>([]);
   let containerRef: HTMLDivElement | undefined;
@@ -210,9 +208,6 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
             );
           }
         }
-
-        const searchableModels = await modelsService.getAvailable();
-        setCatalogModels(searchableModels);
       } catch (err) {
         console.error("Failed to load available models:", err);
       } finally {
@@ -221,7 +216,7 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     })();
   });
 
-  // Filter models: show defaults when no search, search full catalog when typing
+  // Filter models: show the live list when no search, filter it when typing
   const filteredModels = createMemo(() => {
     const query = searchQuery().toLowerCase().trim();
 
@@ -242,22 +237,10 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
       return defaultModels();
     }
 
-    // Searching - use the full Seren catalog for the Seren provider
-    if (currentProvider() === "seren" && catalogModels().length > 0) {
-      const allModels = catalogModels().map((m) => ({
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        description: m.provider,
-      }));
-      return allModels.filter(
-        (model) =>
-          model.name.toLowerCase().includes(query) ||
-          model.id.toLowerCase().includes(query),
-      );
-    }
-
-    // For other providers, search within their models
+    // Search filters the same live list the empty picker shows. For Seren
+    // that list is the publisher's advertised catalog — the only IDs
+    // `POST /publishers/seren-models/chat/completions` routes. A broader
+    // discovery catalog let search surface IDs that 404 on send (#3683).
     return defaultModels().filter(
       (model) =>
         model.name.toLowerCase().includes(query) ||
@@ -287,21 +270,14 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
     }
 
     const models = defaultModels();
-    // First check defaults, then check the full Seren catalog
     const found = models.find((model) => model.id === activeModel);
     if (found) return found;
 
-    // Check full catalog for Seren provider (user may have selected a non-default model)
-    if (currentProvider() === "seren") {
-      const orModel = catalogModels().find((m) => m.id === activeModel);
-      if (orModel) {
-        return {
-          id: orModel.id,
-          name: orModel.name,
-          contextWindow: orModel.contextWindow,
-          description: orModel.provider,
-        };
-      }
+    // A committed model outside the live catalog (e.g. selected before the
+    // catalog changed) is shown by its raw ID rather than borrowing the name
+    // of an unrelated catalog entry.
+    if (activeModel) {
+      return { id: activeModel, name: activeModel, contextWindow: 0 };
     }
 
     return models[0];

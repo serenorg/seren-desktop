@@ -1,10 +1,11 @@
 // ABOUTME: Contract guards for the live model-discovery network path.
-// ABOUTME: Keeps the full OpenRouter catalog reachable from packaged Tauri builds.
+// ABOUTME: Discovery and routing must share the SerenModels publisher catalog.
 
 import { describe, expect, it } from "vitest";
 import { readSource } from "./source-text";
 
 const modelsSource = readSource("src/services/models.ts");
+const selectorSource = readSource("src/components/chat/ModelSelector.tsx");
 const capabilities = JSON.parse(
   readSource("src-tauri/capabilities/default.json"),
 ) as {
@@ -26,30 +27,36 @@ const tauriConfig = JSON.parse(
   };
 };
 
-describe("model catalog network contract", () => {
-  it("loads the searchable catalog from OpenRouter's full models endpoint", () => {
-    expect(modelsSource).toContain(
-      'const CATALOG_URL = "https://openrouter.ai/api/v1/models";',
-    );
-    expect(modelsSource).toContain("await appFetch(CATALOG_URL)");
-    expect(modelsSource).not.toContain("/publishers/seren-models/models");
+describe("#3683 model catalog network contract", () => {
+  it("serves the searchable catalog from the live SerenModels publisher", () => {
+    // Search must only offer IDs that `POST /publishers/seren-models/
+    // chat/completions` can route: the publisher's advertised catalog.
+    // A broader discovery source made searched selections 404 on send.
+    expect(modelsSource).toContain("getLiveSerenModelCatalog()");
+    expect(modelsSource).not.toMatch(/openrouter/i);
+    // No hardcoded fallback list may reintroduce unroutable IDs.
+    expect(modelsSource).not.toContain("getDefaultModels");
   });
 
-  it("allows the OpenRouter catalog in packaged desktop builds", () => {
+  it("keeps the chat picker's search inside the live catalog list", () => {
+    expect(selectorSource).not.toMatch(/openrouter/i);
+    expect(selectorSource).toContain("getLiveSerenModelCatalog");
+  });
+
+  it("does not grant packaged builds access to retired discovery hosts", () => {
     const httpPermission = capabilities.permissions.find(
       (permission) =>
         typeof permission !== "string" &&
         permission.identifier === "http:default",
     );
-
-    expect(
+    const allowedUrls =
       typeof httpPermission !== "string"
-        ? httpPermission?.allow?.map((entry) => entry.url)
-        : [],
-    ).toContain("https://openrouter.ai/**");
-    expect(tauriConfig.app.security.csp).toContain(
-      "connect-src 'self' ipc://localhost",
-    );
-    expect(tauriConfig.app.security.csp).toContain("https://openrouter.ai");
+        ? (httpPermission?.allow?.map((entry) => entry.url) ?? [])
+        : [];
+
+    expect(allowedUrls).toContain("https://api.serendb.com/**");
+    expect(allowedUrls.join(" ")).not.toMatch(/openrouter/i);
+    expect(tauriConfig.app.security.csp).toContain("https://api.serendb.com");
+    expect(tauriConfig.app.security.csp).not.toMatch(/openrouter/i);
   });
 });

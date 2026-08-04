@@ -1,5 +1,5 @@
-// ABOUTME: Searchable dropdown for selecting AI models from OpenRouter.
-// ABOUTME: Fetches full model list and allows filtering by name/provider.
+// ABOUTME: Searchable dropdown for selecting AI models from the live Seren catalog.
+// ABOUTME: Fetches the routable model list and allows filtering by name/provider.
 
 import {
   type Component,
