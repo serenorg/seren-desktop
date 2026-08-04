@@ -179,6 +179,7 @@ struct ToolCallChunk {
 struct ParsedStreamError {
     message: String,
     retryable: bool,
+    retry_without_streaming: bool,
 }
 
 /// Result of parsing a single SSE data line.
@@ -216,6 +217,7 @@ enum StreamOutcome {
         error: String,
         cost: f64,
         retryable: bool,
+        retry_without_streaming: bool,
     },
 }
 
@@ -309,6 +311,13 @@ fn parse_embedded_stream_error(
     Some(ParsedStreamError {
         message: display_message,
         retryable: embedded_stream_error_is_retryable(code),
+        // The production gateway can expose a healthy non-streaming route
+        // while its provider streaming route returns this synthetic code.
+        // Other transient failures (timeouts, rate limits, 5xx) should retain
+        // the orchestrator's existing retry/reroute policy.
+        retry_without_streaming: code_text
+            .as_deref()
+            .is_some_and(|code| code.eq_ignore_ascii_case("upstream_error")),
     })
 }
 
@@ -811,6 +820,7 @@ created if missing.",
                 result.stream_error = Some(ParsedStreamError {
                     message,
                     retryable: gateway_status_is_retryable(status),
+                    retry_without_streaming: false,
                 });
                 return result;
             }
@@ -826,7 +836,8 @@ created if missing.",
         // Extract content delta (handles string, array-of-parts, or object with "text")
         let content_value = effective
             .pointer("/delta/content")
-            .or_else(|| effective.pointer("/choices/0/delta/content"));
+            .or_else(|| effective.pointer("/choices/0/delta/content"))
+            .or_else(|| effective.pointer("/choices/0/message/content"));
 
         let content_text = content_value.and_then(Self::normalize_content);
 
@@ -840,6 +851,8 @@ created if missing.",
         let thinking = effective
             .pointer("/delta/thinking")
             .or_else(|| effective.pointer("/choices/0/delta/thinking"))
+            .or_else(|| effective.pointer("/choices/0/message/reasoning_content"))
+            .or_else(|| effective.pointer("/choices/0/message/thinking"))
             .and_then(|v| v.as_str());
 
         if let Some(text) = thinking {
@@ -854,10 +867,15 @@ created if missing.",
         if let Some(tool_calls) = effective
             .pointer("/delta/tool_calls")
             .or_else(|| effective.pointer("/choices/0/delta/tool_calls"))
+            .or_else(|| effective.pointer("/choices/0/message/tool_calls"))
             .and_then(|v| v.as_array())
         {
-            for tc in tool_calls {
-                let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            for (position, tc) in tool_calls.iter().enumerate() {
+                let index = tc
+                    .get("index")
+                    .and_then(|v| v.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(position);
                 let id = tc.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
                 let name = tc
                     .pointer("/function/name")
@@ -1071,6 +1089,13 @@ created if missing.",
                     error: stream_error.message.clone(),
                     cost: *accumulated_cost,
                     retryable: stream_error.retryable,
+                    // Retrying transport is safe only before the renderer has
+                    // received content, thinking, or a tool call from this
+                    // request. Once output exists, preserve current behavior.
+                    retry_without_streaming: stream_error.retry_without_streaming
+                        && accumulated_content.is_empty()
+                        && accumulated_thinking.is_empty()
+                        && pending_tool_calls.is_empty(),
                 }),
         )
     }
@@ -1238,6 +1263,7 @@ created if missing.",
                             error: full_error,
                             cost: accumulated_cost,
                             retryable,
+                            retry_without_streaming: false,
                         });
                     }
                 }
@@ -2036,59 +2062,92 @@ impl Worker for ChatModelWorker {
                 body["max_tokens"] = serde_json::json!(4096);
             }
 
-            let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-
-            // Use authenticated_request for automatic 401 refresh and retry
-            let response =
-                crate::auth::authenticated_request(app, &self.client, |client, token| {
-                    client
-                        .post(&url)
-                        .header("Content-Type", "application/json")
-                        .bearer_auth(token)
-                        .body(body_str.clone())
-                })
-                .await?;
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body_text = response.text().await.unwrap_or_default();
-                // Check cancellation before logging — a 504 after cancel is expected
+            let mut use_streaming = true;
+            let outcome = loop {
                 if *self.cancelled.lock().await {
-                    log::debug!(
-                        "[ChatModelWorker] HTTP {} after cancellation (expected)",
-                        status
-                    );
                     return Ok(());
                 }
-                log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
-                let display_message = summarize_gateway_error(status, &body_text);
-                let failure_event = stream_failure_event(
-                    display_message.clone(),
-                    gateway_status_is_retryable(status.as_u16().into()),
-                    if total_cost > 0.0 {
-                        Some(total_cost)
-                    } else {
-                        None
-                    },
-                    tool_call_count,
-                );
-                if let Err(e) = event_tx
-                    .send(failure_event)
-                    .await
-                {
-                    // Channel closed — likely cancelled while sending
-                    log::debug!("[ChatModelWorker] Channel closed, cannot send error: {}", e);
-                    return Ok(());
-                }
-                return Err(display_message);
-            }
+                body["stream"] = serde_json::json!(use_streaming);
+                let body_str = serde_json::to_string(&body).map_err(|e| e.to_string())?;
 
-            // Stream the response
-            log::info!(
-                "[ChatModelWorker] Tool round {} starting — awaiting stream outcome",
-                round
-            );
-            let outcome = self.stream_response(response, &event_tx).await?;
+                // Use authenticated_request for automatic 401 refresh and retry.
+                let response =
+                    crate::auth::authenticated_request(app, &self.client, |client, token| {
+                        client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .bearer_auth(token)
+                            .body(body_str.clone())
+                    })
+                    .await?;
+
+                if !response.status().is_success() {
+                    let status = response.status();
+                    let body_text = response.text().await.unwrap_or_default();
+                    // Check cancellation before logging — a 504 after cancel is expected
+                    if *self.cancelled.lock().await {
+                        log::debug!(
+                            "[ChatModelWorker] HTTP {} after cancellation (expected)",
+                            status
+                        );
+                        return Ok(());
+                    }
+                    log::error!("[ChatModelWorker] HTTP {} from Gateway", status);
+                    let display_message = summarize_gateway_error(status, &body_text);
+                    let failure_event = stream_failure_event(
+                        display_message.clone(),
+                        gateway_status_is_retryable(status.as_u16().into()),
+                        if total_cost > 0.0 {
+                            Some(total_cost)
+                        } else {
+                            None
+                        },
+                        tool_call_count,
+                    );
+                    if let Err(e) = event_tx.send(failure_event).await {
+                        // Channel closed — likely cancelled while sending
+                        log::debug!(
+                            "[ChatModelWorker] Channel closed, cannot send error: {}",
+                            e
+                        );
+                        return Ok(());
+                    }
+                    return Err(display_message);
+                }
+
+                log::info!(
+                    "[ChatModelWorker] Tool round {} starting — awaiting {} outcome",
+                    round,
+                    if use_streaming {
+                        "streaming"
+                    } else {
+                        "non-streaming"
+                    }
+                );
+                let attempt_outcome = self.stream_response(response, &event_tx).await?;
+
+                if use_streaming {
+                    if let StreamOutcome::Failed {
+                        cost,
+                        retry_without_streaming: true,
+                        ..
+                    } = &attempt_outcome
+                    {
+                        // The failed stream emitted no visible output or tool
+                        // call, so one same-request transport fallback cannot
+                        // duplicate UI content or an external side effect.
+                        total_cost += *cost;
+                        use_streaming = false;
+                        log::warn!(
+                            "[ChatModelWorker] Streaming transport failed before output; retrying round {} without streaming",
+                            round
+                        );
+                        continue;
+                    }
+                }
+
+                break attempt_outcome;
+            };
 
             match outcome {
                 StreamOutcome::Complete {
@@ -2413,6 +2472,7 @@ impl Worker for ChatModelWorker {
                     error,
                     cost,
                     retryable,
+                    ..
                 } => {
                     total_cost += cost;
                     let total = if total_cost > 0.0 {
@@ -2915,6 +2975,7 @@ mod tests {
         assert!(failure.message.contains("402"));
         assert!(failure.message.contains("Insufficient credits"));
         assert!(!failure.retryable);
+        assert!(!failure.retry_without_streaming);
     }
 
     #[tokio::test]
@@ -2946,10 +3007,12 @@ mod tests {
                 error,
                 cost,
                 retryable,
+                retry_without_streaming,
             } => {
                 assert_eq!(error, "upstream_error: upstream request failed");
                 assert_eq!(cost, 0.0);
                 assert!(retryable);
+                assert!(retry_without_streaming);
             }
             other => panic!("Expected Failed outcome, got: {:?}", other),
         }
@@ -2958,6 +3021,95 @@ mod tests {
             rx.try_recv().is_err(),
             "stream parsing must not render a failure before orchestration decides whether to recover"
         );
+    }
+
+    #[test]
+    fn parses_non_streaming_message_content_reasoning_and_tools() {
+        let data = r#"{
+            "choices": [{
+                "message": {
+                    "content": "Done",
+                    "reasoning_content": "Checked the request",
+                    "tool_calls": [
+                        {"id":"tc_1","type":"function","function":{"name":"first_tool","arguments":"{}"}},
+                        {"id":"tc_2","type":"function","function":{"name":"second_tool","arguments":"{\"value\":2}"}}
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        }"#;
+
+        let result = ChatModelWorker::parse_sse_data(data);
+
+        assert!(matches!(
+            result.events.first(),
+            Some(WorkerEvent::Content { text }) if text == "Done"
+        ));
+        assert!(matches!(
+            result.events.get(1),
+            Some(WorkerEvent::Thinking { text }) if text == "Checked the request"
+        ));
+        assert_eq!(result.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(result.tool_call_chunks.len(), 2);
+        assert_eq!(result.tool_call_chunks[0].index, 0);
+        assert_eq!(result.tool_call_chunks[0].name.as_deref(), Some("first_tool"));
+        assert_eq!(result.tool_call_chunks[1].index, 1);
+        assert_eq!(result.tool_call_chunks[1].name.as_deref(), Some("second_tool"));
+        assert_eq!(result.tool_call_chunks[1].arguments, r#"{"value":2}"#);
+    }
+
+    #[tokio::test]
+    async fn upstream_error_after_partial_output_does_not_retry_transport() {
+        let (tx, mut rx) = mpsc::channel::<WorkerEvent>(2);
+        let mut pending = HashMap::new();
+        let mut content = String::new();
+        let mut thinking = String::new();
+        let mut cost = 0.0;
+        let mut finish_reason = None;
+
+        let content_result = ChatModelWorker::parse_sse_data(
+            r#"{"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}"#,
+        );
+        let first_outcome = ChatModelWorker::process_parse_result(
+            &content_result,
+            &mut pending,
+            &mut content,
+            &mut thinking,
+            &mut cost,
+            &mut finish_reason,
+            &tx,
+        )
+        .await
+        .expect("content should process");
+        assert!(first_outcome.is_none());
+        assert!(matches!(
+            rx.recv().await,
+            Some(WorkerEvent::Content { text }) if text == "partial"
+        ));
+
+        let error_result = ChatModelWorker::parse_sse_data(
+            r#"{"error":{"code":"upstream_error","message":"upstream request failed"}}"#,
+        );
+        let outcome = ChatModelWorker::process_parse_result(
+            &error_result,
+            &mut pending,
+            &mut content,
+            &mut thinking,
+            &mut cost,
+            &mut finish_reason,
+            &tx,
+        )
+        .await
+        .expect("error should process")
+        .expect("error should terminate the stream");
+
+        assert!(matches!(
+            outcome,
+            StreamOutcome::Failed {
+                retry_without_streaming: false,
+                ..
+            }
+        ));
     }
 
     #[test]
