@@ -1049,7 +1049,7 @@ pub async fn recall_preference_from_db(
 /// API key is missing the user needs to log in to Seren Desktop (the login
 /// flow stores the key via `storeSerenApiKey()`).
 fn read_seren_api_key(app: &AppHandle) -> Result<String, String> {
-    let key = crate::credential_store::get_seren_api_key(app)?.unwrap_or_default();
+    let key = crate::credential_store::get_seren_skill_api_key(app)?.unwrap_or_default();
     if key.is_empty() {
         return Err(
             "SerenDB API key not available — log in to Seren Desktop so the key is provisioned"

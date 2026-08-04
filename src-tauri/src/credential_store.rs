@@ -17,6 +17,7 @@ const METADATA_STORE: &str = "credential-metadata.json";
 const TOKEN_KEY: &str = "token";
 const REFRESH_TOKEN_KEY: &str = "refresh_token";
 const SEREN_API_KEY: &str = "seren_api_key";
+const SEREN_SKILL_API_KEY: &str = "seren_skill_api_key";
 const MCP_ACCESS_TOKEN_KEY: &str = "mcp_access_token";
 const MCP_REFRESH_TOKEN_KEY: &str = "mcp_refresh_token";
 
@@ -27,6 +28,7 @@ const PROVIDER_OAUTH: &str = "provider_oauth";
 const ACCESS_TOKEN_ACCOUNT: &str = "seren.auth.access-token.v1";
 const REFRESH_TOKEN_ACCOUNT: &str = "seren.auth.refresh-token.v1";
 const SEREN_API_KEY_ACCOUNT: &str = "seren.api-key.v1";
+const SEREN_SKILL_API_KEY_ACCOUNT: &str = "seren.skill-api-key.v1";
 const MCP_ACCESS_TOKEN_ACCOUNT: &str = "seren.mcp-oauth.access-token.v1";
 const MCP_REFRESH_TOKEN_ACCOUNT: &str = "seren.mcp-oauth.refresh-token.v1";
 
@@ -142,6 +144,7 @@ impl SecureBackend for TestMemorySecureBackend {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ProtectedSetting {
     SerenApiKey,
+    SerenSkillApiKey,
     McpAccessToken,
     McpRefreshToken,
 }
@@ -149,6 +152,7 @@ pub(crate) enum ProtectedSetting {
 pub(crate) fn protected_setting(store: &str, key: &str) -> Option<ProtectedSetting> {
     match (store, key) {
         (AUTH_STORE, SEREN_API_KEY) => Some(ProtectedSetting::SerenApiKey),
+        (AUTH_STORE, SEREN_SKILL_API_KEY) => Some(ProtectedSetting::SerenSkillApiKey),
         (MCP_OAUTH_STORE, MCP_ACCESS_TOKEN_KEY) => Some(ProtectedSetting::McpAccessToken),
         (MCP_OAUTH_STORE, MCP_REFRESH_TOKEN_KEY) => Some(ProtectedSetting::McpRefreshToken),
         _ => None,
@@ -189,6 +193,15 @@ impl CredentialDescriptor<'static> {
             AUTH_STORE,
             SEREN_API_KEY,
             "Seren API key",
+        )
+    }
+
+    fn seren_skill_api_key() -> Self {
+        Self::fixed(
+            SEREN_SKILL_API_KEY_ACCOUNT,
+            AUTH_STORE,
+            SEREN_SKILL_API_KEY,
+            "Seren skill API key",
         )
     }
 
@@ -741,6 +754,27 @@ pub(crate) fn clear_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<(), 
     delete(app, CredentialDescriptor::seren_api_key())
 }
 
+pub(crate) fn store_seren_skill_api_key<R: Runtime>(
+    app: &AppHandle<R>,
+    value: &str,
+) -> Result<(), String> {
+    store(app, CredentialDescriptor::seren_skill_api_key(), value)
+}
+
+/// The publisher-invocation-only key handed to skill child processes and the
+/// SerenDB data plane. Deliberately separate from the Desktop key, which also
+/// carries publisher-administration scopes for the approval-gated MCP path
+/// and must never be exported into a child process. #3675
+pub(crate) fn get_seren_skill_api_key<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<Option<String>, String> {
+    read(app, CredentialDescriptor::seren_skill_api_key())
+}
+
+pub(crate) fn clear_seren_skill_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    delete(app, CredentialDescriptor::seren_skill_api_key())
+}
+
 pub(crate) fn store_provider_api_key<R: Runtime>(
     app: &AppHandle<R>,
     provider: &str,
@@ -842,6 +876,7 @@ pub(crate) fn get_protected_setting<R: Runtime>(
 ) -> Result<Option<String>, String> {
     match setting {
         ProtectedSetting::SerenApiKey => get_seren_api_key(app),
+        ProtectedSetting::SerenSkillApiKey => get_seren_skill_api_key(app),
         ProtectedSetting::McpAccessToken => read(app, CredentialDescriptor::mcp_access_token()),
         ProtectedSetting::McpRefreshToken => read(app, CredentialDescriptor::mcp_refresh_token()),
     }
@@ -855,6 +890,7 @@ pub(crate) fn set_protected_setting<R: Runtime>(
     if value.trim().is_empty() {
         return match setting {
             ProtectedSetting::SerenApiKey => clear_seren_api_key(app),
+            ProtectedSetting::SerenSkillApiKey => clear_seren_skill_api_key(app),
             ProtectedSetting::McpAccessToken => {
                 delete(app, CredentialDescriptor::mcp_access_token())
             }
@@ -866,6 +902,7 @@ pub(crate) fn set_protected_setting<R: Runtime>(
 
     match setting {
         ProtectedSetting::SerenApiKey => store_seren_api_key(app, value),
+        ProtectedSetting::SerenSkillApiKey => store_seren_skill_api_key(app, value),
         ProtectedSetting::McpAccessToken => {
             store(app, CredentialDescriptor::mcp_access_token(), value)
         }
@@ -926,6 +963,26 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The skill key exists so a child process never receives the Desktop
+    /// key's publisher-administration scopes. Aliasing the two slots would
+    /// silently hand the broad key back to skills. #3675
+    #[test]
+    fn skill_key_never_aliases_the_desktop_key_slot() {
+        let desktop = CredentialDescriptor::seren_api_key();
+        let skill = CredentialDescriptor::seren_skill_api_key();
+
+        assert_ne!(desktop.account, skill.account);
+        assert_ne!(desktop.legacy_key, skill.legacy_key);
+        assert_eq!(
+            protected_setting(AUTH_STORE, SEREN_SKILL_API_KEY),
+            Some(ProtectedSetting::SerenSkillApiKey)
+        );
+        assert_eq!(
+            protected_setting(AUTH_STORE, SEREN_API_KEY),
+            Some(ProtectedSetting::SerenApiKey)
+        );
+    }
 
     #[derive(Default)]
     struct MemorySecureBackend {

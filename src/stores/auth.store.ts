@@ -7,6 +7,7 @@ import { runtimeHasCapability } from "@/lib/runtime";
 import { verboseRuntimeConsole } from "@/lib/runtime-console";
 import {
   clearSerenApiKey,
+  clearSerenSkillApiKey,
   getSerenApiKey,
   isTauriRuntime,
   storeSerenApiKey,
@@ -19,6 +20,7 @@ import {
 } from "@/services/auth";
 import { resumeCredentialLeases } from "@/services/credential-lease";
 import {
+  ensureSkillApiKey,
   getDesktopApiKeyStatus,
   repairDesktopApiKey,
 } from "@/services/desktop-api-access";
@@ -102,6 +104,7 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
           "[Auth Store] Stored API key scopes are current",
         );
       }
+      await ensureSkillApiKey();
       return { ok: true };
     }
 
@@ -114,6 +117,7 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
     verboseRuntimeConsole.debug(
       "[Auth Store] API key created and stored successfully",
     );
+    await ensureSkillApiKey();
     return { ok: true };
   } catch (error) {
     console.error("[Auth Store] Failed to ensure API key:", error);
@@ -356,8 +360,9 @@ export async function logout(): Promise<void> {
   // Reset MCP Gateway state
   await resetGateway();
 
-  // Clear stored API key
+  // Clear stored API keys
   await clearSerenApiKey();
+  await clearSerenSkillApiKey();
 
   await authLogout();
   await resetSkillsCatalog();
