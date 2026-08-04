@@ -13,6 +13,25 @@ export function validationHomeForSlot(repoRoot: string, port: number): string {
   return path.join(repoRoot, "artifacts", "validation-home", `slot${port}`);
 }
 
+export function validationTauriCliCommand(inputs: {
+  repoRoot: string;
+  execPath?: string;
+  platform?: NodeJS.Platform;
+}): { command: string; cliScript: string } {
+  const platform = inputs.platform ?? process.platform;
+  const platformPath = platform === "win32" ? path.win32 : path.posix;
+  return {
+    command: inputs.execPath ?? process.execPath,
+    cliScript: platformPath.join(
+      inputs.repoRoot,
+      "node_modules",
+      "@tauri-apps",
+      "cli",
+      "tauri.js",
+    ),
+  };
+}
+
 export function validationChildEnv(inputs: {
   baseEnv: NodeJS.ProcessEnv;
   port: number;

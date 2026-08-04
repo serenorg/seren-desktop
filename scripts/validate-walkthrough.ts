@@ -15,6 +15,7 @@ import {
   ensureValidationHome,
   resolvePnpmStoreDir,
   validationChildEnv,
+  validationTauriCliCommand,
 } from "./validation-env";
 
 interface DiscoveryFile {
@@ -106,8 +107,12 @@ async function main(): Promise<void> {
 
     await rm(artifactsDir, { recursive: true, force: true });
     await mkdir(artifactsDir, { recursive: true });
-    app = launchValidationApp(slot, childEnv);
-    discovery = await waitForDiscovery(discoveryPath, discoveryTimeoutMs);
+    const launchedApp = launchValidationApp(slot, childEnv);
+    app = launchedApp.child;
+    discovery = await Promise.race([
+      waitForDiscovery(discoveryPath, discoveryTimeoutMs),
+      launchedApp.failure,
+    ]);
     await waitForFrontendReady(discovery, 60_000);
     const client = createClient(discovery);
     const scenario = (await import(
@@ -178,11 +183,16 @@ async function waitForFrontendReady(
 function launchValidationApp(
   slot: ValidationSlot,
   childEnv: NodeJS.ProcessEnv,
-): ChildProcess {
+): { child: ChildProcess; failure: Promise<never> } {
+  // Run Tauri's JavaScript entrypoint with the current Node executable. A
+  // bare `pnpm` spawn cannot launch pnpm.cmd on Windows without a shell and
+  // previously left the walkthrough waiting ten minutes for an app that never
+  // started. Direct Node execution is shell-free and identical on every OS.
+  const invocation = validationTauriCliCommand({ repoRoot: root });
   const child = spawn(
-    "pnpm",
+    invocation.command,
     [
-      "tauri",
+      invocation.cliScript,
       "dev",
       "--no-watch",
       "--features",
@@ -204,16 +214,24 @@ function launchValidationApp(
     },
   );
 
-  child.on("exit", (code, signal) => {
-    if (code !== null && code !== 0) {
-      console.error(`[validate:walkthrough] app exited with code ${code}`);
-    }
-    if (signal) {
-      console.error(`[validate:walkthrough] app exited with signal ${signal}`);
-    }
+  const failure = new Promise<never>((_resolve, reject) => {
+    child.once("error", (error) => {
+      reject(
+        new Error(`Validation app failed to start: ${error.message}`, {
+          cause: error,
+        }),
+      );
+    });
+    child.once("exit", (code, signal) => {
+      const detail = signal ? `signal ${signal}` : `code ${code ?? "unknown"}`;
+      if (code !== 0 || signal) {
+        console.error(`[validate:walkthrough] app exited with ${detail}`);
+      }
+      reject(new Error(`Validation app exited before discovery (${detail})`));
+    });
   });
 
-  return child;
+  return { child, failure };
 }
 
 async function waitForDiscovery(

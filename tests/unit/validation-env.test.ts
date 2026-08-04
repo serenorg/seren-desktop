@@ -7,6 +7,7 @@ import {
   ensureValidationKeychain,
   validationChildEnv,
   validationHomeForSlot,
+  validationTauriCliCommand,
 } from "../../scripts/validation-env";
 import { shouldSkipValidationBuild } from "../../scripts/validation-dev-args";
 
@@ -118,6 +119,20 @@ describe("validation environment", () => {
     expect(env.LOCALAPPDATA).toBe(
       path.join(env.HOME as string, "AppData", "Local"),
     );
+  });
+
+  it("launches the Tauri CLI through Node instead of a Windows command shim", () => {
+    expect(
+      validationTauriCliCommand({
+        repoRoot: "D:\\a\\seren-desktop",
+        execPath: "C:\\hostedtoolcache\\node.exe",
+        platform: "win32",
+      }),
+    ).toEqual({
+      command: "C:\\hostedtoolcache\\node.exe",
+      cliScript:
+        "D:\\a\\seren-desktop\\node_modules\\@tauri-apps\\cli\\tauri.js",
+    });
   });
 
   it("sets the pnpm store only when one is provided", () => {
