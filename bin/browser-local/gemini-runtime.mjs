@@ -252,6 +252,12 @@ function buildStatus(session, status = session.status) {
   };
 }
 
+// `--print-timeout` caps the whole turn, not idle time, and the CLI applies
+// its own 5m default when the flag is absent. A session without an explicit
+// timeout waits for as long as the work takes, so pass a duration long enough
+// to never fire rather than omitting the flag. #3662
+const ANTIGRAVITY_UNBOUNDED_TURN = "8760h";
+
 export function buildAntigravityArgs(session, prompt) {
   const args = [
     "--print",
@@ -259,7 +265,9 @@ export function buildAntigravityArgs(session, prompt) {
     "--output-format",
     "stream-json",
     "--print-timeout",
-    `${session.timeoutSecs ?? 600}s`,
+    session.timeoutSecs
+      ? `${session.timeoutSecs}s`
+      : ANTIGRAVITY_UNBOUNDED_TURN,
   ];
   if (session.agentSessionId) {
     args.push("--conversation", session.agentSessionId);
@@ -627,7 +635,10 @@ export function createGeminiRuntime({ emit }) {
     } catch (error) {
       session.status = "ready";
       const message = error instanceof Error ? error.message : String(error);
-      if (runtimeSessions.get(sessionId) === session) {
+      // cancelPrompt already emitted the cancellation, and the killed child
+      // then lands here with the same message. Emitting again persists a
+      // duplicate error row for every cancel. #3664
+      if (!session.cancelled && runtimeSessions.get(sessionId) === session) {
         emit("provider://error", { sessionId, error: message });
         emit("provider://session-status", buildStatus(session, "ready"));
       }
