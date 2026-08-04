@@ -1,0 +1,39 @@
+{
+  "issue": 3682,
+  "date": "2026-08-04",
+  "platform": "darwin",
+  "baseline": {
+    "commit": "a4af87f8",
+    "realAgentType": "codex",
+    "controlsVisible": true,
+    "dismissActionPresent": false
+  },
+  "fixed": {
+    "realAgentType": "codex",
+    "controlsVisibleOnNewAgent": true,
+    "controlsHiddenAfterDismiss": true,
+    "controlsVisibleOnNextAgent": true
+  },
+  "launcherCatalog": {
+    "source": "provider_get_available_agents",
+    "liveAvailableAgentTypes": [
+      "codex",
+      "claude-code",
+      "claude-codex",
+      "gemini",
+      "grok",
+      "lmstudio"
+    ],
+    "mountedAgentTypes": [
+      "claude-code",
+      "codex",
+      "claude-codex",
+      "gemini",
+      "grok",
+      "lmstudio"
+    ],
+    "exactSetMatch": true
+  },
+  "usesMocksOrStubs": false,
+  "changedFeatureHasOutboundNetworkPath": false
+}
