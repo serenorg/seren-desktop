@@ -1,6 +1,7 @@
 // ABOUTME: Protects the validation launcher's hermetic child environment.
 // ABOUTME: Covers worktree state roots while keeping toolchain caches stable.
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -133,6 +134,12 @@ describe("validation environment", () => {
       cliScript:
         "D:\\a\\seren-desktop\\node_modules\\@tauri-apps\\cli\\tauri.js",
     });
+  });
+
+  it("keeps disposable validation profiles outside Vite's file watcher", () => {
+    const viteConfig = readFileSync(path.resolve("vite.config.ts"), "utf8");
+
+    expect(viteConfig).toContain('"**/artifacts/validation-home/**"');
   });
 
   it("sets the pnpm store only when one is provided", () => {

@@ -152,8 +152,14 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**", "**/.agent-shell/**"],
+      // 3. tell Vite to ignore generated/native trees and validation profiles.
+      // Windows creates locked INetCache files inside the scratch HOME; asking
+      // Chokidar to watch those files crashes the validation app with EBUSY.
+      ignored: [
+        "**/src-tauri/**",
+        "**/.agent-shell/**",
+        "**/artifacts/validation-home/**",
+      ],
     },
   },
 }));
