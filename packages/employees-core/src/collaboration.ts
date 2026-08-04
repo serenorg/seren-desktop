@@ -1,3 +1,6 @@
+// ABOUTME: Organization employee collaboration policy and assignment rules.
+// ABOUTME: Shared by the desktop settings surface and the employees web app.
+
 import type {
   CloudRunCollaborationSelection,
   OrganizationEmployeeCollaborationPolicy,

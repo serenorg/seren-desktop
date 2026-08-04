@@ -4437,6 +4437,7 @@ export type DataResponseOrganizationEmployeeCollaborationAssignment = {
         organization_id: string;
         organization_knowledge_read: boolean;
         organization_skill_use: boolean;
+        revoked_at?: string | null;
         updated_at: string;
     };
     pagination?: null | PaginationMeta;
@@ -8954,6 +8955,7 @@ export type DataResponseVecOrganizationEmployeeCollaborationAssignment = {
         organization_id: string;
         organization_knowledge_read: boolean;
         organization_skill_use: boolean;
+        revoked_at?: string | null;
         updated_at: string;
     }>;
     pagination?: null | PaginationMeta;
@@ -12619,6 +12621,7 @@ export type OrganizationEmployeeCollaborationAssignment = {
     organization_id: string;
     organization_knowledge_read: boolean;
     organization_skill_use: boolean;
+    revoked_at?: string | null;
     updated_at: string;
 };
 
@@ -14416,6 +14419,11 @@ export type UpdateOrganizationCustomSkillRequest = {
 
 export type UpdateOrganizationEmployeeCollaborationPolicyRequest = {
     enabled: boolean;
+    /**
+     * Revision returned by the last policy read. Use `baseline` when no
+     * organization-specific policy row exists yet.
+     */
+    expected_policy_revision: string;
     organization_artifact_write?: boolean;
     organization_credential_use?: boolean;
     organization_knowledge_read?: boolean;
@@ -14829,6 +14837,11 @@ export type UpsertFederatedResourceRequest = {
 
 export type UpsertOrganizationEmployeeCollaborationAssignmentRequest = {
     allowed_task_labels?: Array<string>;
+    /**
+     * Generation returned by the last assignment read. Omit only when
+     * creating an assignment that does not yet exist.
+     */
+    expected_assignment_generation?: number | null;
     organization_artifact_write?: boolean;
     organization_credential_use?: boolean;
     organization_knowledge_read?: boolean;
@@ -18228,6 +18241,10 @@ export type UpdateEmployeeCollaborationPolicyErrors = {
      * Only a signed-in organization owner or administrator can update the policy
      */
     403: unknown;
+    /**
+     * Policy revision is stale
+     */
+    409: unknown;
 };
 
 export type UpdateEmployeeCollaborationPolicyResponses = {
@@ -18247,7 +18264,9 @@ export type ListEmployeeCollaborationAssignmentsData = {
          */
         organization_id: string;
     };
-    query?: never;
+    query?: {
+        include_revoked?: boolean;
+    };
     url: '/organizations/{organization_id}/employee-collaboration/assignments';
 };
 
@@ -18260,7 +18279,7 @@ export type ListEmployeeCollaborationAssignmentsErrors = {
 
 export type ListEmployeeCollaborationAssignmentsResponses = {
     /**
-     * Current managed employee collaboration assignments
+     * Managed agent collaboration assignments, optionally including revoked assignments
      */
     200: DataResponseVecOrganizationEmployeeCollaborationAssignment;
 };
@@ -18279,15 +18298,25 @@ export type RevokeEmployeeCollaborationAssignmentData = {
          */
         deployment_id: string;
     };
-    query?: never;
+    query: {
+        expected_assignment_generation: number;
+    };
     url: '/organizations/{organization_id}/employee-collaboration/assignments/{deployment_id}';
 };
 
 export type RevokeEmployeeCollaborationAssignmentErrors = {
     /**
+     * Expected assignment generation is invalid
+     */
+    400: unknown;
+    /**
      * Only a signed-in organization owner or administrator can manage assignments
      */
     403: unknown;
+    /**
+     * Assignment generation is stale
+     */
+    409: unknown;
 };
 
 export type RevokeEmployeeCollaborationAssignmentResponses = {
@@ -18324,6 +18353,10 @@ export type UpsertEmployeeCollaborationAssignmentErrors = {
      * Only a signed-in organization owner or administrator can manage assignments
      */
     403: unknown;
+    /**
+     * Assignment generation is stale or the assignment requires explicit reactivation
+     */
+    409: unknown;
 };
 
 export type UpsertEmployeeCollaborationAssignmentResponses = {
@@ -18334,6 +18367,46 @@ export type UpsertEmployeeCollaborationAssignmentResponses = {
 };
 
 export type UpsertEmployeeCollaborationAssignmentResponse = UpsertEmployeeCollaborationAssignmentResponses[keyof UpsertEmployeeCollaborationAssignmentResponses];
+
+export type ReactivateEmployeeCollaborationAssignmentData = {
+    body: UpsertOrganizationEmployeeCollaborationAssignmentRequest;
+    path: {
+        /**
+         * Organization ID or 'default' for the authenticated user's default organization
+         */
+        organization_id: string;
+        /**
+         * Managed agent deployment ID
+         */
+        deployment_id: string;
+    };
+    query?: never;
+    url: '/organizations/{organization_id}/employee-collaboration/assignments/{deployment_id}/reactivate';
+};
+
+export type ReactivateEmployeeCollaborationAssignmentErrors = {
+    /**
+     * Expected assignment generation is missing or invalid
+     */
+    400: unknown;
+    /**
+     * Only a signed-in organization owner or administrator can manage assignments
+     */
+    403: unknown;
+    /**
+     * Assignment is active or its generation is stale
+     */
+    409: unknown;
+};
+
+export type ReactivateEmployeeCollaborationAssignmentResponses = {
+    /**
+     * Reactivated employee collaboration assignment
+     */
+    200: DataResponseOrganizationEmployeeCollaborationAssignment;
+};
+
+export type ReactivateEmployeeCollaborationAssignmentResponse = ReactivateEmployeeCollaborationAssignmentResponses[keyof ReactivateEmployeeCollaborationAssignmentResponses];
 
 export type ListInvitesData = {
     body?: never;
