@@ -553,6 +553,15 @@ describe("Windows production e2e release gate", () => {
     expect(taskUserRunner).toContain("Get-FileHash");
     expect(taskUserRunner).toContain("SHA512");
     expect(taskUserRunner).toContain('"agy.exe"');
+    // Windows PowerShell 5.1 applies no timeout by default, so a stalled
+    // Antigravity fetch would hang the gate until the outer task timeout
+    // instead of failing fast. #3668
+    for (const antigravityFetch of [
+      'Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json" -UseBasicParsing -TimeoutSec 60',
+      "Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath -UseBasicParsing -TimeoutSec 300",
+    ]) {
+      expect(taskUserRunner).toContain(antigravityFetch);
+    }
     expect(taskUserRunner).toContain("@xai-official/grok@latest");
     for (const [label, binary] of [
       ["Claude Code", "claude.cmd"],

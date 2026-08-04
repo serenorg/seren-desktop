@@ -620,7 +620,7 @@ try {
   # production installer: trust only Google's platform manifest/storage path
   # and verify SHA-512 before the release gate launches the app.
   `$agyManifestOrigin = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
-  `$agyManifest = Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json"
+  `$agyManifest = Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json" -UseBasicParsing -TimeoutSec 60
   `$agyArtifactUri = [Uri][string]`$agyManifest.url
   if (
     `$agyArtifactUri.Scheme -ne "https" -or
@@ -635,7 +635,7 @@ try {
   `$previousProgress = `$ProgressPreference
   `$ProgressPreference = "SilentlyContinue"
   try {
-    Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath
+    Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath -UseBasicParsing -TimeoutSec 300
   } finally {
     `$ProgressPreference = `$previousProgress
   }
