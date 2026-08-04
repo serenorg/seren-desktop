@@ -142,6 +142,17 @@ describe("validation environment", () => {
     expect(viteConfig).toContain('"**/artifacts/validation-home/**"');
   });
 
+  it("allows a clean Windows runner to finish its cold Rust build", () => {
+    const workflow = readFileSync(
+      path.resolve(".github/workflows/validation-walkthrough.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain(
+      'SEREN_VALIDATION_DISCOVERY_TIMEOUT_MS: "1200000"',
+    );
+  });
+
   it("sets the pnpm store only when one is provided", () => {
     const withStore = validationChildEnv({
       baseEnv: {},
