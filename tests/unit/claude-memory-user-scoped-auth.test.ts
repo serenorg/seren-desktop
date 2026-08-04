@@ -27,9 +27,18 @@ describe("seren-db memory path uses the user-scoped credential (#2497 Defect 2)"
     // …and that key is read through the same OS-backed boundary the desktop
     // key lands in, never directly from auth.json.
     expect(rustWatcher).toMatch(/fn read_seren_api_key/);
-    expect(rustWatcher).toMatch(/credential_store::get_seren_api_key\(app\)/);
+    // The credential is the publisher-invocation-only key (#3675). It is still
+    // user-scoped and still read through the OS-backed boundary; it simply
+    // omits the publisher-administration scopes this path never uses.
+    expect(rustWatcher).toMatch(
+      /credential_store::get_seren_skill_api_key\(app\)/,
+    );
+    expect(rustWatcher).not.toMatch(/credential_store::get_seren_api_key\(app\)/);
     expect(credentialStore).toMatch(
       /const SEREN_API_KEY_ACCOUNT: &str = "seren\.api-key\.v1"/,
+    );
+    expect(credentialStore).toMatch(
+      /const SEREN_SKILL_API_KEY_ACCOUNT: &str = "seren\.skill-api-key\.v1"/,
     );
     expect(rustWatcher).not.toMatch(/\.store\("auth\.json"\)/);
   });

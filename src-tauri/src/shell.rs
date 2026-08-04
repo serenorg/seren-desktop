@@ -678,8 +678,13 @@ async fn spawn_one_shot(
     })
 }
 
+/// Skills receive the publisher-invocation-only key, never the Desktop key.
+/// The Desktop key also carries publisher-administration scopes, and those are
+/// protected by the in-app approval gate on the MCP dispatch path — a gate that
+/// cannot apply to a value a child process already holds in its environment.
+/// Fails closed: a signed-out user has no key either way. #3675
 fn read_stored_seren_api_key<R: Runtime>(app: &AppHandle<R>) -> Result<Option<String>, String> {
-    let key = crate::credential_store::get_seren_api_key(app)?.unwrap_or_default();
+    let key = crate::credential_store::get_seren_skill_api_key(app)?.unwrap_or_default();
 
     let trimmed = key.trim();
     if trimmed.is_empty() {
@@ -820,7 +825,9 @@ mod tests {
 
         app.manage(crate::credential_store::CredentialStoreState::new_memory_for_tests());
         if let Some(api_key) = api_key {
-            crate::credential_store::store_seren_api_key(app.handle(), api_key)
+            // Skills receive the publisher-invocation-only key, so that is the
+            // slot these command tests seed. #3675
+            crate::credential_store::store_seren_skill_api_key(app.handle(), api_key)
                 .expect("test API key stores in memory");
         }
 
@@ -904,7 +911,34 @@ mod tests {
         assert_eq!(result.exit_code, Some(0));
         assert!(
             result.stdout.contains("seren_test_shell_key"),
-            "skill-path commands must keep receiving desktop auth"
+            "skill-path commands must keep receiving Seren auth"
+        );
+    }
+
+    /// The Desktop key carries publisher-administration scopes that are only
+    /// safe behind the in-app approval gate. A skill process holds whatever it
+    /// is handed, so the Desktop key must never reach one — even when it is the
+    /// only credential stored. #3675
+    #[tokio::test]
+    async fn skill_path_command_never_receives_the_desktop_key() {
+        let app = mock_app_with_api_key(None);
+        crate::credential_store::store_seren_api_key(app.handle(), "seren_desktop_admin_key")
+            .expect("desktop key stores in memory");
+        let command = format!(
+            "cd ~/.config/seren/skills/example 2>/dev/null; {}",
+            print_seren_key_env_command()
+        );
+
+        let auth_handle = handle_for_command(&app, &command);
+        let result =
+            execute_shell_command(app.handle().clone(), command, Some(5), Some(true), auth_handle)
+                .await
+                .expect("command succeeds");
+
+        assert_eq!(result.exit_code, Some(0));
+        assert!(
+            !result.stdout.contains("seren_desktop_admin_key"),
+            "the Desktop key must never be exported into a skill process"
         );
     }
 

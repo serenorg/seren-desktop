@@ -9,6 +9,7 @@ import {
 const TOKEN_STORAGE_KEY = "seren_token";
 const REFRESH_TOKEN_STORAGE_KEY = "seren_refresh_token";
 const API_KEY_STORAGE_KEY = "seren_api_key";
+const SKILL_API_KEY_STORAGE_KEY = "seren_skill_api_key";
 const DEFAULT_ORG_ID_STORAGE_KEY = "seren_default_org_id";
 
 /**
@@ -159,6 +160,38 @@ export async function storeSerenApiKey(apiKey: string): Promise<void> {
 }
 
 /**
+ * Store the publisher-invocation-only key handed to skill child processes and
+ * the SerenDB data plane. Kept apart from the Desktop key, which also carries
+ * publisher-administration scopes that must stay behind the approval gate.
+ * See #3675.
+ */
+export async function storeSerenSkillApiKey(apiKey: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "seren_skill_api_key",
+      value: apiKey,
+    });
+  } else {
+    devStorage.setItem(SKILL_API_KEY_STORAGE_KEY, apiKey);
+  }
+}
+
+/** Retrieve the stored skill API key. Returns null if none is stored. */
+export async function getSerenSkillApiKey(): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    const result = await invoke<string | null>("get_setting", {
+      store: "auth.json",
+      key: "seren_skill_api_key",
+    });
+    return result && result.length > 0 ? result : null;
+  }
+  return devStorage.getItem(SKILL_API_KEY_STORAGE_KEY);
+}
+
+/**
  * Retrieve stored Seren API key.
  * Returns null if no key is stored.
  */
@@ -189,6 +222,20 @@ export async function clearSerenApiKey(): Promise<void> {
   } else {
     // Browser fallback for testing
     devStorage.removeItem(API_KEY_STORAGE_KEY);
+  }
+}
+
+/** Clear the stored skill API key (logout). */
+export async function clearSerenSkillApiKey(): Promise<void> {
+  const invoke = await getInvoke();
+  if (invoke) {
+    await invoke("set_setting", {
+      store: "auth.json",
+      key: "seren_skill_api_key",
+      value: "",
+    });
+  } else {
+    devStorage.removeItem(SKILL_API_KEY_STORAGE_KEY);
   }
 }
 

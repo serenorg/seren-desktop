@@ -9,9 +9,25 @@ import {
   listDefaultOrgApiKeys,
   revokeDefaultOrgApiKey,
 } from "@/api";
-import { getSerenApiKey, storeSerenApiKey } from "@/lib/tauri-bridge";
+import {
+  getSerenApiKey,
+  getSerenSkillApiKey,
+  storeSerenApiKey,
+  storeSerenSkillApiKey,
+} from "@/lib/tauri-bridge";
 
 export const DESKTOP_API_KEY_NAME = "Seren Desktop";
+export const SKILL_API_KEY_NAME = "Seren Desktop Skills";
+
+/**
+ * Skill child processes and the SerenDB data plane only ever invoke
+ * publishers. They receive this key instead of the Desktop key so that the
+ * publisher-administration scopes below — which are safe on the Desktop key
+ * because every mutation there is approval-gated on the MCP dispatch path —
+ * are never exported into a process that can call the REST API directly.
+ * See #3675.
+ */
+export const SKILL_API_KEY_SCOPES = ["publisher:*"] as const;
 export const DESKTOP_API_KEY_SCOPES = [
   "publisher:*",
   "managed-deployment:update",
@@ -285,4 +301,71 @@ export function repairDesktopApiKey(
   });
 
   return repairInFlight;
+}
+
+async function skillKeyNeedsReplacement(storedKey: string): Promise<boolean> {
+  const keyId = publicKeyId(storedKey);
+  if (!keyId) return true;
+
+  const { data, error, response } = await listDefaultOrgApiKeys({
+    throwOnError: false,
+  });
+  if (error || !data?.data) {
+    throw await apiKeyRequestError("Failed to inspect skill API key", response);
+  }
+
+  const record = data.data.find((candidate) => candidate.key_id === keyId);
+  if (!record || record.revoked_at) return true;
+  if (
+    record.expires_at !== null &&
+    record.expires_at !== undefined &&
+    new Date(record.expires_at).getTime() <= Date.now()
+  ) {
+    return true;
+  }
+
+  const scopes = new Set(record.scopes ?? []);
+  const required = new Set<string>(SKILL_API_KEY_SCOPES);
+  return (
+    scopes.size !== required.size ||
+    [...required].some((scope) => !scopes.has(scope))
+  );
+}
+
+let skillKeyInFlight: Promise<void> | null = null;
+
+/**
+ * Provision the publisher-invocation-only key that skill child processes and
+ * the SerenDB data plane receive. Reconciled the same way as the Desktop key so
+ * a key minted by an older build cannot linger with broader scopes.
+ */
+export function ensureSkillApiKey(): Promise<void> {
+  if (skillKeyInFlight) return skillKeyInFlight;
+
+  skillKeyInFlight = (async () => {
+    const existing = await getSerenSkillApiKey();
+    if (existing && !(await skillKeyNeedsReplacement(existing))) return;
+
+    const previousKeyId = existing ? publicKeyId(existing) : null;
+    const created = await createApiKeyRecord({
+      name: SKILL_API_KEY_NAME,
+      scopes: SKILL_API_KEY_SCOPES,
+    });
+    // Store before revoking so a failed revoke cannot strand skills without a
+    // usable key, matching repairDesktopApiKey.
+    await storeSerenSkillApiKey(created.api_key);
+
+    if (previousKeyId) {
+      const { data } = await listDefaultOrgApiKeys({ throwOnError: false });
+      const stale = data?.data?.find(
+        (candidate) =>
+          candidate.key_id === previousKeyId && !candidate.revoked_at,
+      );
+      if (stale) await revokeKeyRecord(stale).catch(() => undefined);
+    }
+  })().finally(() => {
+    skillKeyInFlight = null;
+  });
+
+  return skillKeyInFlight;
 }
