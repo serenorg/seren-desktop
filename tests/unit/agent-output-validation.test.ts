@@ -456,6 +456,22 @@ describe("#1987 Verified Agent Output", () => {
     expect(report.canStoreMemory).toBe(true);
   });
 
+  it("passes model self-description disclaimers through untouched (#3687)", () => {
+    // This is the complete raw GLM response that was corrupted during the
+    // #3681 walkthrough. First-person negation is framing, not a capability
+    // subject, so it must not manufacture a publisher-unavailability claim.
+    const finalText =
+      "I don't have direct introspective access to my exact model identifier. I can check the private models catalog available through Seren if you'd like — that would tell you what models are configured and which is the default. Want me to look that up?";
+    const report = validateFinalOutput({
+      finalText,
+      evidence: extractEvidenceFromUnifiedMessages([]),
+    });
+    expect(report.claims).toEqual([]);
+    expect(report.safeDisplayText).toBe(finalText);
+    expect(report.safeDisplayText).not.toContain(SUBSTITUTION_MARKER);
+    expect(report.canStoreMemory).toBe(true);
+  });
+
   it("marks substituted sentences without disturbing markdown (#3109)", () => {
     const finalText = [
       "## Findings",

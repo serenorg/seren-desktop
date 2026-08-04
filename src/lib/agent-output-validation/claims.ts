@@ -7,10 +7,10 @@ type ClaimMatcher = {
   kind: ClaimKind;
   pattern: RegExp;
   /** Additional condition on the same sentence. The claim is only extracted
-   * when this also matches, so a matcher can constrain what a sentence is
+   * when this also holds, so a matcher can constrain what a sentence is
    * *about* separately from the phrasing it keys on. Offsets still come from
    * `pattern`. */
-  requiresContext?: RegExp;
+  requiresContext?: (sentence: string) => boolean;
 };
 
 // An availability-negative phrase on its own says nothing about the subject:
@@ -20,27 +20,40 @@ type ClaimMatcher = {
 //
 // Capability context is therefore required alongside the trigger, in one of
 // two forms: gateway vocabulary that only appears when discussing what this
-// agent can reach, or framing that scopes the statement to this agent.
+// agent can reach, or framing that scopes availability to this agent's
+// environment.
 //
 // `tool` and `plugin` are ordinary English and are not gateway vocabulary on
 // their own — "their build tool is not available for Windows" is prose about
-// someone else's product. They count only under agent-scope framing, which is
-// how a real capability claim reads ("I don't have a tool for that").
-// `api`, `endpoint`, `host` and `server` are excluded for the same reason and
-// have no agent-scope form worth admitting.
+// someone else's product. They count only alongside first-person negation,
+// which is how a real capability claim reads ("I don't have a tool for that").
+// First-person negation is likewise not context by itself: without a
+// capability noun, "I don't have direct introspective access to my exact
+// model identifier" is the model describing itself, not a publisher claim
+// (#3687). `api`, `endpoint`, `host` and `server` are excluded for the same
+// reason and have no agent-scope form worth admitting.
 const PUBLISHER_ABSENCE_TRIGGER =
   /\b(unavailable|not available|not exposed|not configured|not enabled|not connected|not supported|could not access|couldn'?t access|cannot access|can'?t access|not found|no access to|do(?: not|n'?t) have)\b|\bno\s+(?:\w+\s+){0,2}(?:publishers?|integrations?|connectors?|gateways?|mcp|tools?|skills?|plugins?)\b/i;
 
 const GATEWAY_VOCABULARY =
   /\b(?:publishers?|integrations?|connectors?|gateways?|mcp|skills?)\b/i;
 
-const AGENT_SCOPE =
-  /\b(?:in|for|during|from) th(?:is|e current) (?:session|conversation|chat)\b|\bavailable to me\b|\bmy (?:tools?|capabilities|access)\b|\bI (?:can'?t|cannot|could not|couldn'?t|do not|don'?t|have no)\b/i;
+const AGENT_ENVIRONMENT_SCOPE =
+  /\b(?:in|for|during|from) th(?:is|e current) (?:session|conversation|chat)\b|\bavailable to me\b|\bmy (?:tools?|capabilities|access)\b/i;
 
-const AGENT_CAPABILITY_CONTEXT = new RegExp(
-  `${GATEWAY_VOCABULARY.source}|${AGENT_SCOPE.source}`,
-  "i",
-);
+const FIRST_PERSON_NEGATION =
+  /\bI (?:can'?t|cannot|could not|couldn'?t|do not|don'?t|have no)\b/i;
+
+const PLAIN_CAPABILITY_NOUN = /\b(?:tools?|plugins?)\b/i;
+
+function hasAgentCapabilityContext(sentence: string): boolean {
+  return (
+    GATEWAY_VOCABULARY.test(sentence) ||
+    AGENT_ENVIRONMENT_SCOPE.test(sentence) ||
+    (FIRST_PERSON_NEGATION.test(sentence) &&
+      PLAIN_CAPABILITY_NOUN.test(sentence))
+  );
+}
 
 const CLAIM_MATCHERS: ClaimMatcher[] = [
   {
@@ -71,7 +84,7 @@ const CLAIM_MATCHERS: ClaimMatcher[] = [
   {
     kind: "publisher_unavailable",
     pattern: PUBLISHER_ABSENCE_TRIGGER,
-    requiresContext: AGENT_CAPABILITY_CONTEXT,
+    requiresContext: hasAgentCapabilityContext,
   },
   {
     kind: "browser_action",
@@ -94,10 +107,7 @@ export function extractClaims(finalText: string): ExtractedClaim[] {
     for (const matcher of CLAIM_MATCHERS) {
       const match = matcher.pattern.exec(sentence.text);
       if (!match) continue;
-      if (
-        matcher.requiresContext &&
-        !matcher.requiresContext.test(sentence.text)
-      ) {
+      if (matcher.requiresContext && !matcher.requiresContext(sentence.text)) {
         continue;
       }
       sentenceClaims.push({
