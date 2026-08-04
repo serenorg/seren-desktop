@@ -23,7 +23,7 @@ describe("provider picker switch contract", () => {
     const catalogLoading = sourceBetween(
       modelSelectorSource,
       "// Load full model list from the Seren catalog or private models catalog.",
-      "// Filter models: show defaults when no search, search full catalog when typing",
+      "// Filter models: show the live list when no search, filter it when typing",
     );
 
     expect(catalogLoading).toContain("getLiveSerenModelCatalog()");
@@ -36,7 +36,9 @@ describe("provider picker switch contract", () => {
     expect(catalogLoading).not.toContain(
       'providerStore.setProviderModels("seren", [])',
     );
-    expect(catalogLoading).toContain("modelsService.getAvailable()");
+    // Search filters the same live catalog — no second, broader discovery
+    // list may reintroduce IDs the publisher cannot route. #3683
+    expect(catalogLoading).not.toContain("modelsService.getAvailable()");
     expect(providerStoreSource).toMatch(/seren:\s*\[\]/);
     expect(serenProviderSource).not.toContain("const DEFAULT_MODELS");
     expect(serenProviderSource).toContain("return fetchSerenModelCatalog()");
