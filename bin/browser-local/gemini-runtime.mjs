@@ -7,6 +7,7 @@ import readline from "node:readline";
 
 import {
   ANTIGRAVITY_MIN_VERSION,
+  isAntigravityAuthError,
   isAntigravityVersionSupported,
   readAntigravityVersion,
   resolveAntigravityBinary,
@@ -38,20 +39,6 @@ function stripAnsi(value) {
   return String(value ?? "")
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
     .replace(/\r/g, "");
-}
-
-export function isAntigravityAuthError(message) {
-  const normalized = String(message ?? "").toLowerCase();
-  return (
-    normalized.includes("please sign in") ||
-    normalized.includes("sign-in required") ||
-    normalized.includes("authentication required") ||
-    normalized.includes("not authenticated") ||
-    normalized.includes("not logged in") ||
-    normalized.includes("no valid oauth token") ||
-    normalized.includes("no valid refresh token") ||
-    normalized.includes("failed to load token")
-  );
 }
 
 function normalizeModelObject(model) {
