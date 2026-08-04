@@ -8038,7 +8038,7 @@ dependencies = [
 [[package]]
 name = "seren-secrets-crypto"
 version = "0.4.0"
-source = "git+https://github.com/serenorg/seren-secrets.git#8d1b94a3e1bf30650798b3c68905933a3579fad8"
+source = "git+https://github.com/serenorg/seren-secrets.git?rev=8d1b94a3e1bf30650798b3c68905933a3579fad8#8d1b94a3e1bf30650798b3c68905933a3579fad8"
 dependencies = [
  "aes",
  "argon2",
@@ -8073,7 +8073,7 @@ dependencies = [
 [[package]]
 name = "seren-secrets-macros"
 version = "0.4.0"
-source = "git+https://github.com/serenorg/seren-secrets.git#8d1b94a3e1bf30650798b3c68905933a3579fad8"
+source = "git+https://github.com/serenorg/seren-secrets.git?rev=8d1b94a3e1bf30650798b3c68905933a3579fad8#8d1b94a3e1bf30650798b3c68905933a3579fad8"
 dependencies = [
  "proc-macro2",
  "quote",
