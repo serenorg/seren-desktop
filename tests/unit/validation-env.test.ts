@@ -1,12 +1,14 @@
 // ABOUTME: Protects the validation launcher's hermetic child environment.
 // ABOUTME: Covers worktree state roots while keeping toolchain caches stable.
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ensureValidationKeychain,
   validationChildEnv,
   validationHomeForSlot,
+  validationTauriCliCommand,
 } from "../../scripts/validation-env";
 import { shouldSkipValidationBuild } from "../../scripts/validation-dev-args";
 
@@ -100,6 +102,55 @@ describe("validation environment", () => {
     expect(configured.RUSTUP_HOME).toBe("/custom/rustup");
     expect(defaults.CARGO_HOME).toBe(path.join("/real-home", ".cargo"));
     expect(defaults.RUSTUP_HOME).toBe(path.join("/real-home", ".rustup"));
+  });
+
+  it("isolates Windows profile and app-data roots for clean CLI provisioning", () => {
+    const env = validationChildEnv({
+      baseEnv: {},
+      port: 1422,
+      repoRoot: "/repo",
+      realHome: "/real-home",
+      platform: "win32",
+    });
+
+    expect(env.USERPROFILE).toBe(env.HOME);
+    expect(env.APPDATA).toBe(
+      path.join(env.HOME as string, "AppData", "Roaming"),
+    );
+    expect(env.LOCALAPPDATA).toBe(
+      path.join(env.HOME as string, "AppData", "Local"),
+    );
+  });
+
+  it("launches the Tauri CLI through Node instead of a Windows command shim", () => {
+    expect(
+      validationTauriCliCommand({
+        repoRoot: "D:\\a\\seren-desktop",
+        execPath: "C:\\hostedtoolcache\\node.exe",
+        platform: "win32",
+      }),
+    ).toEqual({
+      command: "C:\\hostedtoolcache\\node.exe",
+      cliScript:
+        "D:\\a\\seren-desktop\\node_modules\\@tauri-apps\\cli\\tauri.js",
+    });
+  });
+
+  it("keeps disposable validation profiles outside Vite's file watcher", () => {
+    const viteConfig = readFileSync(path.resolve("vite.config.ts"), "utf8");
+
+    expect(viteConfig).toContain('"**/artifacts/validation-home/**"');
+  });
+
+  it("allows a clean Windows runner to finish its cold Rust build", () => {
+    const workflow = readFileSync(
+      path.resolve(".github/workflows/validation-walkthrough.yml"),
+      "utf8",
+    );
+
+    expect(workflow).toContain(
+      'SEREN_VALIDATION_DISCOVERY_TIMEOUT_MS: "1200000"',
+    );
   });
 
   it("sets the pnpm store only when one is provided", () => {

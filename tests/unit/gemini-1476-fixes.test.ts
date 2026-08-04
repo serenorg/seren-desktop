@@ -50,7 +50,10 @@ describe("Gemini Agent #1476 — load-bearing regression guards", () => {
 
   // ─── Slice B: Antigravity first-run auth ─────────────────────────────
   it("launches agy itself because Antigravity has no login subcommand", () => {
-    const idx = agentRegistryMjs.indexOf("gemini: {");
+    const registryStart = agentRegistryMjs.indexOf(
+      "export function createBrowserLocalAgentRegistry",
+    );
+    const idx = agentRegistryMjs.indexOf("gemini: {", registryStart);
     expect(idx).toBeGreaterThan(-1);
     const definition = agentRegistryMjs.slice(idx, idx + 2400);
     expect(definition).toContain("launchInteractiveCommand");

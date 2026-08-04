@@ -9,9 +9,12 @@ const registryPath = resolve("bin/browser-local/agent-registry.mjs");
 const registrySource = readFileSync(registryPath, "utf-8");
 
 function sliceDefinition(key: string): string {
+  const registryStart = registrySource.indexOf(
+    "export function createBrowserLocalAgentRegistry",
+  );
   // Object literal keys may be quoted ("claude-code") or bare (codex).
-  const quoted = registrySource.indexOf(`"${key}": {`);
-  const bare = registrySource.indexOf(`\n    ${key}: {`);
+  const quoted = registrySource.indexOf(`"${key}": {`, registryStart);
+  const bare = registrySource.indexOf(`\n    ${key}: {`, registryStart);
   const start = quoted >= 0 ? quoted : bare >= 0 ? bare + 1 : -1;
   if (start < 0) throw new Error(`Definition not found: ${key}`);
   const window = registrySource.slice(start, start + 4000);

@@ -2,6 +2,7 @@
 // ABOUTME: Starts the bundled runtime on localhost and returns connection config to the frontend.
 
 use serde::Serialize;
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -477,6 +478,45 @@ fn find_provider_runtime_mjs(app: &AppHandle) -> Result<PathBuf, String> {
     ))
 }
 
+/// Node 24 cannot execute a script whose argv entrypoint uses Windows'
+/// verbatim `\\?\` prefix: it collapses `\\?\D:\...` to `D:` and exits with
+/// EISDIR before loading the runtime. Rust and Tauri may return that prefix
+/// from `current_exe`/resource resolution, so remove it only at the Node
+/// process boundary. Preserve ordinary paths and device/volume namespaces;
+/// translate verbatim UNC paths to their equivalent ordinary UNC form.
+fn node_compatible_path(path: &Path) -> Cow<'_, Path> {
+    #[cfg(windows)]
+    if let Some(raw_path) = path.to_str() {
+        if let Some(normalized) = strip_node_unsupported_windows_verbatim_prefix(raw_path) {
+            return Cow::Owned(PathBuf::from(normalized));
+        }
+    }
+
+    Cow::Borrowed(path)
+}
+
+#[cfg(any(windows, test))]
+fn strip_node_unsupported_windows_verbatim_prefix(path: &str) -> Option<String> {
+    const VERBATIM_PREFIX: &str = r"\\?\";
+    const VERBATIM_UNC_PREFIX: &str = r"\\?\UNC\";
+
+    if path
+        .get(..VERBATIM_UNC_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(VERBATIM_UNC_PREFIX))
+    {
+        let network_path = path.get(VERBATIM_UNC_PREFIX.len()..)?;
+        return Some(format!(r"\\{network_path}"));
+    }
+
+    let local_path = path.strip_prefix(VERBATIM_PREFIX)?;
+    let bytes = local_path.as_bytes();
+    let is_drive_absolute = bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/');
+    is_drive_absolute.then(|| local_path.to_string())
+}
+
 fn spawn_node_process(
     node_bin: &std::path::Path,
     runtime_entry: &std::path::Path,
@@ -484,9 +524,10 @@ fn spawn_node_process(
     port: u16,
     token: &str,
 ) -> Result<Child, String> {
+    let runtime_entry_for_node = node_compatible_path(runtime_entry);
     let mut command = Command::new(node_bin);
     command
-        .arg(runtime_entry)
+        .arg(&*runtime_entry_for_node)
         .arg("--host")
         .arg(host)
         .arg("--port")
@@ -531,7 +572,8 @@ fn spawn_node_process(
     // sees the tools. Expose the absolute embedded node binary so
     // `mcp-config.mjs` can rewrite `node` → absolute path before emitting
     // the per-CLI config JSON / TOML.
-    command.env("SEREN_EMBEDDED_NODE_BIN", node_bin);
+    let node_bin_for_runtime = node_compatible_path(node_bin);
+    command.env("SEREN_EMBEDDED_NODE_BIN", &*node_bin_for_runtime);
 
     // serenorg/seren-desktop#3230 — a bounded agent's launch spec is produced by
     // this binary's `__seren-sandbox-spec` subcommand, not by whichever caller
@@ -539,7 +581,8 @@ fn spawn_node_process(
     // for the spec and every bounded launch fails closed.
     match std::env::current_exe() {
         Ok(app_binary) => {
-            command.env("SEREN_SANDBOX_SPEC_BIN", app_binary);
+            let app_binary_for_runtime = node_compatible_path(&app_binary);
+            command.env("SEREN_SANDBOX_SPEC_BIN", &*app_binary_for_runtime);
         }
         Err(err) => {
             log::error!(
@@ -1034,6 +1077,46 @@ pub async fn provider_force_kill_session(
 mod tests {
     use super::*;
     use tokio::process::Command as TokioCommand;
+
+    #[test]
+    fn node_entrypoint_strips_local_windows_verbatim_prefix() {
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(
+                r"\\?\D:\a\seren-desktop\provider-runtime.mjs",
+            ),
+            Some(r"D:\a\seren-desktop\provider-runtime.mjs".to_string()),
+        );
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(
+                r"D:\a\seren-desktop\provider-runtime.mjs",
+            ),
+            None,
+        );
+    }
+
+    #[test]
+    fn node_entrypoint_normalizes_unc_without_touching_device_namespaces() {
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(
+                r"\\?\UNC\server\share\provider-runtime.mjs",
+            ),
+            Some(r"\\server\share\provider-runtime.mjs".to_string()),
+        );
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(r"\\server\share\provider-runtime.mjs",),
+            None,
+        );
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(r"\\.\PIPE\seren"),
+            None,
+        );
+        assert_eq!(
+            strip_node_unsupported_windows_verbatim_prefix(
+                r"\\?\Volume{01234567-89ab-cdef-0123-456789abcdef}\provider-runtime.mjs",
+            ),
+            None,
+        );
+    }
 
     #[test]
     fn validation_cli_home_is_scoped_to_validation_provider_runtime() {

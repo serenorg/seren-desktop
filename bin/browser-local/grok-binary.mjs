@@ -5,6 +5,8 @@ import { existsSync, lstatSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { managedCliBinary, managedCliPrefix } from "./cli-paths.mjs";
+
 function isSymlink(candidate) {
   try {
     return lstatSync(candidate).isSymbolicLink();
@@ -19,6 +21,7 @@ export function resolveGrokBinary({
   arch = process.arch,
   home = os.homedir(),
   appData = process.env.APPDATA ?? "",
+  managedPrefix = managedCliPrefix({ platform, home, appData }),
   // Absolute install locations outside the caller's control, checked last.
   // Injectable so a hermetic test can supply an empty list and assert the bare
   // "grok" fallback without a real system grok on the host tainting the result.
@@ -40,9 +43,26 @@ export function resolveGrokBinary({
     "bin",
     executableName,
   );
+  const managedNative = path.join(
+    managedPrefix,
+    platform === "win32" ? "node_modules" : "lib/node_modules",
+    "@xai-official",
+    "grok",
+    "node_modules",
+    "@xai-official",
+    `grok-${platform}-${arch}`,
+    "bin",
+    executableName,
+  );
+  const managedShim = managedCliBinary("grok", {
+    platform,
+    prefix: managedPrefix,
+  });
 
   if (platform === "win32") {
     const candidates = [
+      managedNative,
+      managedShim,
       // Prefer the package-owned native binary. Unlike npm's command shim it
       // remains executable after Tauri relocates embedded resources. #3088.
       embeddedNative,
@@ -61,6 +81,8 @@ export function resolveGrokBinary({
 
   const embeddedShim = path.join(npmPrefix, "bin", "grok");
   const candidates = [
+    managedNative,
+    ...(isSymlink(managedShim) ? [managedShim] : []),
     // Tauri dereferences npm bin symlinks while staging resources. Executing
     // the relocated CommonJS trampoline from node/bin makes Node classify it
     // as ESM under Seren's package root. Use the official native payload (or

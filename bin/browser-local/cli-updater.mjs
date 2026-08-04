@@ -1,5 +1,5 @@
-// ABOUTME: Background updates for bundled agent CLIs (Codex, Claude Code) per #1637.
-// ABOUTME: Verifies candidate bytes and post-update health before reporting success.
+// ABOUTME: Automatic verified provisioning and updates for Seren-managed npm agent CLIs.
+// ABOUTME: Verifies candidate bytes and post-install health before reporting success.
 
 import { execFile } from "node:child_process";
 import {
@@ -11,7 +11,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -21,6 +20,7 @@ import {
   scanTarball,
   verifyTarballIntegrity,
 } from "./cli-scanner.mjs";
+import { serenDataDir } from "./cli-paths.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -67,14 +67,6 @@ export function isBelowBaseline(installed, baseline) {
     if (ai !== bi) return ai < bi;
   }
   return false;
-}
-
-function serenDataDir() {
-  if (process.platform === "win32") {
-    const base = process.env.APPDATA ?? os.homedir();
-    return path.join(base, "Seren");
-  }
-  return path.join(os.homedir(), ".seren");
 }
 
 function statePath() {
@@ -273,11 +265,20 @@ async function runNpmInstallLatest(packageName, { npmCliScript } = {}) {
  * passes — we install the exact bytes we scanned, not whatever the registry
  * serves at install time. Eliminates the post-scan/pre-install TOCTOU window.
  */
-async function runNpmInstallFromTarball(tarballPath, { npmCliScript } = {}) {
+async function runNpmInstallFromTarball(
+  tarballPath,
+  { npmCliScript, installPrefix } = {},
+) {
+  const installArgs = [
+    "install",
+    "-g",
+    ...(installPrefix ? ["--prefix", installPrefix] : []),
+    tarballPath,
+  ];
   if (npmCliScript) {
     await execFileAsync(
       process.execPath,
-      [npmCliScript, "install", "-g", tarballPath],
+      [npmCliScript, ...installArgs],
       { timeout: NPM_INSTALL_TIMEOUT_MS },
     );
     return;
@@ -285,10 +286,21 @@ async function runNpmInstallFromTarball(tarballPath, { npmCliScript } = {}) {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   await execFileAsync(
     npmCommand,
-    ["install", "-g", tarballPath],
+    installArgs,
     // Node refuses to exec a .cmd shim without a shell.
     { timeout: NPM_INSTALL_TIMEOUT_MS, shell: process.platform === "win32" },
   );
+}
+
+// All managed npm CLIs share one global prefix. npm mutates that prefix as a
+// single dependency tree, so startup provisioning must serialize only the
+// install phase even though registry lookup and scanning can run in parallel.
+let npmInstallTail = Promise.resolve();
+
+function enqueueNpmInstall(install) {
+  const pending = npmInstallTail.then(install, install);
+  npmInstallTail = pending.catch(() => {});
+  return pending;
 }
 
 /**
@@ -314,6 +326,7 @@ const HOSTNAME_ALLOWLIST = {
     "github.com",
     "githubusercontent.com",
   ],
+  "@xai-official/grok": ["x.ai", "grok.com"],
 };
 
 const FIRST_BASELINE_POLICIES = {
@@ -335,11 +348,22 @@ const FIRST_BASELINE_POLICIES = {
     executableFiles: ["bin/codex.js"],
     hostnameAllowlist: HOSTNAME_ALLOWLIST["@openai/codex"],
   },
+  "@xai-official/grok": {
+    installScripts: { postinstall: "node bin/postinstall.js" },
+    dependencyPatterns: [
+      /^@xai-official\/grok-(darwin|linux|win32)-(arm64|x64)$/,
+      /^@iarna\/toml$/,
+    ],
+    binEntries: { grok: "bin/grok" },
+    executableFiles: ["bin/grok"],
+    hostnameAllowlist: HOSTNAME_ALLOWLIST["@xai-official/grok"],
+  },
 };
 
 const OFFICIAL_INSTRUCTIONS_URLS = {
   "@anthropic-ai/claude-code": "https://code.claude.com/docs/en/installation",
   "@openai/codex": "https://developers.openai.com/codex/cli/",
+  "@xai-official/grok": "https://docs.x.ai/build/overview",
 };
 
 /**
@@ -483,7 +507,7 @@ function emitOutcomeLog({ packageName, outcome, details, logger }) {
  * Every invocation emits exactly one log line + (for success or scan_rejected)
  * exactly one provider event. See #1646.
  */
-export async function backgroundUpdateCli({
+async function runBackgroundUpdateCli({
   label,
   bareCommand,
   resolvedPath,
@@ -492,6 +516,9 @@ export async function backgroundUpdateCli({
   now = Date.now(),
   state,
   force = false,
+  installIfMissing = false,
+  installPrefix,
+  resolveInstalledPath,
   onUpdated,
   onScanRejected,
   onActionRequired,
@@ -545,22 +572,27 @@ export async function backgroundUpdateCli({
     const pendingActionKey = `pendingAction:${bareCommand}`;
     const lastCheck = persisted[key];
 
-    const channel = classifyInstallChannel(resolvedPath, bareCommand);
-    if (channel === "unresolved") {
+    let channel = classifyInstallChannel(resolvedPath, bareCommand);
+    const installFromMissing = channel === "unresolved" && installIfMissing;
+    if (channel === "unresolved" && !installFromMissing) {
       // Don't write state — we want to re-check next launch in case the
       // install completes between now and then.
       return report("skipped:unresolved");
     }
+    if (installFromMissing) channel = "npm";
 
     // Read installed version up-front so the baseline gate can override TTL.
     // The npm view is still deferred until we decide whether to run.
-    const installed = await installedVersionFn(resolvedPath, bareCommand);
+    const installed = installFromMissing
+      ? null
+      : await installedVersionFn(resolvedPath, bareCommand);
     const baseline = CLI_MIN_VERSION_BASELINE[packageName];
     const belowBaseline =
       typeof baseline === "string" && isBelowBaseline(installed, baseline);
 
     if (
       !force &&
+      !installFromMissing &&
       !belowBaseline &&
       typeof lastCheck === "number" &&
       now - lastCheck < UPDATE_CHECK_TTL_MS
@@ -583,6 +615,19 @@ export async function backgroundUpdateCli({
     }
 
     function requireAction(reason, details = {}) {
+      if (installFromMissing) {
+        // First install is Seren-owned recovery work, not a decision to push
+        // onto a clean user. Keep the failure retryable without persisting the
+        // manual Retry / instructions card used for an existing CLI update.
+        persisted[pendingActionKey] = null;
+        if (ownsPersistence) saveState(persisted);
+        return report(`skipped:${reason}`, {
+          from: installed,
+          to: latest,
+          installedFromMissing: true,
+          ...details,
+        });
+      }
       const actionKey = `lastActionRequired:${bareCommand}:${latest}`;
       const lastAction = persisted[actionKey];
       const actionRequired = {
@@ -614,20 +659,27 @@ export async function backgroundUpdateCli({
       });
     }
 
-    if (installed && latest && isNewer(installed, latest)) {
+    if (
+      latest &&
+      (installFromMissing || (installed && isNewer(installed, latest)))
+    ) {
       // Native-channel binaries and Codex's package-manager-aware updater must
       // verify the resulting bytes before success is surfaced. Never fall back
       // to a downloaded installer script when self-update fails.
-      if (channel === "native" || packageName === "@openai/codex") {
+      if (
+        installed &&
+        (channel === "native" || packageName === "@openai/codex")
+      ) {
         const selfOk = await selfUpdateFn(resolvedPath);
         if (!selfOk) {
           return requireAction("self_update_failed", { channel });
         }
+        const installedPath = resolveInstalledPath?.() ?? resolvedPath;
         const verifiedVersion = await installedVersionFn(
-          resolvedPath,
+          installedPath,
           bareCommand,
         );
-        const healthy = await healthCheckFn(resolvedPath);
+        const healthy = await healthCheckFn(installedPath);
         if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
           return requireAction("verification_required", {
             channel,
@@ -758,7 +810,12 @@ export async function backgroundUpdateCli({
         // verdict is "pass" or a policy-approved "no_baseline" — install the
         // exact integrity-verified tarball and seed the next diff baseline.
         try {
-          await installFromTarballFn(tarballPath, { npmCliScript });
+          await enqueueNpmInstall(() =>
+            installFromTarballFn(tarballPath, {
+              npmCliScript,
+              installPrefix,
+            }),
+          );
         } catch {
           saveState(persisted);
           cleanupStaging();
@@ -769,11 +826,12 @@ export async function backgroundUpdateCli({
           });
         }
 
+        const installedPath = resolveInstalledPath?.() ?? resolvedPath;
         const verifiedVersion = await installedVersionFn(
-          resolvedPath,
+          installedPath,
           bareCommand,
         );
-        const healthy = await healthCheckFn(resolvedPath);
+        const healthy = await healthCheckFn(installedPath);
         if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
           cleanupStaging();
           return requireAction("verification_required", {
@@ -811,6 +869,7 @@ export async function backgroundUpdateCli({
           channel,
           tarballSha512: scan.candidate.tarballSha512,
           firstInstall: scan.verdict === "no_baseline",
+          installedFromMissing: installFromMissing,
           verifiedVersion,
         });
       } catch {
@@ -829,6 +888,25 @@ export async function backgroundUpdateCli({
     // registry init path.
     return report("skipped:error");
   }
+}
+
+const updatesInFlight = new Map();
+
+/**
+ * Share one real update/install per CLI. Provider startup and an immediate
+ * user launch can ask for the same missing binary concurrently; both callers
+ * must await the same verified bytes instead of racing global npm installs.
+ */
+export function backgroundUpdateCli(options) {
+  const key = `${options.packageName}:${options.bareCommand}`;
+  const existing = updatesInFlight.get(key);
+  if (existing) return existing;
+
+  const pending = runBackgroundUpdateCli(options).finally(() => {
+    if (updatesInFlight.get(key) === pending) updatesInFlight.delete(key);
+  });
+  updatesInFlight.set(key, pending);
+  return pending;
 }
 
 export { formatOutcomeLog as _formatOutcomeLog };

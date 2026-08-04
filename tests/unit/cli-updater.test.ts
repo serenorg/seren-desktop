@@ -187,6 +187,247 @@ describe("backgroundUpdateCli TTL gate", () => {
   });
 });
 
+describe("automatic verified first install (#3680)", () => {
+  const codexCandidate = {
+    version: "0.146.0",
+    tarballSha512: "verified-codex",
+    installScripts: {},
+    declaredDependencies: ["@openai/codex-darwin-arm64"],
+    binEntries: { codex: "bin/codex.js" },
+    executableFiles: ["bin/codex.js"],
+    networkHosts: [],
+    files: ["package.json", "bin/codex.js"],
+    fileHashes: { "package.json": "package", "bin/codex.js": "bin" },
+  };
+
+  function firstInstallInvocation(
+    overrides: Record<string, unknown> = {},
+  ) {
+    let resolved = "codex";
+    return {
+      options: {
+        label: "Codex",
+        bareCommand: "codex",
+        resolvedPath: "codex",
+        packageName: "@openai/codex",
+        installIfMissing: true,
+        installPrefix: "/managed/cli-tools",
+        resolveInstalledPath: () => resolved,
+        state: {} as Record<string, unknown>,
+        now: Date.now(),
+        _versionOverrides: {
+          runInstalledVersion: async () =>
+            resolved === "codex" ? null : "0.146.0",
+          runNpmView: async () => "0.146.0",
+          runNpmViewIntegrity: async () => "sha512-verified",
+          runCliHealthCheck: async () => true,
+        },
+        _scannerOverrides: {
+          npmPackToDirectory: async () => "/tmp/codex-0.146.0.tgz",
+          verifyTarballIntegrity: () => true,
+          scanTarball: async () => ({
+            verdict: "no_baseline",
+            flags: [],
+            candidate: codexCandidate,
+          }),
+          runNpmInstallFromTarball: async (
+            _tarball: string,
+            installOptions: Record<string, unknown>,
+          ) => {
+            expect(installOptions.installPrefix).toBe("/managed/cli-tools");
+            resolved = "/managed/cli-tools/bin/codex";
+          },
+        },
+        ...overrides,
+      },
+      setResolved(value: string) {
+        resolved = value;
+      },
+    };
+  }
+
+  it("installs a missing CLI into Seren's managed prefix and verifies the resolved binary", async () => {
+    const { options } = firstInstallInvocation();
+    const result = await backgroundUpdateCli(options);
+
+    expect(result).toMatchObject({
+      outcome: "success",
+      installedFromMissing: true,
+      firstInstall: true,
+      verifiedVersion: "0.146.0",
+    });
+  });
+
+  it("keeps subsequent npm updates in Seren's managed prefix", async () => {
+    let installedVersion = "2.1.220";
+    let receivedPrefix: unknown;
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/home/person/.seren/cli-tools/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      installPrefix: "/home/person/.seren/cli-tools",
+      resolveInstalledPath: () =>
+        "/home/person/.seren/cli-tools/bin/claude",
+      state: {},
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => installedVersion,
+        runNpmView: async () => "2.1.221",
+        runNpmViewIntegrity: async () => "sha512-verified",
+        runCliHealthCheck: async () => true,
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/claude-2.1.221.tgz",
+        verifyTarballIntegrity: () => true,
+        scanTarball: async () => ({
+          verdict: "pass",
+          flags: [],
+          candidate: {
+            ...codexCandidate,
+            version: "2.1.221",
+            tarballSha512: "verified-claude",
+          },
+        }),
+        runNpmInstallFromTarball: async (
+          _tarball: string,
+          installOptions: Record<string, unknown>,
+        ) => {
+          receivedPrefix = installOptions.installPrefix;
+          installedVersion = "2.1.221";
+        },
+      },
+    });
+
+    expect(result.outcome).toBe("success");
+    expect(receivedPrefix).toBe("/home/person/.seren/cli-tools");
+  });
+
+  it("fails closed without creating a manual-install action when integrity is wrong", async () => {
+    const actions: unknown[] = [];
+    let installCalled = false;
+    const state: Record<string, unknown> = {
+      "pendingAction:codex": { reason: "installation_required" },
+    };
+    const { options } = firstInstallInvocation({
+      state,
+      onActionRequired: (event: unknown) => actions.push(event),
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/codex-0.146.0.tgz",
+        verifyTarballIntegrity: () => false,
+        scanTarball: async () => {
+          throw new Error("unverified bytes must not be scanned");
+        },
+        runNpmInstallFromTarball: async () => {
+          installCalled = true;
+        },
+      },
+    });
+
+    const result = await backgroundUpdateCli(options);
+    expect(result).toMatchObject({
+      outcome: "skipped:integrity_failed",
+      installedFromMissing: true,
+    });
+    expect(installCalled).toBe(false);
+    expect(actions).toHaveLength(0);
+    expect(state["pendingAction:codex"]).toBeNull();
+  });
+
+  it("shares one install when startup and spawn request the same missing CLI", async () => {
+    let installCalls = 0;
+    let resolved = "codex";
+    const options = {
+      label: "Codex",
+      bareCommand: "codex",
+      resolvedPath: "codex",
+      packageName: "@openai/codex",
+      installIfMissing: true,
+      installPrefix: "/managed/cli-tools",
+      resolveInstalledPath: () => resolved,
+      state: {} as Record<string, unknown>,
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () =>
+          resolved === "codex" ? null : "0.146.0",
+        runNpmView: async () => "0.146.0",
+        runNpmViewIntegrity: async () => "sha512-verified",
+        runCliHealthCheck: async () => true,
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/codex-0.146.0.tgz",
+        verifyTarballIntegrity: () => true,
+        scanTarball: async () => ({
+          verdict: "no_baseline",
+          flags: [],
+          candidate: codexCandidate,
+        }),
+        runNpmInstallFromTarball: async () => {
+          installCalls += 1;
+          resolved = "/managed/cli-tools/bin/codex";
+        },
+      },
+    };
+
+    const [startup, spawn] = await Promise.all([
+      backgroundUpdateCli(options),
+      backgroundUpdateCli(options),
+    ]);
+    expect(startup.outcome).toBe("success");
+    expect(spawn).toBe(startup);
+    expect(installCalls).toBe(1);
+  });
+
+  it("accepts the current Grok package shape before its first managed install", async () => {
+    let resolved = "grok";
+    const result = await backgroundUpdateCli({
+      label: "Grok",
+      bareCommand: "grok",
+      resolvedPath: "grok",
+      packageName: "@xai-official/grok",
+      installIfMissing: true,
+      installPrefix: "/managed/cli-tools",
+      resolveInstalledPath: () => resolved,
+      state: {},
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () =>
+          resolved === "grok" ? null : "0.2.118",
+        runNpmView: async () => "0.2.118",
+        runNpmViewIntegrity: async () => "sha512-verified",
+        runCliHealthCheck: async () => true,
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/grok-0.2.118.tgz",
+        verifyTarballIntegrity: () => true,
+        scanTarball: async () => ({
+          verdict: "no_baseline",
+          flags: [],
+          candidate: {
+            version: "0.2.118",
+            tarballSha512: "verified-grok",
+            installScripts: { postinstall: "node bin/postinstall.js" },
+            declaredDependencies: [
+              "@iarna/toml",
+              "@xai-official/grok-win32-x64",
+            ],
+            binEntries: { grok: "bin/grok" },
+            executableFiles: ["bin/grok"],
+            networkHosts: [],
+            files: ["package.json", "bin/grok"],
+            fileHashes: { "package.json": "package", "bin/grok": "bin" },
+          },
+        }),
+        runNpmInstallFromTarball: async () => {
+          resolved = "/managed/cli-tools/bin/grok";
+        },
+      },
+    });
+
+    expect(result.outcome).toBe("success");
+  });
+});
+
 describe("isBelowBaseline (#1761)", () => {
   it("returns true when installed is older on any semver component", () => {
     expect(isBelowBaseline("2.1.30", "2.1.120")).toBe(true);
@@ -763,5 +1004,6 @@ describe("verified fail-closed updates (#3092)", () => {
     expect(card).toContain("agentStore.openCliUpdateInstructions()");
     expect(store).toContain("https://code.claude.com/");
     expect(store).toContain("https://developers.openai.com/");
+    expect(store).toContain("https://docs.x.ai/");
   });
 });

@@ -10,6 +10,12 @@ Run the validation app and walkthrough:
 pnpm validate:walkthrough app-ready
 ```
 
+Run the clean-profile coding-agent CLI walkthrough:
+
+```bash
+pnpm validate:walkthrough automatic-cli-provisioning
+```
+
 Run the validation app manually:
 
 ```bash
@@ -36,7 +42,7 @@ The validation Tauri config uses base bundle identifier `com.serendb.desktop.val
 
 At runtime the validation build sets isolated roots for app config, Seren skill authoring, and Claude skills under the validation app-data directory. The app-wide OAuth callback server binds an isolated loopback port and frontend OAuth flows ask the running app for the active callback URL.
 
-The validation control channel is compiled only with the `validation` Cargo feature and only starts for the base validation identifier or one of its numeric slot identifiers. It writes a tokenized loopback discovery file and accepts only typed commands: navigate, click, fill, press, waitFor, dumpText, and screenshot.
+The validation control channel is compiled only with the `validation` Cargo feature and only starts for the base validation identifier or one of its numeric slot identifiers. It writes a tokenized loopback discovery file and accepts only typed commands: navigate, click, contextmenu, readState, fill, select, press, waitFor, dumpText, screenshot, and setRootPath. `readState` has a separate read-only native-command allowlist.
 
 ## Evidence
 
@@ -54,4 +60,4 @@ For macOS native pixels, grant Screen Recording permission to the validation app
 
 ## CI
 
-The `validation-walkthrough` workflow is label-gated. Add the `needs-validation` PR label to run `pnpm validate:walkthrough app-ready` on macOS and upload the artifact directory.
+The `validation-walkthrough` workflow is label-gated. Add the `needs-validation` PR label to run the clean-profile automatic CLI scenario in real Tauri apps on macOS, Ubuntu (under Xvfb), and Windows, with one artifact bundle per operating system.

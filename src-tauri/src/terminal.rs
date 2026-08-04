@@ -3721,8 +3721,9 @@ fn compose_cli_command(
 
 /// PATH for terminal child processes — the embedded runtime directories
 /// plus the parent process PATH plus the CLI install dirs
-/// (`~/.claude/bin`, `~/.local/bin`, Homebrew, `%APPDATA%\npm`) a
-/// GUI-launched Tauri app typically misses.
+/// (`~/.seren/cli-tools/bin`, `~/.claude/bin`, `~/.local/bin`, Homebrew,
+/// `%APPDATA%\Seren\cli-tools`, `%APPDATA%\npm`) a GUI-launched Tauri app
+/// typically misses.
 ///
 /// Single source of truth for both the PTY spawn and the `claude
 /// --version` probe so a regression in one surface can't desync from
@@ -4248,20 +4249,24 @@ mod tests {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             let home = std::env::var("HOME").expect("HOME must be set for this test");
-            let expected = format!("{}/.local/bin", home);
+            let managed = format!("{}/.seren/cli-tools/bin", home);
+            let native = format!("{}/.local/bin", home);
             assert!(
-                path.split(':').any(|p| p == expected),
-                "expected {expected} to be in augmented PATH, got: {path}",
+                path.split(':').any(|p| p == managed),
+                "expected {managed} to be in augmented PATH, got: {path}",
+            );
+            assert!(
+                path.split(':').any(|p| p == native),
+                "expected {native} to be in augmented PATH, got: {path}",
             );
         }
         #[cfg(target_os = "windows")]
         {
-            let userprofile =
-                std::env::var("USERPROFILE").expect("USERPROFILE must be set for this test");
-            let expected = format!(r"{}\.claude\bin", userprofile);
+            let appdata = std::env::var("APPDATA").expect("APPDATA must be set for this test");
+            let managed = format!(r"{}\Seren\cli-tools", appdata);
             assert!(
-                path.split(';').any(|p| p == expected),
-                "expected {expected} to be in augmented PATH, got: {path}",
+                path.split(';').any(|p| p == managed),
+                "expected {managed} to be in augmented PATH, got: {path}",
             );
         }
     }

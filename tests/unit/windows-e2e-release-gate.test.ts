@@ -348,16 +348,15 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("initialModelId");
   });
 
-  it("installs the agent CLIs where the app's production resolver looks (run 30159367572)", () => {
-    // The harness provisions a portable toolchain Node whose npm global prefix
-    // is the scratch Node dir, but the installed app resolves agent CLIs from
-    // %APPDATA%\npm (resolveInstalledCodexBinary candidate #1). Pin the install
-    // prefix to %APPDATA%\npm so the app can actually see the codex it installed;
-    // otherwise the codex journey dies with "not installed in a verifiable
-    // location" while the box demonstrably has the CLI.
-    expect(taskUserRunner).toContain("npm_config_prefix");
-    expect(taskUserRunner).toContain("appDataNpmPrefix");
-    expect(agentRegistry).toContain('path.join(appData, "npm", "codex.cmd")');
+  it("makes the installed app provision CLIs into its managed Windows prefix", () => {
+    // The temporary profile must begin without agent binaries. The probe then
+    // verifies the exact files Seren created rather than accepting test-setup
+    // preinstalls that can mask a production regression.
+    expect(taskUserRunner).not.toContain('Invoke-LoggedNative "Install e2e agent CLIs"');
+    expect(taskUserRunner).toContain("Clean Windows e2e profile unexpectedly resolves");
+    expect(taskUserRunner).toContain('Join-Path `$env:APPDATA "Seren\\cli-tools"');
+    expect(agentRegistry).toContain("managedCliBinary");
+    expect(probe).toContain('path.join(appData, "Seren", "cli-tools", "codex.cmd")');
   });
 
   it("keeps codex credentials required under Bedrock — Bedrock waives only Claude (run 30159367572)", () => {
@@ -532,50 +531,19 @@ describe("Windows production e2e release gate", () => {
     expect(releaseWorkflow).toContain("windows-app-e2e-logs");
   });
 
-  it("preprovisions real agent CLIs outside provider startup before checking release-gate availability (#2481, #3100)", () => {
-    // #3096 removed automatic provider-startup installers. The disposable
-    // Windows release user must install its explicit test prerequisites before
-    // app launch, while the production RPC only verifies resolution.
-    const cliSetupAt = taskUserRunner.indexOf(
-      'Invoke-LoggedNative "Install e2e agent CLIs"',
+  it("certifies automatic provisioning on a clean Windows profile (#3680)", () => {
+    const cleanProfileAt = taskUserRunner.indexOf(
+      "Confirmed clean profile; Seren must provision every managed agent CLI automatically",
     );
     const appHarnessAt = taskUserRunner.indexOf(
       'Invoke-LoggedNative "Windows app harness"',
     );
-    expect(cliSetupAt).toBeGreaterThanOrEqual(0);
+    expect(cleanProfileAt).toBeGreaterThanOrEqual(0);
     expect(appHarnessAt).toBeGreaterThanOrEqual(0);
-    expect(cliSetupAt).toBeLessThan(appHarnessAt);
-    expect(taskUserRunner).toContain("@anthropic-ai/claude-code@latest");
-    expect(taskUserRunner).toContain("@openai/codex@latest");
-    expect(taskUserRunner).toContain(
-      "manifests/windows_amd64.json",
-    );
-    expect(taskUserRunner).toContain("Get-FileHash");
-    expect(taskUserRunner).toContain("SHA512");
-    expect(taskUserRunner).toContain('"agy.exe"');
-    // Windows PowerShell 5.1 applies no timeout by default, so a stalled
-    // Antigravity fetch would hang the gate until the outer task timeout
-    // instead of failing fast. #3668
-    for (const antigravityFetch of [
-      'Invoke-RestMethod -Uri "`$agyManifestOrigin/manifests/windows_amd64.json" -UseBasicParsing -TimeoutSec 60',
-      "Invoke-WebRequest -Uri `$agyArtifactUri.AbsoluteUri -OutFile `$agyPath -UseBasicParsing -TimeoutSec 300",
-    ]) {
-      expect(taskUserRunner).toContain(antigravityFetch);
-    }
-    expect(taskUserRunner).toContain("@xai-official/grok@latest");
-    for (const [label, binary] of [
-      ["Claude Code", "claude.cmd"],
-      ["Codex", "codex.cmd"],
-      ["Grok", "grok.cmd"],
-    ]) {
-      expect(taskUserRunner).toContain(
-        `Label = "${label}"; Package =`,
-      );
-      expect(taskUserRunner).toContain(`Binary = "${binary}"`);
-    }
-    expect(taskUserRunner).toContain(
-      'Invoke-LoggedNative "Verify `$(`$agentCli.Label) CLI"',
-    );
+    expect(cleanProfileAt).toBeLessThan(appHarnessAt);
+    expect(taskUserRunner).not.toContain("@anthropic-ai/claude-code@latest");
+    expect(taskUserRunner).not.toContain("@openai/codex@latest");
+    expect(taskUserRunner).not.toContain("@xai-official/grok@latest");
 
     expect(probe).toContain("provider_ensure_agent_cli");
     expect(probe).toContain("ensureAgentCli");
@@ -583,6 +551,9 @@ describe("Windows production e2e release gate", () => {
     expect(probe).toContain("provider CLI ready");
     expect(probe).toContain("CLI_COMPATIBILITY_AGENT_TYPES");
     expect(probe).toContain("verifyAgentCliCompatibility");
+    expect(probe).toContain("verifyManagedCliArtifacts");
+    expect(probe).toContain("provider_get_available_agents");
+    expect(probe).toContain("verifyLiveAgentRosterAndLaunchers");
     expect(probe).toContain("all provider CLI resolution checks passed");
     for (const agentType of [
       "codex",
@@ -592,6 +563,21 @@ describe("Windows production e2e release gate", () => {
       "grok",
     ]) {
       expect(probe).toContain(`"${agentType}"`);
+    }
+    for (const binary of ["claude.cmd", "codex.cmd", "grok.cmd", "agy.exe"]) {
+      expect(probe).toContain(`"${binary}"`);
+    }
+    for (const testId of [
+      "new-claude-agent",
+      "new-codex-agent",
+      "new-claude-codex-agent",
+      "new-gemini-agent",
+      "new-grok-agent",
+      "new-lmstudio-agent",
+      "new-claude-cli",
+      "new-codex-cli",
+    ]) {
+      expect(probe).toContain(`"${testId}"`);
     }
     const runtimeExerciseAt = probe.indexOf("async function exerciseAgentRuntime");
     const compatibilityCheckAt = probe.indexOf(
