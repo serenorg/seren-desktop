@@ -8,6 +8,11 @@ import * as https from "https";
 import * as path from "path";
 import { pipeline } from "stream/promises";
 import { pathToFileURL } from "node:url";
+import {
+	clearStagedComponentVersion,
+	readStagedComponentVersion,
+	writeStagedComponentVersion,
+} from "../runtime-staging";
 
 // Version configuration — keep this pinned. The Python freshness workflow
 // (.github/workflows/check-python-version.yml) opens a PR to bump the patch
@@ -239,10 +244,20 @@ async function preparePython(
 	const pythonDir = path.join(outputDir, "python");
 
 	if (fs.existsSync(pythonDir)) {
-		console.log(`Python directory already exists at ${pythonDir}, skipping...`);
-		return { pythonDir, getPipSha256: null, pipLauncherSha256: null };
+		const stagedVersion = readStagedComponentVersion(outputDir, "python");
+		if (stagedVersion === PYTHON_VERSION) {
+			console.log(`Python ${PYTHON_VERSION} already staged at ${pythonDir}, skipping download...`);
+			return { pythonDir, getPipSha256: null, pipLauncherSha256: null };
+		}
+		// A directory without a matching marker is either an interrupted
+		// extraction or a stale version; both must be re-staged (#3697).
+		console.log(
+			`Staged Python at ${pythonDir} is ${stagedVersion ?? "incomplete or of unrecorded version"}, expected ${PYTHON_VERSION}; re-staging...`,
+		);
+		fs.rmSync(pythonDir, { recursive: true, force: true });
 	}
 
+	clearStagedComponentVersion(outputDir, "python");
 	fs.mkdirSync(pythonDir, { recursive: true });
 
 	const zipPath = path.join(outputDir, `python-${arch}.zip`);
@@ -289,6 +304,8 @@ async function preparePython(
 	}
 
 	fs.unlinkSync(zipPath);
+
+	writeStagedComponentVersion(outputDir, "python", PYTHON_VERSION);
 
 	console.log(`Python prepared at ${pythonDir}`);
 	return { pythonDir, getPipSha256, pipLauncherSha256 };

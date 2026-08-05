@@ -107,8 +107,14 @@ fn gather_repo_context(project_root: &str) -> String {
 
     let mut parts: Vec<String> = Vec::new();
 
+    // Bare "git" resolves against the embedded runtime PATH (#3701): launched
+    // from Finder/desktop the parent PATH is minimal, and Windows ships its
+    // own portable git. The resolver falls back to the bare name when the
+    // embedded PATH is empty or has no match.
+    let git = crate::mcp::resolve_command_in_embedded_path("git");
+
     // Current branch
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = std::process::Command::new(&git)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(root)
         .output()
@@ -120,7 +126,7 @@ fn gather_repo_context(project_root: &str) -> String {
     }
 
     // Dirty file count
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = std::process::Command::new(&git)
         .args(["status", "--porcelain"])
         .current_dir(root)
         .output()
@@ -135,7 +141,7 @@ fn gather_repo_context(project_root: &str) -> String {
     }
 
     // Recent commits (last 5)
-    if let Ok(output) = std::process::Command::new("git")
+    if let Ok(output) = std::process::Command::new(&git)
         .args(["log", "--oneline", "-5"])
         .current_dir(root)
         .output()

@@ -419,6 +419,34 @@ pub(crate) fn format_playwright_mcp_command(node: &str, script: &std::path::Path
     format!("{} {}", shell_quote(node), shell_quote(&script_str))
 }
 
+/// Candidate file names probed for a bare command, in priority order.
+///
+/// On Windows the executable suffixes must come before the bare name: the
+/// staged win-x64 node directory ships extensionless POSIX `npm`/`npx`
+/// scripts alongside `npm.cmd`/`npx.cmd`, and CreateProcess cannot run a
+/// POSIX shell script — a bare-name-first probe resolves to a file that can
+/// never spawn (#3691).
+fn embedded_command_candidate_names(command: &str, windows: bool) -> Vec<String> {
+    if windows {
+        vec![
+            format!("{}.exe", command),
+            format!("{}.cmd", command),
+            format!("{}.bat", command),
+            command.to_string(),
+        ]
+    } else {
+        vec![command.to_string()]
+    }
+}
+
+/// First candidate name that exists in `dir`, honoring the priority order.
+fn find_command_candidate(dir: &std::path::Path, names: &[String]) -> Option<std::path::PathBuf> {
+    names
+        .iter()
+        .map(|name| dir.join(name))
+        .find(|candidate| candidate.exists())
+}
+
 /// Resolve a bare command name to an absolute path by searching the embedded PATH.
 ///
 /// On macOS/Linux, when the app is launched from Finder or a desktop launcher,
@@ -442,22 +470,11 @@ pub(crate) fn resolve_command_in_embedded_path(command: &str) -> String {
     #[cfg(not(target_os = "windows"))]
     let sep = ":";
 
-    // On Windows, try bare name, then .exe and .cmd suffixes.
-    #[cfg(target_os = "windows")]
-    let names: Vec<String> = vec![
-        command.to_string(),
-        format!("{}.exe", command),
-        format!("{}.cmd", command),
-    ];
-    #[cfg(not(target_os = "windows"))]
-    let names: Vec<String> = vec![command.to_string()];
+    let names = embedded_command_candidate_names(command, cfg!(target_os = "windows"));
 
     for dir in embedded_path.split(sep) {
-        for name in &names {
-            let candidate = std::path::Path::new(dir).join(name);
-            if candidate.exists() {
-                return candidate.to_string_lossy().to_string();
-            }
+        if let Some(candidate) = find_command_candidate(std::path::Path::new(dir), &names) {
+            return candidate.to_string_lossy().to_string();
         }
     }
 
@@ -1987,6 +2004,46 @@ mod playwright_resolver_tests {
         assert_eq!(
             cmd,
             "/usr/local/bin/node /opt/seren/playwright-stealth/dist/index.js"
+        );
+    }
+}
+
+#[cfg(test)]
+mod embedded_command_resolver_tests {
+    use super::*;
+
+    /// #3691: the staged win-x64 runtime ships extensionless POSIX `npm` /
+    /// `npx` scripts alongside `npm.cmd`. A Windows resolve must pick the
+    /// spawnable `.cmd`, never the POSIX script. Exercised through the pure
+    /// candidate list so the ordering is verified on every host OS.
+    #[test]
+    fn windows_probe_prefers_cmd_over_extensionless_posix_script() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("npm"), b"#!/bin/sh\n").unwrap();
+        std::fs::write(tmp.path().join("npm.cmd"), b"@echo off\r\n").unwrap();
+
+        let names = embedded_command_candidate_names("npm", true);
+        let resolved = find_command_candidate(tmp.path(), &names)
+            .expect("candidate must resolve in the fixture dir");
+        assert_eq!(resolved, tmp.path().join("npm.cmd"));
+    }
+
+    #[test]
+    fn windows_probe_still_reaches_the_bare_name_last() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("node"), b"binary\n").unwrap();
+
+        let names = embedded_command_candidate_names("node", true);
+        let resolved = find_command_candidate(tmp.path(), &names)
+            .expect("candidate must resolve in the fixture dir");
+        assert_eq!(resolved, tmp.path().join("node"));
+    }
+
+    #[test]
+    fn unix_probe_uses_only_the_bare_name() {
+        assert_eq!(
+            embedded_command_candidate_names("npm", false),
+            vec!["npm".to_string()]
         );
     }
 }

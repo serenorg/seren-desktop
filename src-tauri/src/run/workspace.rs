@@ -15,7 +15,17 @@ const SETUP_OUTPUT_LIMIT: usize = 2_000;
 /// Every child this module spawns is background work for a run. Without this
 /// flag Windows opens a console window for each one — setup scripts, evidence
 /// checks, and every git call during provisioning.
+///
+/// Bare `git` resolves against the embedded runtime PATH (#3701): launched
+/// from Finder or a desktop launcher the parent PATH is minimal, and Windows
+/// ships its own portable git. The resolver falls back to the bare name when
+/// the embedded PATH is empty or has no match.
 fn hidden_command(program: &str) -> Command {
+    let program = if program == "git" {
+        crate::mcp::resolve_command_in_embedded_path(program)
+    } else {
+        program.to_string()
+    };
     #[allow(unused_mut)]
     let mut command = Command::new(program);
     #[cfg(target_os = "windows")]
