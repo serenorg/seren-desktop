@@ -34,7 +34,12 @@ to start the local Codex agent used for this UI behavior.
 
 ![After clicking dismiss](./03-after-dismiss.png)
 
-![A new agent receives its own banner](./04-next-agent-controls-reset.png)
+Step 6 (a second agent receives its own banner) was performed live and its
+assertion passed in `verification.json`, but the packet originally presented a
+byte-identical copy of the step-4 capture as its screenshot. The duplicate has
+been removed (#3705); the step's visual capture is pending the next live
+walkthrough of this flow. The behavior itself is code-verified: dismissal is
+keyed per conversation id, and each pane mounts its own panel instance.
 
 The live launcher used in the walkthrough:
 
