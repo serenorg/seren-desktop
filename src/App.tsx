@@ -299,6 +299,11 @@ function App() {
     const isAuth = authStore.isAuthenticated;
     // Track the dependency explicitly so createEffect re-runs when auth changes.
     void isAuth;
+    // Also track successful skill-key provisions: a start that failed because
+    // the key was not provisioned yet (offline launch, transient 5xx) can only
+    // retry when the key later lands — `isAuthenticated` stays true across
+    // refreshes and never re-fires this effect on its own. #3690.
+    void authStore.skillKeyEpoch;
 
     untrack(async () => {
       try {

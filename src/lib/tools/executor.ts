@@ -1259,6 +1259,25 @@ export async function executeTool(
           return auth.toolResult;
         }
 
+        // An empty skill-key slot means provisioning failed earlier (offline
+        // launch, transient 5xx) and the Rust side would silently spawn the
+        // skill without credentials. One best-effort provision here lets the
+        // first run after connectivity returns carry them. #3690.
+        {
+          const { getSerenSkillApiKey } = await import("@/lib/tauri-bridge");
+          if (!(await getSerenSkillApiKey().catch(() => null))) {
+            const { ensureSkillApiKey } = await import(
+              "@/services/desktop-api-access"
+            );
+            await ensureSkillApiKey().catch((error) => {
+              console.warn(
+                "[ToolExecutor] Skill key provisioning retry failed:",
+                error,
+              );
+            });
+          }
+        }
+
         const invokeArgs: {
           skillSlug: string;
           cwd: string;
