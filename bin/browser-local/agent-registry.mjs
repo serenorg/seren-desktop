@@ -400,6 +400,31 @@ function assertAgentCliProvisioningComplete(definitions, provisioning) {
 }
 
 /**
+ * Plain-language reasons for updater outcomes quoted in user-facing spawn
+ * errors, so a raw enum like `skipped:network` never reaches the user. The
+ * structured app log still records the exact outcome enum for support.
+ */
+const CLI_OUTCOME_DESCRIPTIONS = {
+  "skipped:network": "network unavailable",
+  "skipped:unresolved": "the CLI could not be located",
+  "skipped:install_failed": "the install failed",
+  "skipped:integrity_failed": "the download could not be verified",
+  "skipped:scan_rejected": "the download failed Seren's security scan",
+  "skipped:scan_error": "the security scan could not finish",
+  "skipped:verification_required": "the installed version could not be verified",
+  "skipped:error": "an unexpected error occurred",
+};
+
+function describeCliOutcome(outcome) {
+  return (
+    CLI_OUTCOME_DESCRIPTIONS[outcome] ??
+    String(outcome ?? "unknown")
+      .replace(/^skipped:/, "")
+      .replace(/_/g, " ")
+  );
+}
+
+/**
  * Block spawn until the resolved CLI meets its CLI_MIN_VERSION_BASELINE,
  * force-updating through the verified updater when it does not. Shared by
  * the Codex (#2904) and Claude Code (#3443) spawn paths so both degrade
@@ -482,8 +507,9 @@ async function ensureCliBaselineViaUpdater(
       return resolved;
     }
     throw new Error(
-      `Seren could not install ${label} automatically. Seren will retry ` +
-        `automatically. (${outcome.outcome})`,
+      `Seren could not install ${label} automatically ` +
+        `(${describeCliOutcome(outcome.outcome)}). Seren will retry the ` +
+        `next time you start this agent.`,
     );
   }
   if (!isBelowBaseline(installed, baseline)) {
@@ -521,8 +547,8 @@ async function ensureCliBaselineViaUpdater(
   ) {
     throw new Error(
       `${label} CLI is still ${updated ?? "unknown"}; Seren requires ${baseline} ` +
-        `or newer and will retry the verified update automatically. ` +
-        `(${outcome.outcome})`,
+        `or newer and will retry the verified update the next time you start ` +
+        `this agent (${describeCliOutcome(outcome.outcome)}).`,
     );
   }
 
@@ -540,6 +566,10 @@ async function ensureCodexCliViaUpdater(emit) {
     bareCommand: "codex",
     packageName: "@openai/codex",
     resolveBinary: resolveInstalledCodexBinary,
+    // A resolved install whose version probe times out on an IO-starved
+    // machine is usable, not missing — spawn permissively instead of failing
+    // the launch, matching Claude Code (#3471).
+    allowUnprobeableInstall: true,
   });
 }
 
@@ -556,11 +586,10 @@ async function ensureClaudeCodeCli(emit) {
       bareCommand: "claude",
       packageName: "@anthropic-ai/claude-code",
       resolveBinary: resolveInstalledClaudeBinary,
-      // Unlike Codex (a small native binary that answers --version
-      // instantly), this CLI is a large JS package whose cold start can
-      // outlive the probe timeout on a slow machine. An unprobeable version
-      // at a known install location spawns permissively (#3471), matching
-      // the custom-PATH branch below.
+      // This CLI is a large JS package whose cold start can outlive the
+      // probe timeout on a slow machine. An unprobeable version at a known
+      // install location spawns permissively (#3471), matching the
+      // custom-PATH branch below.
       allowUnprobeableInstall: true,
     });
   }
@@ -822,7 +851,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Seren is preparing the Codex CLI automatically.",
+                  "Seren installs the Codex CLI automatically when you start the agent.",
               }),
         };
       },
@@ -859,7 +888,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Seren is preparing the Claude Code CLI automatically.",
+                  "Seren installs the Claude Code CLI automatically when you start the agent.",
               }),
         };
       },
@@ -903,7 +932,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           ...(missing.length === 0
             ? {}
             : {
-                unavailableReason: `Seren is preparing the ${missing.join(" and ")} CLI${missing.length > 1 ? "s" : ""} automatically.`,
+                unavailableReason: `Seren installs the ${missing.join(" and ")} CLI${missing.length > 1 ? "s" : ""} automatically when you start the agent.`,
               }),
         };
       },
@@ -945,7 +974,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Seren is preparing the Antigravity CLI automatically.",
+                  "Seren installs the Antigravity CLI automatically when you start the agent.",
               }),
         };
       },
@@ -961,7 +990,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
           emit?.("provider://cli-install-progress", {
             stage: "action_required",
             message:
-              "Seren could not prepare Antigravity yet and will retry automatically.",
+              "Seren could not prepare Antigravity yet and will retry the next time you start this agent.",
           });
           throw error;
         }
@@ -996,7 +1025,7 @@ export function createBrowserLocalAgentRegistry({ emit }) {
             ? {}
             : {
                 unavailableReason:
-                  "Seren is preparing the Grok CLI automatically.",
+                  "Seren installs the Grok CLI automatically when you start the agent.",
               }),
         };
       },
@@ -1089,7 +1118,13 @@ export function createBrowserLocalAgentRegistry({ emit }) {
   const persistedActions = managedNpmTargets.map((target) => {
     const key = `pendingAction:${target}`;
     const action = persistedUpdaterState[key];
-    if (action?.reason === "installation_required") {
+    // Both reasons were persisted by builds that handed install/update work
+    // to the user; provisioning is Seren-owned now, so a leftover card would
+    // resurface a decision the app no longer asks for. #3708
+    if (
+      action?.reason === "installation_required" ||
+      action?.reason === "update_required"
+    ) {
       persistedUpdaterState[key] = null;
       removedStaleInstallAction = true;
       return null;

@@ -941,12 +941,23 @@ export async function getAgentPermissionCatalog(
 }
 
 /**
+ * CLI ensure/retry RPCs cover real install work — an npm install bounded at
+ * three minutes, pack/scan verification, and serialization behind other CLIs
+ * sharing the managed prefix — so the default 30s RPC timeout can expire while
+ * a first install is still succeeding underneath it. Give these calls ten
+ * minutes.
+ */
+const CLI_ENSURE_TIMEOUT_MS = 600_000;
+
+/**
  * Ensure Claude Code CLI is installed through Seren's verified managed path.
  */
 export async function ensureClaudeCli(): Promise<string> {
-  return invokeProvider<string>("provider_ensure_agent_cli", {
-    agentType: "claude-code",
-  });
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "claude-code" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -954,9 +965,11 @@ export async function ensureClaudeCli(): Promise<string> {
  * Missing installs and upgrades are verified before success is reported.
  */
 export async function ensureCodexCli(): Promise<string> {
-  return invokeProvider<string>("provider_ensure_agent_cli", {
-    agentType: "codex",
-  });
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "codex" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 export type CliUpdateOutcome = {
@@ -983,9 +996,11 @@ export type CliUpdateActionRequired = {
 export async function retryCliUpdate(
   bareCommand: "claude" | "codex" | "grok",
 ): Promise<CliUpdateOutcome> {
-  return invokeProvider<CliUpdateOutcome>("provider_retry_cli_update", {
-    bareCommand,
-  });
+  return invokeProvider<CliUpdateOutcome>(
+    "provider_retry_cli_update",
+    { bareCommand },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 /** Read an updater action that may have fired before the UI subscribed. */
@@ -1001,16 +1016,20 @@ export async function getPendingCliUpdateAction(): Promise<CliUpdateActionRequir
  * The durable service name remains Gemini for saved-session compatibility.
  */
 export async function ensureGeminiCli(): Promise<string> {
-  return invokeProvider<string>("provider_ensure_agent_cli", {
-    agentType: "gemini",
-  });
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "gemini" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 /** Ensure the official Grok Build CLI is installed in Seren's managed prefix. */
 export async function ensureGrokCli(): Promise<string> {
-  return invokeProvider<string>("provider_ensure_agent_cli", {
-    agentType: "grok",
-  });
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "grok" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 /**
@@ -1018,9 +1037,11 @@ export async function ensureGrokCli(): Promise<string> {
  * Returns the bin directory path containing the claude binary.
  */
 export async function ensurePairedCli(): Promise<string> {
-  return invokeProvider<string>("provider_ensure_agent_cli", {
-    agentType: "claude-codex",
-  });
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "claude-codex" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
 }
 
 /**
