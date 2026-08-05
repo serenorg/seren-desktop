@@ -418,6 +418,96 @@ describe("LM Studio runtime helpers", () => {
     expect(prepared.body.max_tokens).toBeGreaterThan(0);
   });
 
+  it("retains Seren publisher routing tools when the live catalog exceeds context", () => {
+    const routingNames = [
+      "list_agent_publishers",
+      "list_mcp_tools",
+      "call_publisher",
+      "get_agent_publisher",
+      "list_mcp_resources",
+      "list_user_oauth_connections",
+    ];
+    const tool = (name: string, description: string) => ({
+      type: "function",
+      function: {
+        name,
+        description,
+        parameters: { type: "object", properties: {} },
+      },
+    });
+    const prepared = buildLmStudioChatCompletionBodyForContextBudget({
+      model: "local-model",
+      messages: [{ role: "user", content: "Search my email" }],
+      tools: [
+        tool("read_file", "Read one local file"),
+        ...Array.from({ length: 80 }, (_, index) =>
+          tool(`catalog_tool_${index}`, "x".repeat(800)),
+        ),
+        ...routingNames.map((name) => tool(name, `Route through ${name}`)),
+      ],
+      contextLength: 8192,
+    });
+
+    const selectedNames = (prepared.body.tools ?? []).map(
+      (entry) => (entry.function as { name: string }).name,
+    );
+    expect(prepared.droppedTools).toBeGreaterThan(0);
+    expect(selectedNames.slice(0, routingNames.length)).toEqual(routingNames);
+    expect(selectedNames).toContain("read_file");
+  });
+
+  it("keeps the publisher executor after multi-step discovery fills context", () => {
+    const tool = (name: string, description: string) => ({
+      type: "function",
+      function: {
+        name,
+        description,
+        parameters: { type: "object", properties: {} },
+      },
+    });
+    const discoveryMessages = [
+      { role: "user", content: `Primer ${"p".repeat(12_000)}\nSearch Gmail` },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ function: { name: "list_agent_publishers" } }],
+      },
+      { role: "tool", content: `Publisher list ${"a".repeat(14_000)}` },
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ function: { name: "list_mcp_tools" } }],
+      },
+      { role: "tool", content: `Gmail tools ${"b".repeat(10_000)}` },
+    ];
+    const prepared = buildLmStudioChatCompletionBodyForContextBudget({
+      model: "local-model",
+      messages: discoveryMessages,
+      tools: [
+        ...Array.from({ length: 80 }, (_, index) =>
+          tool(`catalog_tool_${index}`, "x".repeat(800)),
+        ),
+        tool("call_publisher", "c".repeat(4_000)),
+        tool("list_agent_publishers", "l".repeat(2_000)),
+        tool("list_mcp_tools", "m".repeat(1_800)),
+      ],
+      contextLength: 8192,
+    });
+
+    const selectedNames = (prepared.body.tools ?? []).map(
+      (entry) => (entry.function as { name: string }).name,
+    );
+    const messageText = JSON.stringify(prepared.body.messages);
+    expect(prepared.droppedMessages).toBe(2);
+    expect(messageText).not.toContain("Publisher list");
+    expect(messageText).toContain("Gmail tools");
+    expect(messageText).toContain("Search Gmail");
+    expect(selectedNames).toContain("call_publisher");
+    expect(prepared.estimatedInputTokens + prepared.maxTokens).toBeLessThanOrEqual(
+      Math.floor(8192 * 0.94),
+    );
+  });
+
   it("scopes tool incompatibility to the selected LM Studio model", () => {
     const session = {
       currentModelId: "gemma-4-12b-obliterated",

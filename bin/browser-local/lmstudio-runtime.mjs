@@ -39,6 +39,20 @@ const CONTEXT_SAFETY_FRACTION = 0.82;
 const AGGRESSIVE_CONTEXT_SAFETY_FRACTION = 0.58;
 const MIN_INPUT_BUDGET_TOKENS = 512;
 const TOOL_SCHEMA_TOKEN_SAFETY_MULTIPLIER = 1.35;
+const SEREN_PUBLISHER_ROUTING_TOOL_NAMES = [
+  "list_agent_publishers",
+  "list_mcp_tools",
+  "call_publisher",
+  "get_agent_publisher",
+  "list_mcp_resources",
+  "list_user_oauth_connections",
+];
+const SEREN_PUBLISHER_ROUTING_TOOL_RANK = new Map(
+  SEREN_PUBLISHER_ROUTING_TOOL_NAMES.map((name, index) => [name, index]),
+);
+const SEREN_PUBLISHER_CORE_TOOL_NAMES = new Set(
+  SEREN_PUBLISHER_ROUTING_TOOL_NAMES.slice(0, 3),
+);
 const TOOLS_UNSUPPORTED_NOTICE =
   "_This LM Studio model doesn't support tool calls, so local file access and Seren tools are off for this model._\n\n";
 const TOOLS_CONTEXT_OVERFLOW_NOTICE =
@@ -853,6 +867,44 @@ function estimateLmStudioToolTokens(tool) {
   );
 }
 
+function prioritizeLmStudioToolsForContextBudget(tools) {
+  const routingTools = [];
+  const remainingTools = [];
+  for (const tool of tools) {
+    const name = tool?.function?.name;
+    if (SEREN_PUBLISHER_ROUTING_TOOL_RANK.has(name)) {
+      routingTools.push(tool);
+    } else {
+      remainingTools.push(tool);
+    }
+  }
+  routingTools.sort(
+    (left, right) =>
+      (SEREN_PUBLISHER_ROUTING_TOOL_RANK.get(left?.function?.name) ??
+        Number.MAX_SAFE_INTEGER) -
+      (SEREN_PUBLISHER_ROUTING_TOOL_RANK.get(right?.function?.name) ??
+        Number.MAX_SAFE_INTEGER),
+  );
+  return [...routingTools, ...remainingTools];
+}
+
+function publisherRoutingReservationTokens(tools, contextLength, options = {}) {
+  const maxReservation = Math.max(
+    0,
+    totalInputBudgetForContextLength(contextLength, options) -
+      MIN_INPUT_BUDGET_TOKENS -
+      REQUEST_INPUT_OVERHEAD_TOKENS,
+  );
+  let reservedTokens = 0;
+  for (const tool of prioritizeLmStudioToolsForContextBudget(tools)) {
+    if (!SEREN_PUBLISHER_CORE_TOOL_NAMES.has(tool?.function?.name)) continue;
+    const toolTokens = estimateLmStudioToolTokens(tool);
+    if (reservedTokens + toolTokens > maxReservation) continue;
+    reservedTokens += toolTokens;
+  }
+  return reservedTokens;
+}
+
 function maxCompletionTokensForContextLength(contextLength, estimatedInputTokens) {
   const resolvedContextLength = resolvedLmStudioContextLength(contextLength);
   const available =
@@ -869,7 +921,9 @@ function selectLmStudioToolsForContextBudget(
   contextLength,
   options = {},
 ) {
-  const availableTools = Array.isArray(tools) ? tools : [];
+  const availableTools = prioritizeLmStudioToolsForContextBudget(
+    Array.isArray(tools) ? tools : [],
+  );
   const messageTokens = estimateLmStudioMessagesTokens(
     Array.isArray(messages) ? messages : [],
   );
@@ -928,24 +982,51 @@ export function prepareLmStudioMessagesForContextBudget(
     droppedMessages += 1;
   }
 
-  if (
-    prepared.length === 1 &&
-    estimateLmStudioMessagesTokens(prepared) > budget
-  ) {
-    const [onlyMessage] = prepared;
-    if (typeof onlyMessage?.content === "string") {
+  while (estimateLmStudioMessagesTokens(prepared) > budget) {
+    const exchanges = [];
+    for (let index = 0; index < prepared.length; index += 1) {
+      if (
+        prepared[index]?.role !== "assistant" ||
+        !Array.isArray(prepared[index]?.tool_calls) ||
+        prepared[index].tool_calls.length === 0
+      ) {
+        continue;
+      }
+      let end = index + 1;
+      while (prepared[end]?.role === "tool") end += 1;
+      if (end > index + 1) exchanges.push({ start: index, end });
+    }
+    if (exchanges.length <= 1) break;
+    const [oldest] = exchanges;
+    droppedMessages += oldest.end - oldest.start;
+    prepared.splice(oldest.start, oldest.end - oldest.start);
+  }
+
+  if (estimateLmStudioMessagesTokens(prepared) > budget) {
+    const [firstMessage] = prepared;
+    if (
+      firstMessage?.role === "user" &&
+      typeof firstMessage.content === "string"
+    ) {
+      const otherMessageTokens = estimateLmStudioMessagesTokens(
+        prepared.slice(1),
+      );
       const contentBudget = Math.max(
         128,
-        budget - estimateLmStudioTokens(CONTEXT_TRIM_NOTICE) - 8,
+        budget -
+          otherMessageTokens -
+          estimateLmStudioTokens(CONTEXT_TRIM_NOTICE) -
+          8,
       );
       prepared = [
         {
-          ...onlyMessage,
+          ...firstMessage,
           content: `${CONTEXT_TRIM_NOTICE}\n\n${truncateTextToTokenBudget(
-            onlyMessage.content,
+            firstMessage.content,
             contentBudget,
           )}`,
         },
+        ...prepared.slice(1),
       ];
     }
   }
@@ -966,9 +1047,8 @@ export function buildLmStudioChatCompletionBodyForContextBudget({
   options = {},
 }) {
   const availableTools = useTools && Array.isArray(tools) ? tools : [];
-  let selectedTools = selectLmStudioToolsForContextBudget(
+  const routingReservation = publisherRoutingReservationTokens(
     availableTools,
-    messages,
     contextLength,
     options,
   );
@@ -978,11 +1058,11 @@ export function buildLmStudioChatCompletionBodyForContextBudget({
     {
       ...options,
       reservedInputTokens:
-        selectedTools.estimatedTokens + REQUEST_INPUT_OVERHEAD_TOKENS,
+        routingReservation + REQUEST_INPUT_OVERHEAD_TOKENS,
     },
   );
 
-  selectedTools = selectLmStudioToolsForContextBudget(
+  let selectedTools = selectLmStudioToolsForContextBudget(
     availableTools,
     prepared.messages,
     contextLength,

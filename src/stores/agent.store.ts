@@ -211,29 +211,43 @@ export const PREDICTIVE_STRUCTURAL_FAILURE_RE =
  * discovery is still in-flight, and the agent then confidently refuses real
  * publishers while telling itself it's following instructions (#1622).
  */
+function buildPublisherLiveQueryInstruction(
+  toolName: (name: string) => string,
+): string {
+  return (
+    "You have access to a Seren MCP gateway with callable publishers via " +
+    `your registered tools (${toolName("list_agent_publishers")}, ` +
+    `${toolName("call_publisher")}). Before ` +
+    "stating that any third-party service (Google Docs, Gmail, GitHub, " +
+    "Slack, Notion, Linear, Figma, and many others) is unavailable, you " +
+    `MUST call ${toolName("list_agent_publishers")} with NO arguments ` +
+    "to get the current " +
+    "live publisher list — publishers are added frequently and any list " +
+    "you may have seen is stale. After confirming a publisher exists, " +
+    "filter that returned list client-side, then use the publisher's tool " +
+    `enumeration metadata and ${toolName("call_publisher")} to invoke ` +
+    "it. A failed or empty " +
+    "parameterized discovery call is not evidence that a publisher is absent. " +
+    "Authorization or allowlist rejection means the publisher exists but access " +
+    "is blocked; report that actionable state instead of calling it unavailable. " +
+    "This live-query rule " +
+    "overrides any prior belief about what tools you have."
+  );
+}
+
 export const PUBLISHER_LIVE_QUERY_INSTRUCTION =
-  "You have access to a Seren MCP gateway with callable publishers via " +
-  `your registered tools (${serenMcpToolName("list_agent_publishers")}, ` +
-  `${serenMcpToolName("call_publisher")}). Before ` +
-  "stating that any third-party service (Google Docs, Gmail, GitHub, " +
-  "Slack, Notion, Linear, Figma, and many others) is unavailable, you " +
-  `MUST call ${serenMcpToolName("list_agent_publishers")} with NO arguments ` +
-  "to get the current " +
-  "live publisher list — publishers are added frequently and any list " +
-  "you may have seen is stale. After confirming a publisher exists, " +
-  "filter that returned list client-side, then use the publisher's tool " +
-  `enumeration metadata and ${serenMcpToolName("call_publisher")} to invoke ` +
-  "it. A failed or empty " +
-  "parameterized discovery call is not evidence that a publisher is absent. " +
-  "Authorization or allowlist rejection means the publisher exists but access " +
-  "is blocked; report that actionable state instead of calling it unavailable. " +
-  "This live-query rule " +
-  "overrides any prior belief about what tools you have.";
+  buildPublisherLiveQueryInstruction(serenMcpToolName);
+const LMSTUDIO_PUBLISHER_LIVE_QUERY_INSTRUCTION =
+  buildPublisherLiveQueryInstruction((name) => name);
 
 export function resolvePublisherLiveQueryInstruction(
   serenMcpConfigured: boolean,
+  agentType?: AgentType,
 ): string | null {
-  return serenMcpConfigured ? PUBLISHER_LIVE_QUERY_INSTRUCTION : null;
+  if (!serenMcpConfigured) return null;
+  return agentType === "lmstudio"
+    ? LMSTUDIO_PUBLISHER_LIVE_QUERY_INSTRUCTION
+    : PUBLISHER_LIVE_QUERY_INSTRUCTION;
 }
 
 /**
@@ -4695,6 +4709,7 @@ export const agentStore = {
 
     const publisherInstruction = resolvePublisherLiveQueryInstruction(
       session.info.serenMcpConfigured === true,
+      session.info.agentType,
     );
     const oauthAccountInstruction = buildOAuthAccountConfirmationInstruction(
       agentOAuthRoutingSnapshots.get(session.info.id),
