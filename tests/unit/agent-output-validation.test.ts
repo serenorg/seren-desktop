@@ -456,6 +456,35 @@ describe("#1987 Verified Agent Output", () => {
     expect(report.canStoreMemory).toBe(true);
   });
 
+  it("guards first-person access denials that name a service (#3704)", () => {
+    const fires = (finalText: string) =>
+      validateFinalOutput({
+        finalText,
+        evidence: extractEvidenceFromUnifiedMessages([]),
+      }).claims.some((claim) => claim.kind === "publisher_unavailable");
+
+    // A named service turns a first-person access denial into a capability
+    // claim, with or without gateway vocabulary.
+    for (const sentence of [
+      "I cannot access your Gmail account.",
+      "I could not access the GitHub repository you linked.",
+      "I have no access to your Google Calendar.",
+    ]) {
+      expect(fires(sentence), sentence).toBe(true);
+    }
+
+    // Self-description and calendar prose stay untouched: no service name, or
+    // only calendar names.
+    for (const sentence of [
+      "I don't have direct introspective access to my exact model identifier.",
+      "I don't have Friday free.",
+      "I have no access to Monday's notes.",
+      "I couldn't access the file you uploaded.",
+    ]) {
+      expect(fires(sentence), sentence).toBe(false);
+    }
+  });
+
   it("passes model self-description disclaimers through untouched (#3687)", () => {
     // This is the complete raw GLM response that was corrupted during the
     // #3681 walkthrough. First-person negation is framing, not a capability
