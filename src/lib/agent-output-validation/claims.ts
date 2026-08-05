@@ -32,6 +32,15 @@ type ClaimMatcher = {
 // model identifier" is the model describing itself, not a publisher claim
 // (#3687). `api`, `endpoint`, `host` and `server` are excluded for the same
 // reason and have no agent-scope form worth admitting.
+//
+// A first-person denial of ACCESS to a NAMED service ("I cannot access your
+// Gmail account") is a capability claim even without gateway vocabulary — the
+// hallucinated-unavailability phrasing this validator exists for (#2910). The
+// name requirement is what separates it from self-description: the #3687
+// disclaimer talks about access but names no service, and scheduling prose
+// ("I don't have Friday free") names no access. Weekday and month words are
+// excluded from the name check so calendar sentences can never qualify
+// (#3704).
 const PUBLISHER_ABSENCE_TRIGGER =
   /\b(unavailable|not available|not exposed|not configured|not enabled|not connected|not supported|could not access|couldn'?t access|cannot access|can'?t access|not found|no access to|do(?: not|n'?t) have)\b|\bno\s+(?:\w+\s+){0,2}(?:publishers?|integrations?|connectors?|gateways?|mcp|tools?|skills?|plugins?)\b/i;
 
@@ -46,12 +55,35 @@ const FIRST_PERSON_NEGATION =
 
 const PLAIN_CAPABILITY_NOUN = /\b(?:tools?|plugins?)\b/i;
 
+const ACCESS_PHRASE = /\b(?:access|reach|connect to)\b/i;
+
+// Trailing s also covers possessives: token cleaning strips the apostrophe,
+// so "Monday's" arrives as "Mondays".
+const CALENDAR_NAME =
+  /^(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)days?$|^(?:January|February|March|April|May|June|July|August|September|October|November|December)s?$/;
+
+/** True when the sentence names something after its first word that is
+ * written like a proper noun — the "Gmail" in "I cannot access your Gmail
+ * account". Calendar names never qualify. */
+function namesService(sentence: string): boolean {
+  return sentence
+    .split(/\s+/)
+    .slice(1)
+    .some((token) => {
+      const word = token.replace(/[^A-Za-z-]/g, "");
+      return (
+        /^[A-Z][a-z]/.test(word) && word !== "I" && !CALENDAR_NAME.test(word)
+      );
+    });
+}
+
 function hasAgentCapabilityContext(sentence: string): boolean {
   return (
     GATEWAY_VOCABULARY.test(sentence) ||
     AGENT_ENVIRONMENT_SCOPE.test(sentence) ||
     (FIRST_PERSON_NEGATION.test(sentence) &&
-      PLAIN_CAPABILITY_NOUN.test(sentence))
+      (PLAIN_CAPABILITY_NOUN.test(sentence) ||
+        (ACCESS_PHRASE.test(sentence) && namesService(sentence))))
   );
 }
 
