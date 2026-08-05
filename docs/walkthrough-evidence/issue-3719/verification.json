@@ -1,0 +1,56 @@
+{
+  "date": "2026-08-05",
+  "platform": "macOS",
+  "app": "native Tauri validation bundle",
+  "identity": "dedicated non-production validation account",
+  "googleConnections": {
+    "total": 1,
+    "valid": 1
+  },
+  "liveAgents": {
+    "source": "provider_get_available_agents",
+    "types": [
+      "claude-code",
+      "codex",
+      "claude-codex",
+      "gemini",
+      "grok",
+      "lmstudio"
+    ],
+    "count": 6,
+    "everyLiveAgentRendered": true
+  },
+  "liveModels": {
+    "source": "lms ls --llm --json",
+    "names": [
+      "Qwen3.6 35B A3B",
+      "Qwen3.6 27B",
+      "Ornith 1.0 35B",
+      "Gemma 3 1B Instruct GLM 4.7 Flash Heretic Uncensored Thinking",
+      "Gemma 4 E4B",
+      "Gemma 4 12B OBLITERATED"
+    ],
+    "count": 6,
+    "exactModelOrder": true,
+    "everyLiveModelRendered": true,
+    "selectedToolModel": "Gemma 4 E4B",
+    "selectedContextLength": 8192
+  },
+  "publisherRoute": {
+    "transport": "MCP tools/call over HTTPS POST",
+    "endpointPath": "/mcp",
+    "publisherDiscoveryTool": "list_agent_publishers",
+    "toolEnumerationTool": "list_mcp_tools",
+    "executionTool": "call_publisher",
+    "publisherSlug": "gmail",
+    "generatedToolSlug": "get_messages",
+    "readOnly": true,
+    "livePublisherDiscovery": true,
+    "liveToolEnumeration": true,
+    "liveReadSucceeded": true
+  },
+  "mailboxDataDisplayed": false,
+  "mailboxWritesPerformed": false,
+  "endpointAllowlistErrorVisible": false,
+  "markerSeen": true
+}

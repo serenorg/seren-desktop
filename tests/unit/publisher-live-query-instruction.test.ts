@@ -68,6 +68,13 @@ describe("#1622 — PUBLISHER_LIVE_QUERY_INSTRUCTION", () => {
     );
   });
 
+  it("uses the direct MCP function names registered by LM Studio", () => {
+    const txt = resolvePublisherLiveQueryInstruction(true, "lmstudio");
+    expect(txt).toContain("(list_agent_publishers, call_publisher)");
+    expect(txt).toContain("MUST call list_agent_publishers with NO arguments");
+    expect(txt).not.toContain("mcp__seren-mcp__");
+  });
+
   it("omits the instruction when the Seren MCP server was not registered", () => {
     const { serenMcpConfigured } = buildProviderMcpConfig({
       serenCapability: CAPABILITY,
