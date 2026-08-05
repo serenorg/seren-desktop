@@ -781,7 +781,14 @@ created if missing.",
     }
 
     /// Parse a single SSE data line into events, cost, tool call chunks, and finish reason.
-    fn parse_sse_data(data: &str) -> ParseResult {
+    ///
+    /// `allow_message_shape` admits the consolidated `/choices/0/message/*`
+    /// pointers used by non-streaming completions. Streaming chunk parsing
+    /// must NOT admit them: some OpenAI-compatible proxies emit a final
+    /// consolidated chunk carrying the full message alongside its deltas, and
+    /// appending that snapshot after the accumulated deltas doubles the turn's
+    /// content and corrupts tool-call arguments (#3702).
+    fn parse_sse_data(data: &str, allow_message_shape: bool) -> ParseResult {
         let mut result = ParseResult {
             events: Vec::new(),
             cost: None,
@@ -837,7 +844,13 @@ created if missing.",
         let content_value = effective
             .pointer("/delta/content")
             .or_else(|| effective.pointer("/choices/0/delta/content"))
-            .or_else(|| effective.pointer("/choices/0/message/content"));
+            .or_else(|| {
+                if allow_message_shape {
+                    effective.pointer("/choices/0/message/content")
+                } else {
+                    None
+                }
+            });
 
         let content_text = content_value.and_then(Self::normalize_content);
 
@@ -851,8 +864,15 @@ created if missing.",
         let thinking = effective
             .pointer("/delta/thinking")
             .or_else(|| effective.pointer("/choices/0/delta/thinking"))
-            .or_else(|| effective.pointer("/choices/0/message/reasoning_content"))
-            .or_else(|| effective.pointer("/choices/0/message/thinking"))
+            .or_else(|| {
+                if allow_message_shape {
+                    effective
+                        .pointer("/choices/0/message/reasoning_content")
+                        .or_else(|| effective.pointer("/choices/0/message/thinking"))
+                } else {
+                    None
+                }
+            })
             .and_then(|v| v.as_str());
 
         if let Some(text) = thinking {
@@ -867,7 +887,13 @@ created if missing.",
         if let Some(tool_calls) = effective
             .pointer("/delta/tool_calls")
             .or_else(|| effective.pointer("/choices/0/delta/tool_calls"))
-            .or_else(|| effective.pointer("/choices/0/message/tool_calls"))
+            .or_else(|| {
+                if allow_message_shape {
+                    effective.pointer("/choices/0/message/tool_calls")
+                } else {
+                    None
+                }
+            })
             .and_then(|v| v.as_array())
         {
             for (position, tc) in tool_calls.iter().enumerate() {
@@ -1109,6 +1135,10 @@ created if missing.",
         log::debug!("[ChatModelWorker] Starting SSE stream");
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        // Full copy of the response text: the line loop consumes `buffer`
+        // destructively, but the end-of-stream fallback must be able to parse
+        // a multi-line (pretty-printed) completion whole (#3703).
+        let mut full_response_text = String::new();
         let mut accumulated_content = String::new();
         let mut accumulated_thinking = String::new();
         let mut accumulated_cost: f64 = 0.0;
@@ -1145,6 +1175,7 @@ created if missing.",
             }
 
             buffer.push_str(&text);
+            full_response_text.push_str(&text);
 
             // Process complete lines
             while let Some(newline_pos) = buffer.find('\n') {
@@ -1194,7 +1225,7 @@ created if missing.",
                     ));
                 }
 
-                let result = Self::parse_sse_data(&data_str);
+                let result = Self::parse_sse_data(&data_str, false);
                 if let Some(failure) = Self::process_parse_result(
                     &result,
                     &mut pending_tool_calls,
@@ -1224,8 +1255,14 @@ created if missing.",
         // the body field is a string containing embedded SSE data:
         //   {"status":200,"body":"data: {...}\n\ndata: {...}\n\n...[DONE]","cost":"..."}
         // In this case the buffer has no real newlines (SSE newlines are JSON escapes).
-        if !buffer.is_empty() && accumulated_content.is_empty() && last_finish_reason.is_none() {
-            if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(&buffer) {
+        // A pretty-printed body arrives as many lines the SSE loop consumed
+        // without accumulating anything, leaving only a fragment in the
+        // buffer — fall back to re-parsing the full response text so a valid
+        // completion is never dropped as an empty turn (#3703).
+        if accumulated_content.is_empty() && last_finish_reason.is_none() {
+            let parsed_tail = serde_json::from_str::<serde_json::Value>(buffer.trim())
+                .or_else(|_| serde_json::from_str::<serde_json::Value>(full_response_text.trim()));
+            if let Ok(wrapper) = parsed_tail {
                 let envelope = unwrap_data_response(&wrapper);
 
                 // Extract cost from the non-streaming wrapper
@@ -1292,7 +1329,7 @@ created if missing.",
                         if data_str.trim() == "[DONE]" {
                             break;
                         }
-                        let result = Self::parse_sse_data(data_str);
+                        let result = Self::parse_sse_data(data_str, true);
                         if let Some(failure) = Self::process_parse_result(
                             &result,
                             &mut pending_tool_calls,
@@ -1311,7 +1348,7 @@ created if missing.",
                     // body is a JSON object (non-streaming response), extract content directly
                     if body_obj.is_object() {
                         log::info!("[ChatModelWorker] Gateway returned non-streaming JSON body");
-                        let result = Self::parse_sse_data(&body_obj.to_string());
+                        let result = Self::parse_sse_data(&body_obj.to_string(), true);
                         if let Some(failure) = Self::process_parse_result(
                             &result,
                             &mut pending_tool_calls,
@@ -1325,6 +1362,27 @@ created if missing.",
                         {
                             return Ok(failure);
                         }
+                    }
+                } else if envelope.get("choices").is_some() {
+                    // No {status, body, cost} wrapper at all: the envelope IS
+                    // the completion. Without this branch a bare non-streaming
+                    // response ends as a silent empty turn (#3703).
+                    log::info!(
+                        "[ChatModelWorker] Response is a bare non-streaming completion"
+                    );
+                    let result = Self::parse_sse_data(&envelope.to_string(), true);
+                    if let Some(failure) = Self::process_parse_result(
+                        &result,
+                        &mut pending_tool_calls,
+                        &mut accumulated_content,
+                        &mut accumulated_thinking,
+                        &mut accumulated_cost,
+                        &mut last_finish_reason,
+                        event_tx,
+                    )
+                    .await?
+                    {
+                        return Ok(failure);
                     }
                 }
             }
@@ -2023,6 +2081,10 @@ impl Worker for ChatModelWorker {
         // prompt tokens (#1433) — see `trim_history_for_tool_round`.
         let current_prompt_start = messages.len().saturating_sub(1); // user message index
 
+        // Turn-scoped: once the streaming route fails and the non-streaming
+        // fallback succeeds, later tool rounds skip the doomed streaming
+        // attempt instead of paying it once per round.
+        let mut use_streaming = true;
         for round in 0..=MAX_TOOL_ROUNDS {
             // Check cancellation
             if *self.cancelled.lock().await {
@@ -2062,7 +2124,6 @@ impl Worker for ChatModelWorker {
                 body["max_tokens"] = serde_json::json!(4096);
             }
 
-            let mut use_streaming = true;
             let outcome = loop {
                 if *self.cancelled.lock().await {
                     return Ok(());
@@ -2802,7 +2863,7 @@ mod tests {
     #[test]
     fn parses_content_sse_data() {
         let data = r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello"),
@@ -2813,7 +2874,7 @@ mod tests {
     #[test]
     fn parses_content_from_delta_shorthand() {
         let data = r#"{"delta":{"content":"World"}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "World"),
@@ -2829,7 +2890,7 @@ mod tests {
         // fragment. The completed-call event is emitted at stream end —
         // see streaming_tool_call_emits_full_arguments_at_stream_end.
         let data = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"web_search","arguments":"{\"query\":\"news\"}"}}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(
             result.events.is_empty(),
             "parse_sse_data must not emit a ToolCall on a chunk — args may be partial"
@@ -2847,7 +2908,7 @@ mod tests {
     fn accumulates_tool_call_argument_chunks() {
         // First chunk: has id and name, partial arguments.
         let data1 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"tc_1","type":"function","function":{"name":"write_file","arguments":"{\"path"}}]},"finish_reason":null}]}"#;
-        let result1 = ChatModelWorker::parse_sse_data(data1);
+        let result1 = ChatModelWorker::parse_sse_data(data1, false);
         assert_eq!(result1.tool_call_chunks.len(), 1);
         assert_eq!(result1.tool_call_chunks[0].arguments, "{\"path");
         // Chunks never emit per-delta ToolCall events — args may be partial.
@@ -2855,7 +2916,7 @@ mod tests {
 
         // Continuation chunk: only arguments, no id/name.
         let data2 = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\"/tmp/test.txt\""}}]},"finish_reason":null}]}"#;
-        let result2 = ChatModelWorker::parse_sse_data(data2);
+        let result2 = ChatModelWorker::parse_sse_data(data2, false);
         assert_eq!(result2.tool_call_chunks.len(), 1);
         assert_eq!(
             result2.tool_call_chunks[0].arguments,
@@ -2894,7 +2955,7 @@ mod tests {
         let mut finish_reason: Option<String> = None;
 
         for chunk in &chunks {
-            let result = ChatModelWorker::parse_sse_data(chunk);
+            let result = ChatModelWorker::parse_sse_data(chunk, false);
             let outcome = ChatModelWorker::process_parse_result(
                 &result,
                 &mut pending,
@@ -2952,14 +3013,14 @@ mod tests {
     #[test]
     fn detects_tool_calls_finish_reason() {
         let data = r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.finish_reason, Some("tool_calls".to_string()));
     }
 
     #[test]
     fn detects_stop_finish_reason() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.finish_reason, Some("stop".to_string()));
     }
 
@@ -2967,7 +3028,7 @@ mod tests {
     fn parses_gateway_error_response() {
         let data =
             r#"{"status":402,"body":{"error":{"message":"Insufficient credits"}},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(result.events.is_empty());
         let failure = result
             .stream_error
@@ -2981,7 +3042,7 @@ mod tests {
     #[tokio::test]
     async fn embedded_sse_upstream_error_returns_failed_outcome() {
         let data = r#"{"error":{"code":"upstream_error","message":"upstream request failed","metadata":{"model":"live/model"}}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         let (tx, mut rx) = mpsc::channel::<WorkerEvent>(2);
         let mut pending = HashMap::new();
         let mut content = String::new();
@@ -3024,6 +3085,38 @@ mod tests {
     }
 
     #[test]
+    fn streaming_chunks_ignore_consolidated_message_snapshots() {
+        // Some OpenAI-compatible proxies emit a final chunk carrying the full
+        // consolidated message alongside the deltas already streamed.
+        // Admitting it on the streaming path duplicates content and corrupts
+        // accumulated tool arguments (#3702).
+        let data = r#"{
+            "choices": [{
+                "message": {
+                    "content": "Full consolidated answer",
+                    "tool_calls": [
+                        {"id":"tc_1","type":"function","function":{"name":"a_tool","arguments":"{}"}}
+                    ]
+                },
+                "finish_reason": "stop"
+            }]
+        }"#;
+
+        let result = ChatModelWorker::parse_sse_data(data, false);
+
+        assert!(
+            result.events.is_empty(),
+            "message-shape content must not surface on the streaming path"
+        );
+        assert!(
+            result.tool_call_chunks.is_empty(),
+            "message-shape tool calls must not append to streamed arguments"
+        );
+        // The finish reason is chunk-level metadata, not message-shape.
+        assert_eq!(result.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
     fn parses_non_streaming_message_content_reasoning_and_tools() {
         let data = r#"{
             "choices": [{
@@ -3039,7 +3132,7 @@ mod tests {
             }]
         }"#;
 
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, true);
 
         assert!(matches!(
             result.events.first(),
@@ -3069,6 +3162,7 @@ mod tests {
 
         let content_result = ChatModelWorker::parse_sse_data(
             r#"{"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}"#,
+            false,
         );
         let first_outcome = ChatModelWorker::process_parse_result(
             &content_result,
@@ -3089,6 +3183,7 @@ mod tests {
 
         let error_result = ChatModelWorker::parse_sse_data(
             r#"{"error":{"code":"upstream_error","message":"upstream request failed"}}"#,
+            false,
         );
         let outcome = ChatModelWorker::process_parse_result(
             &error_result,
@@ -3147,7 +3242,7 @@ mod tests {
 
     #[test]
     fn ignores_invalid_json() {
-        let result = ChatModelWorker::parse_sse_data("not json at all");
+        let result = ChatModelWorker::parse_sse_data("not json at all", false);
         assert!(result.events.is_empty());
         assert!(result.cost.is_none());
     }
@@ -3155,7 +3250,7 @@ mod tests {
     #[test]
     fn ignores_empty_content() {
         let data = r#"{"choices":[{"delta":{"content":""},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         // Should not produce a Content event for empty string
         assert!(
             result
@@ -3168,7 +3263,7 @@ mod tests {
     #[test]
     fn parses_thinking_sse_data() {
         let data = r#"{"delta":{"thinking":"Let me consider..."}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Thinking { text } => assert_eq!(text, "Let me consider..."),
@@ -3179,7 +3274,7 @@ mod tests {
     #[test]
     fn parses_thinking_from_choices_path() {
         let data = r#"{"choices":[{"delta":{"thinking":"Reasoning step"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Thinking { text } => assert_eq!(text, "Reasoning step"),
@@ -3190,7 +3285,7 @@ mod tests {
     #[test]
     fn ignores_empty_thinking() {
         let data = r#"{"choices":[{"delta":{"thinking":""},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(
             result
                 .events
@@ -3243,7 +3338,7 @@ mod tests {
     fn parses_gemini_array_of_parts_content() {
         // Gemini returns content as an array of objects with "text" fields
         let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello from Gemini"}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello from Gemini"),
@@ -3255,7 +3350,7 @@ mod tests {
     fn parses_gemini_multi_part_content() {
         // Multiple parts concatenated
         let data = r#"{"choices":[{"delta":{"content":[{"text":"Hello "},{"text":"world"}]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Hello world"),
@@ -3268,7 +3363,7 @@ mod tests {
         // Content as a single object with "text" field
         let data =
             r#"{"choices":[{"delta":{"content":{"text":"Object content"}},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Object content"),
@@ -3279,7 +3374,7 @@ mod tests {
     #[test]
     fn ignores_empty_gemini_array_content() {
         let data = r#"{"choices":[{"delta":{"content":[]},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(
             result
                 .events
@@ -3293,7 +3388,7 @@ mod tests {
         // Finish with array-of-parts content should include the content and set finish_reason
         let data =
             r#"{"choices":[{"delta":{"content":[{"text":"Done"}]},"finish_reason":"stop"}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(
             result
                 .events
@@ -3307,7 +3402,7 @@ mod tests {
     fn parses_gateway_wrapped_content() {
         // Gateway wraps SSE events in {status, body, cost}
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":"Wrapped hello"},"finish_reason":null}]},"cost":"0.001"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Wrapped hello"),
@@ -3319,7 +3414,7 @@ mod tests {
     #[test]
     fn parses_data_response_gateway_wrapped_content() {
         let data = r#"{"data":{"status":200,"body":{"choices":[{"delta":{"content":"Data wrapped hello"},"finish_reason":null}]},"cost":"0.001"}}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Data wrapped hello"),
@@ -3331,7 +3426,7 @@ mod tests {
     #[test]
     fn parses_gateway_wrapped_finish() {
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":""},"finish_reason":"stop"}]},"cost":"0.002"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.finish_reason, Some("stop".to_string()));
         assert_eq!(result.cost, Some(0.002));
     }
@@ -3339,14 +3434,14 @@ mod tests {
     #[test]
     fn extracts_zero_cost_from_gateway() {
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":"test"},"finish_reason":null}]},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.cost, Some(0.0));
     }
 
     #[test]
     fn no_cost_when_absent_from_response() {
         let data = r#"{"choices":[{"delta":{"content":"no wrapper"},"finish_reason":null}]}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert!(result.cost.is_none());
     }
 
@@ -3354,7 +3449,7 @@ mod tests {
     fn parses_gateway_wrapped_gemini_array_content() {
         // Gateway-wrapped Gemini array-of-parts format
         let data = r#"{"status":200,"body":{"choices":[{"delta":{"content":[{"text":"Wrapped Gemini"}]},"finish_reason":null}]},"cost":"0"}"#;
-        let result = ChatModelWorker::parse_sse_data(data);
+        let result = ChatModelWorker::parse_sse_data(data, false);
         assert_eq!(result.events.len(), 1);
         match &result.events[0] {
             WorkerEvent::Content { text } => assert_eq!(text, "Wrapped Gemini"),
@@ -3432,7 +3527,7 @@ mod tests {
         let mut finish_reason = None;
 
         for chunk in chunks {
-            let result = ChatModelWorker::parse_sse_data(chunk);
+            let result = ChatModelWorker::parse_sse_data(chunk, false);
             let outcome = ChatModelWorker::process_parse_result(
                 &result,
                 &mut pending,
