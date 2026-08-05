@@ -119,11 +119,41 @@ describe("backgroundUpdateCli TTL gate", () => {
         },
       },
     });
-    expect(npmViewCalls).toBe(1);
+    // Both the initial lookup and the cold-cache retry must fail before the
+    // network skip is reported (#3717).
+    expect(npmViewCalls).toBe(2);
     expect(result).toMatchObject({
       outcome: "skipped:network",
       skipped: "network",
     });
+  });
+
+  it("recovers when the first registry lookup times out cold and the retry succeeds (#3717)", async () => {
+    // A fresh profile's first npm view builds the cache while three CLIs
+    // check in parallel at app startup; on a cold Windows machine the first
+    // attempt times out. The warm retry must carry provisioning instead of
+    // reporting the registry as unreachable.
+    const state = {
+      "lastUpdateCheck:codex": Date.now() - (UPDATE_CHECK_TTL_MS + 1),
+    };
+    let npmViewCalls = 0;
+    const result = await backgroundUpdateCli({
+      label: "Codex",
+      bareCommand: "codex",
+      resolvedPath: "/nonexistent/codex",
+      packageName: "@seren-test/definitely-not-a-real-package-xyz",
+      state,
+      now: Date.now(),
+      _versionOverrides: {
+        runInstalledVersion: async () => "1.0.0",
+        runNpmView: async () => {
+          npmViewCalls++;
+          return npmViewCalls === 1 ? null : "1.0.0";
+        },
+      },
+    });
+    expect(npmViewCalls).toBe(2);
+    expect(result).toMatchObject({ outcome: "skipped:up_to_date" });
   });
 
   it("skips when resolver returned the bare command — never creates a shadow install", async () => {

@@ -48,7 +48,10 @@ export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Timeouts kept tight so a hung subprocess can't freeze the background task. */
 const VERSION_CMD_TIMEOUT_MS = 5_000;
-const NPM_VIEW_TIMEOUT_MS = 15_000;
+// Budgeted for a COLD registry lookup: on a fresh Windows profile the first
+// npm invocation builds its cache while three CLIs check concurrently during
+// app startup, and 15s was measurably too tight there (#3717).
+const NPM_VIEW_TIMEOUT_MS = 60_000;
 const NPM_INSTALL_TIMEOUT_MS = 180_000;
 
 const SEMVER_EXACT_RE = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -616,7 +619,15 @@ async function runBackgroundUpdateCli({
       return report("skipped:ttl");
     }
 
-    const latest = await npmViewFn(packageName, { npmCliScript });
+    let latest = await npmViewFn(packageName, { npmCliScript });
+    if (!latest) {
+      // On a fresh profile the first view builds npm's cache from scratch
+      // while claude/codex/grok check in parallel during app startup; a cold
+      // Windows machine blows the per-view budget and a swallowed timeout is
+      // indistinguishable from the registry being down. One retry runs
+      // against the now-warm cache in about a second (#3717).
+      latest = await npmViewFn(packageName, { npmCliScript });
+    }
 
     // Record the check timestamp even when we couldn't compare — offline
     // and rate-limited cases should not retry every launch.
