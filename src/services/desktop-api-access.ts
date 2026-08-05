@@ -338,9 +338,18 @@ let skillKeyInFlight: Promise<void> | null = null;
  * Provision the publisher-invocation-only key that skill child processes and
  * the SerenDB data plane receive. Reconciled the same way as the Desktop key so
  * a key minted by an older build cannot linger with broader scopes.
+ *
+ * `isCurrent` lets the caller invalidate the provisioning mid-flight: a
+ * sign-out (or account switch) that lands between the server-side create and
+ * the local store must not write the old session's live key into the keychain
+ * of whoever is signed in next. When it reports stale, the created key is
+ * revoked instead of stored. #3696.
  */
-export function ensureSkillApiKey(): Promise<void> {
+export function ensureSkillApiKey(options?: {
+  isCurrent?: () => boolean;
+}): Promise<void> {
   if (skillKeyInFlight) return skillKeyInFlight;
+  const isCurrent = options?.isCurrent ?? (() => true);
 
   skillKeyInFlight = (async () => {
     const existing = await getSerenSkillApiKey();
@@ -351,9 +360,20 @@ export function ensureSkillApiKey(): Promise<void> {
       name: SKILL_API_KEY_NAME,
       scopes: SKILL_API_KEY_SCOPES,
     });
-    // Store before revoking so a failed revoke cannot strand skills without a
-    // usable key, matching repairDesktopApiKey.
-    await storeSerenSkillApiKey(created.api_key);
+    if (!isCurrent()) {
+      await revokeKeyRecord(created).catch(() => undefined);
+      return;
+    }
+    try {
+      // Store before revoking so a failed revoke cannot strand skills without
+      // a usable key, matching repairDesktopApiKey.
+      await storeSerenSkillApiKey(created.api_key);
+    } catch (error) {
+      // Do not leave a server-side key orphaned if local secure storage
+      // rejects it — every refresh would mint another live key. #3694.
+      await revokeKeyRecord(created).catch(() => undefined);
+      throw error;
+    }
 
     if (previousKeyId) {
       const { data } = await listDefaultOrgApiKeys({ throwOnError: false });
@@ -361,7 +381,14 @@ export function ensureSkillApiKey(): Promise<void> {
         (candidate) =>
           candidate.key_id === previousKeyId && !candidate.revoked_at,
       );
-      if (stale) await revokeKeyRecord(stale).catch(() => undefined);
+      if (stale) {
+        await revokeKeyRecord(stale).catch((error) => {
+          console.warn(
+            "[Desktop API Access] Stale skill key revoke failed; the old key stays active server-side:",
+            error,
+          );
+        });
+      }
     }
   })().finally(() => {
     skillKeyInFlight = null;

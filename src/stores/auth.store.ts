@@ -53,6 +53,13 @@ interface AuthState {
    * See #1661.
    */
   signInModalRequested: boolean;
+  /**
+   * Counts successful skill-key provisions. Consumers that fail while the
+   * key is absent (the Claude memory interceptor start) track this so a
+   * later successful provisioning re-runs them — `isAuthenticated` alone
+   * never re-fires in-session because refresh sets true over true. #3690.
+   */
+  skillKeyEpoch: number;
 }
 
 const [state, setState] = createStore<AuthState>({
@@ -62,6 +69,7 @@ const [state, setState] = createStore<AuthState>({
   mcpConnected: false,
   privateChatPolicy: null,
   signInModalRequested: false,
+  skillKeyEpoch: 0,
 });
 
 let authBindingsInitialized = false;
@@ -88,12 +96,26 @@ type EnsureApiKeyResult =
  * the blocking sign-in modal. Retries on the next refresh. #3677
  */
 async function provisionSkillApiKey(): Promise<void> {
+  const epoch = authEpoch;
   try {
-    await ensureSkillApiKey();
+    await ensureSkillApiKey({ isCurrent: () => !authEpochChanged(epoch) });
+    setState("skillKeyEpoch", (count) => count + 1);
   } catch (error) {
     console.warn(
       "[Auth Store] Skill API key provisioning failed; skills and Claude memory will retry on next refresh:",
       error,
+    );
+    // Persistent failures (org key policy, quota) never self-heal and
+    // otherwise leave zero telemetry while skills and Claude memory stay
+    // degraded. #3695.
+    const status =
+      typeof (error as { status?: unknown })?.status === "number"
+        ? (error as { status: number }).status
+        : undefined;
+    void reportApiKeyFailure(
+      status,
+      error,
+      "auth.skill_key_provisioning_failure",
     );
   }
 }
@@ -154,6 +176,7 @@ export async function ensureApiKey(): Promise<EnsureApiKeyResult> {
 async function reportApiKeyFailure(
   status: number | undefined,
   error: unknown,
+  kind = "auth.api_key_provisioning_failure",
 ): Promise<void> {
   try {
     const { captureSupportError } = await import("@/lib/support/hook");
@@ -161,7 +184,7 @@ async function reportApiKeyFailure(
     const stack =
       error instanceof Error && error.stack ? error.stack.split("\n") : [];
     void captureSupportError({
-      kind: "auth.api_key_provisioning_failure",
+      kind,
       message,
       stack,
       http: {

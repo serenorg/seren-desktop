@@ -290,7 +290,7 @@ export function classifyMemoryStartFailure(
     return {
       status,
       message:
-        "Seren is still finishing your account setup, so memory storage isn't ready yet. Sign out and back in, or try again shortly.",
+        "Seren is still finishing your account setup, so memory storage isn't ready yet. It starts automatically once your connection to Seren is back — no sign-out needed.",
     };
   }
 
