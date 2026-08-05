@@ -24,6 +24,12 @@ pub struct ProviderRuntimeConfig {
 
 const MAX_RESTART_ATTEMPTS: u32 = 3;
 
+/// Exit-time kill: attempts × delay bounds how long `kill_sync` may block the
+/// RunEvent::Exit handler while waiting out a transient hold on the process
+/// lock (the monitor loop takes it every 5s).
+const KILL_LOCK_ATTEMPTS: u32 = 20;
+const KILL_LOCK_RETRY_DELAY: Duration = Duration::from_millis(25);
+
 /// Per-attempt readiness deadlines for the initial spawn sequence
 /// (see GH #1587). Escalating windows absorb the worst observed cold-start
 /// path: first attempt SIGKILL'd instantly (macOS first-touch on the
@@ -174,12 +180,16 @@ impl ProviderRuntimeState {
                     drop(guard);
                     *self.last_config.lock().await = Some(config.clone());
 
-                    // Abort any previous crash monitor before starting a new one
-                    if let Some(old_handle) = self.monitor_handle.lock().await.take() {
-                        old_handle.abort();
-                    }
+                    // Ordering constraint (#3698): the old monitor can be THIS
+                    // task (self-restart via spawn_process_monitor →
+                    // ensure_started). Abort cancels the current task at its
+                    // next yield point, so nothing after the abort is
+                    // guaranteed to run — the new handle must be stored and
+                    // readiness emitted first. The abort itself must still
+                    // happen, or the replaced monitor keeps polling alongside
+                    // the new one.
                     let monitor = spawn_process_monitor(app.clone());
-                    *self.monitor_handle.lock().await = Some(monitor);
+                    let old_monitor = self.monitor_handle.lock().await.replace(monitor);
 
                     // Notify the frontend that the runtime is up. The
                     // agent store subscribes to this event and re-runs
@@ -187,6 +197,10 @@ impl ProviderRuntimeState {
                     // Gemini buttons even when first-attempt readiness
                     // exceeds the store's initial-query backoff budget.
                     let _ = app.emit("provider-runtime://ready", &config);
+
+                    if let Some(old_monitor) = old_monitor {
+                        old_monitor.abort();
+                    }
 
                     return Ok(config);
                 }
@@ -275,35 +289,59 @@ impl ProviderRuntimeState {
             }
         }
 
-        if let Ok(mut guard) = self.process.try_lock() {
-            if let Some(ref process) = *guard {
-                if let Some(pid) = process.child.id() {
-                    log::info!("[ProviderRuntime] Killing process on exit: pid={}", pid);
-                    #[cfg(unix)]
-                    unsafe {
+        // A single `try_lock` can lose the race against the monitor loop,
+        // which takes this lock every 5s. Tauri exits via `process::exit`,
+        // skipping `Drop`/`kill_on_drop`, so a silently missed kill orphans
+        // the runtime and every agent child under it (#3699). Bounded retries
+        // keep RunEvent::Exit from hanging while closing the window.
+        let mut process_guard = None;
+        for _ in 0..KILL_LOCK_ATTEMPTS {
+            if let Ok(guard) = self.process.try_lock() {
+                process_guard = Some(guard);
+                break;
+            }
+            std::thread::sleep(KILL_LOCK_RETRY_DELAY);
+        }
+        let Some(mut guard) = process_guard else {
+            log::warn!(
+                "[ProviderRuntime] Could not acquire process lock on exit; runtime process (pid unknown — lock held) may be orphaned"
+            );
+            return;
+        };
+        if let Some(ref process) = *guard {
+            if let Some(pid) = process.child.id() {
+                log::info!("[ProviderRuntime] Killing process on exit: pid={}", pid);
+                #[cfg(unix)]
+                unsafe {
+                    // The child was spawned with process_group(0), so pid ==
+                    // pgid: killpg reaps the runtime's agent grandchildren
+                    // (claude/codex CLIs) that a single kill(pid) would
+                    // orphan past app exit (#3700). Fall back to the lone
+                    // pid when killpg fails (e.g. the group is already gone).
+                    if libc::killpg(pid as libc::pid_t, libc::SIGKILL) != 0 {
                         libc::kill(pid as i32, libc::SIGKILL);
                     }
-                    #[cfg(windows)]
-                    {
-                        // Use taskkill /T to kill the entire process tree.
-                        // kill_on_drop only terminates the immediate child, leaving
-                        // grandchild node.exe processes (claude CLI) orphaned and
-                        // holding file locks that block the next NSIS install.
-                        // Spawn detached instead of .status(): this runs in the
-                        // RunEvent::Exit handler on the UI thread, and waiting on
-                        // taskkill there freezes "Quit Seren" until the whole tree
-                        // dies (#2508). /F /T is fire-and-forget — taskkill keeps
-                        // running and reaps the tree after we exit.
-                        use std::os::windows::process::CommandExt;
-                        let _ = std::process::Command::new("taskkill")
-                            .args(["/F", "/T", "/PID", &pid.to_string()])
-                            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-                            .spawn();
-                    }
+                }
+                #[cfg(windows)]
+                {
+                    // Use taskkill /T to kill the entire process tree.
+                    // kill_on_drop only terminates the immediate child, leaving
+                    // grandchild node.exe processes (claude CLI) orphaned and
+                    // holding file locks that block the next NSIS install.
+                    // Spawn detached instead of .status(): this runs in the
+                    // RunEvent::Exit handler on the UI thread, and waiting on
+                    // taskkill there freezes "Quit Seren" until the whole tree
+                    // dies (#2508). /F /T is fire-and-forget — taskkill keeps
+                    // running and reaps the tree after we exit.
+                    use std::os::windows::process::CommandExt;
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                        .spawn();
                 }
             }
-            *guard = None;
         }
+        *guard = None;
     }
 }
 
@@ -544,6 +582,14 @@ fn spawn_node_process(
     #[cfg(windows)]
     {
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+
+    #[cfg(unix)]
+    {
+        // Own process group so the exit-time `kill_sync` can killpg the whole
+        // agent tree (#3700): the runtime spawns CLI grandchildren that a
+        // single SIGKILL to the runtime pid would orphan past app quit.
+        command.process_group(0);
     }
 
     let embedded_path = crate::embedded_runtime::get_embedded_path();
@@ -1299,6 +1345,94 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    /// #3699: `kill_sync` runs in RunEvent::Exit, where a single failed
+    /// `try_lock` used to skip the kill silently — the monitor loop takes the
+    /// same lock every 5s, and a missed kill orphans the runtime past app
+    /// exit. The bounded retry must wait out a transient hold and still kill.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn kill_sync_waits_out_a_transient_process_lock_hold() {
+        let state = std::sync::Arc::new(ProviderRuntimeState::new());
+        let child = spawn_hanging_child().await;
+        *state.process.lock().await = Some(ProviderRuntimeProcess {
+            child,
+            config: dummy_config(),
+            spawned_at: Instant::now(),
+            restart_budget_rearmed: false,
+        });
+
+        // Hold the process lock as the monitor loop would, releasing it while
+        // kill_sync is still inside its retry budget.
+        let guard = state.process.lock().await;
+        let killer = {
+            let state = state.clone();
+            std::thread::spawn(move || state.kill_sync())
+        };
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(guard);
+        killer.join().expect("kill_sync thread");
+
+        assert!(
+            state
+                .process
+                .try_lock()
+                .expect("process lock free after kill_sync")
+                .is_none(),
+            "kill_sync must clear the process slot once the lock frees up"
+        );
+    }
+
+    /// #3700: quitting the app must not orphan agent grandchildren. The
+    /// runtime child owns its process group (`spawn_node_process` sets
+    /// `process_group(0)`), so `kill_sync`'s killpg must take down processes
+    /// the runtime spawned, not only the runtime pid itself.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn kill_sync_kills_the_runtime_process_group() {
+        let mut command = test_shell_command("sleep 30 & echo $!; wait");
+        command
+            .process_group(0)
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command.spawn().expect("spawn group leader");
+
+        let stdout = child.stdout.take().expect("stdout piped");
+        let mut lines = BufReader::new(stdout).lines();
+        let grandchild_pid: libc::pid_t = lines
+            .next_line()
+            .await
+            .expect("read grandchild pid")
+            .expect("grandchild pid line")
+            .trim()
+            .parse()
+            .expect("numeric grandchild pid");
+
+        let state = ProviderRuntimeState::new();
+        *state.process.lock().await = Some(ProviderRuntimeProcess {
+            child,
+            config: dummy_config(),
+            spawned_at: Instant::now(),
+            restart_budget_rearmed: false,
+        });
+
+        state.kill_sync();
+
+        // SIGKILL delivery is immediate; reaping of the re-parented
+        // grandchild by init/launchd can lag a moment.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let alive = unsafe { libc::kill(grandchild_pid, 0) } == 0;
+            if !alive {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "grandchild pid {grandchild_pid} survived kill_sync — process group not killed"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
     }
 
     /// Build a stub child process that exits instantly with the requested

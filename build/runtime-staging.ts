@@ -32,25 +32,25 @@ export function ensureRuntimeShims(nodeDir: string): void {
 }
 
 /**
- * The staged-Node version marker records which Node version was actually
- * extracted into `<outputDir>/node`. The prepare scripts skip the download when
- * that directory exists, and before this marker they had no way to tell a
- * current tree from a stale one — after a NODE_VERSION bump a cached dev
- * staging dir silently shipped the old binary while embedded-runtime.json
- * claimed the new version (#3450).
+ * A staged-component version marker records which version of a runtime
+ * component (node, git, python) was actually extracted into
+ * `<outputDir>/<component>`. The prepare scripts skip the download when that
+ * directory exists, and without a marker they cannot tell a complete tree
+ * from a stale one (#3450) or from an interrupted extraction that left the
+ * directory behind (#3697) — either way the broken tree latches forever.
  *
- * A marker file is used instead of running `<staged node> --version` because
- * the staged binary is not always executable on the staging host (e.g. the
- * linux runtime staged on macOS).
+ * A marker file is used instead of running the staged binary because it is
+ * not always executable on the staging host (e.g. the linux runtime staged
+ * on macOS).
  */
-function stagedNodeVersionPath(outputDir: string): string {
-	return path.join(outputDir, 'staged-node-version');
+function stagedComponentVersionPath(outputDir: string, component: string): string {
+	return path.join(outputDir, `staged-${component}-version`);
 }
 
-/** Read the recorded staged Node version, or null when no marker exists. */
-export function readStagedNodeVersion(outputDir: string): string | null {
+/** Read the recorded staged component version, or null when no marker exists. */
+export function readStagedComponentVersion(outputDir: string, component: string): string | null {
 	try {
-		return fs.readFileSync(stagedNodeVersionPath(outputDir), 'utf8').trim() || null;
+		return fs.readFileSync(stagedComponentVersionPath(outputDir, component), 'utf8').trim() || null;
 	} catch {
 		return null;
 	}
@@ -60,11 +60,33 @@ export function readStagedNodeVersion(outputDir: string): string | null {
  * Remove the marker before (re-)staging begins so an interrupted download or
  * extraction can never leave a marker that matches a broken tree.
  */
+export function clearStagedComponentVersion(outputDir: string, component: string): void {
+	fs.rmSync(stagedComponentVersionPath(outputDir, component), { force: true });
+}
+
+/** Record the staged component version. Call only after staging fully succeeds. */
+export function writeStagedComponentVersion(
+	outputDir: string,
+	component: string,
+	version: string
+): void {
+	fs.writeFileSync(stagedComponentVersionPath(outputDir, component), `${version}\n`);
+}
+
+/** Read the recorded staged Node version, or null when no marker exists. */
+export function readStagedNodeVersion(outputDir: string): string | null {
+	return readStagedComponentVersion(outputDir, 'node');
+}
+
+/**
+ * Remove the marker before (re-)staging begins so an interrupted download or
+ * extraction can never leave a marker that matches a broken tree.
+ */
 export function clearStagedNodeVersion(outputDir: string): void {
-	fs.rmSync(stagedNodeVersionPath(outputDir), { force: true });
+	clearStagedComponentVersion(outputDir, 'node');
 }
 
 /** Record the staged Node version. Call only after staging fully succeeds. */
 export function writeStagedNodeVersion(outputDir: string, version: string): void {
-	fs.writeFileSync(stagedNodeVersionPath(outputDir), `${version}\n`);
+	writeStagedComponentVersion(outputDir, 'node', version);
 }

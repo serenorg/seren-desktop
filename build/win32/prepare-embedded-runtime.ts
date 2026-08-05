@@ -7,8 +7,11 @@ import * as https from 'https';
 import { pipeline } from 'stream/promises';
 import { execSync } from 'child_process';
 import {
+	clearStagedComponentVersion,
 	clearStagedNodeVersion,
+	readStagedComponentVersion,
 	readStagedNodeVersion,
+	writeStagedComponentVersion,
 	writeStagedNodeVersion
 } from '../runtime-staging';
 
@@ -143,10 +146,18 @@ async function prepareGit(options: DownloadOptions): Promise<string> {
 	const gitDir = path.join(outputDir, 'git');
 
 	if (fs.existsSync(gitDir)) {
-		console.log(`Git directory already exists at ${gitDir}, skipping...`);
-		return gitDir;
+		const stagedVersion = readStagedComponentVersion(outputDir, 'git');
+		if (stagedVersion === GIT_VERSION) {
+			console.log(`Git ${GIT_VERSION} already staged at ${gitDir}, skipping download...`);
+			return gitDir;
+		}
+		// A directory without a matching marker is either an interrupted
+		// extraction or a stale version; both must be re-staged (#3697).
+		console.log(`Staged Git at ${gitDir} is ${stagedVersion ?? 'incomplete or of unrecorded version'}, expected ${GIT_VERSION}; re-staging...`);
+		fs.rmSync(gitDir, { recursive: true, force: true });
 	}
 
+	clearStagedComponentVersion(outputDir, 'git');
 	fs.mkdirSync(gitDir, { recursive: true });
 
 	const archivePath = path.join(outputDir, `git-${arch}.7z.exe`);
@@ -157,6 +168,8 @@ async function prepareGit(options: DownloadOptions): Promise<string> {
 
 	// Cleanup
 	fs.unlinkSync(archivePath);
+
+	writeStagedComponentVersion(outputDir, 'git', GIT_VERSION);
 
 	console.log(`Git prepared at ${gitDir}`);
 	return gitDir;
