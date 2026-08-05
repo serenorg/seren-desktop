@@ -122,7 +122,7 @@ describe("#3443 shared baseline gate decision logic", () => {
         _runInstalledVersion: async () => "2.1.100",
         _backgroundUpdateCli: async () => ({ outcome: "skipped:network" }),
       }),
-    ).rejects.toThrow(/requires 2\.1\.197.*skipped:network/s);
+    ).rejects.toThrow(/requires 2\.1\.197.*network unavailable/s);
   });
 
   it("fails closed when the update reports success but the binary is stale", async () => {

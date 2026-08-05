@@ -21,8 +21,27 @@ import {
   verifyTarballIntegrity,
 } from "./cli-scanner.mjs";
 import { serenDataDir } from "./cli-paths.mjs";
+import { composeWindowsShellCommand } from "./windows-shell-args.mjs";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Run a CLI that may resolve to a Windows .cmd shim. Node refuses to exec a
+ * .cmd without a shell, and cmd.exe joins argv with spaces and no per-argument
+ * quoting — an install path containing a space (a Windows username is enough)
+ * splits into two arguments and the command fails. Compose one pre-quoted
+ * command line for the shell case, mirroring the claude-runtime spawn path;
+ * exec directly otherwise.
+ */
+function execCliFile(command, args, { timeout, useShell }) {
+  if (useShell) {
+    return execFileAsync(composeWindowsShellCommand(command, args), [], {
+      timeout,
+      shell: true,
+    });
+  }
+  return execFileAsync(command, args, { timeout });
+}
 
 /** 24h between update checks per CLI. */
 export const UPDATE_CHECK_TTL_MS = 24 * 60 * 60 * 1000;
@@ -197,9 +216,11 @@ export async function runInstalledVersion(resolvedPath, bareCommand) {
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const { stdout } = await execFileAsync(resolvedPath, ["--version"], {
+      const { stdout } = await execCliFile(resolvedPath, ["--version"], {
         timeout: VERSION_CMD_TIMEOUT_MS,
-        shell: process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd"),
+        useShell:
+          process.platform === "win32" &&
+          resolvedPath.toLowerCase().endsWith(".cmd"),
       });
       return stdout.trim().match(SEMVER_EXTRACT_RE)?.[0] ?? null;
     } catch {
@@ -225,11 +246,10 @@ export async function runNpmView(packageName, { npmCliScript } = {}) {
       return stdout.trim();
     }
     const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-    const { stdout } = await execFileAsync(
+    const { stdout } = await execCliFile(
       npmCommand,
       ["view", packageName, "version"],
-      // Node refuses to exec a .cmd shim without a shell.
-      { timeout: NPM_VIEW_TIMEOUT_MS, shell: process.platform === "win32" },
+      { timeout: NPM_VIEW_TIMEOUT_MS, useShell: process.platform === "win32" },
     );
     return stdout.trim();
   } catch {
@@ -252,11 +272,10 @@ async function runNpmInstallLatest(packageName, { npmCliScript } = {}) {
     return;
   }
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  await execFileAsync(
+  await execCliFile(
     npmCommand,
     ["install", "-g", `${packageName}@latest`],
-    // Node refuses to exec a .cmd shim without a shell.
-    { timeout: NPM_INSTALL_TIMEOUT_MS, shell: process.platform === "win32" },
+    { timeout: NPM_INSTALL_TIMEOUT_MS, useShell: process.platform === "win32" },
   );
 }
 
@@ -284,12 +303,10 @@ async function runNpmInstallFromTarball(
     return;
   }
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
-  await execFileAsync(
-    npmCommand,
-    installArgs,
-    // Node refuses to exec a .cmd shim without a shell.
-    { timeout: NPM_INSTALL_TIMEOUT_MS, shell: process.platform === "win32" },
-  );
+  await execCliFile(npmCommand, installArgs, {
+    timeout: NPM_INSTALL_TIMEOUT_MS,
+    useShell: process.platform === "win32",
+  });
 }
 
 // All managed npm CLIs share one global prefix. npm mutates that prefix as a
@@ -375,9 +392,9 @@ async function tryCliSelfUpdate(resolvedPath) {
   try {
     const onWindowsCmd =
       process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd");
-    await execFileAsync(resolvedPath, ["update"], {
+    await execCliFile(resolvedPath, ["update"], {
       timeout: NPM_INSTALL_TIMEOUT_MS,
-      shell: onWindowsCmd,
+      useShell: onWindowsCmd,
     });
     return true;
   } catch {
@@ -390,9 +407,9 @@ async function runCliHealthCheck(resolvedPath) {
   try {
     const onWindowsCmd =
       process.platform === "win32" && resolvedPath.toLowerCase().endsWith(".cmd");
-    await execFileAsync(resolvedPath, ["--help"], {
+    await execCliFile(resolvedPath, ["--help"], {
       timeout: VERSION_CMD_TIMEOUT_MS,
-      shell: onWindowsCmd,
+      useShell: onWindowsCmd,
     });
     return true;
   } catch {
@@ -419,10 +436,9 @@ export async function runNpmViewIntegrity(
       : process.platform === "win32"
         ? "npm.cmd"
         : "npm";
-    const { stdout } = await execFileAsync(command, args, {
+    const { stdout } = await execCliFile(command, args, {
       timeout: NPM_VIEW_TIMEOUT_MS,
-      // Node refuses to exec a .cmd shim without a shell.
-      shell: !npmCliScript && process.platform === "win32",
+      useShell: !npmCliScript && process.platform === "win32",
     });
     const trimmed = stdout.trim();
     if (!trimmed) return null;
@@ -663,45 +679,48 @@ async function runBackgroundUpdateCli({
       latest &&
       (installFromMissing || (installed && isNewer(installed, latest)))
     ) {
-      // Native-channel binaries and Codex's package-manager-aware updater must
-      // verify the resulting bytes before success is surfaced. Never fall back
-      // to a downloaded installer script when self-update fails.
+      // Native-channel binaries and Codex's package-manager-aware updater try
+      // their own self-update first and must verify the resulting bytes before
+      // success is surfaced. A failed self-update falls through to the managed
+      // verified npm install below — the same pack-scan-install path a first
+      // install uses — never to a downloaded installer script. The managed
+      // copy leads binary resolution, so the fallback actually unblocks spawn
+      // instead of parking the user on a manual-action card. #3706
       if (
         installed &&
         (channel === "native" || packageName === "@openai/codex")
       ) {
         const selfOk = await selfUpdateFn(resolvedPath);
-        if (!selfOk) {
-          return requireAction("self_update_failed", { channel });
-        }
-        const installedPath = resolveInstalledPath?.() ?? resolvedPath;
-        const verifiedVersion = await installedVersionFn(
-          installedPath,
-          bareCommand,
-        );
-        const healthy = await healthCheckFn(installedPath);
-        if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
-          return requireAction("verification_required", {
-            channel,
+        if (selfOk) {
+          const installedPath = resolveInstalledPath?.() ?? resolvedPath;
+          const verifiedVersion = await installedVersionFn(
+            installedPath,
+            bareCommand,
+          );
+          const healthy = await healthCheckFn(installedPath);
+          if (!isVersionAtLeast(verifiedVersion, latest) || !healthy) {
+            return requireAction("verification_required", {
+              channel,
+              verifiedVersion,
+            });
+          }
+          persisted[pendingActionKey] = null;
+          if (ownsPersistence) saveState(persisted);
+          onUpdated?.({
+            label,
+            bareCommand,
+            from: installed,
+            to: latest,
+            channel: "self",
+            verifiedVersion,
+          });
+          return report("success", {
+            from: installed,
+            to: latest,
+            channel: "self",
             verifiedVersion,
           });
         }
-        persisted[pendingActionKey] = null;
-        if (ownsPersistence) saveState(persisted);
-        onUpdated?.({
-          label,
-          bareCommand,
-          from: installed,
-          to: latest,
-          channel: "self",
-          verifiedVersion,
-        });
-        return report("success", {
-          from: installed,
-          to: latest,
-          channel: "self",
-          verifiedVersion,
-        });
       }
 
       // npm channel: pack-extract-scan-install-baseline.

@@ -422,16 +422,38 @@ pub fn configure_embedded_runtime(app: &AppHandle) -> EmbeddedRuntimePaths {
 }
 
 pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &str) -> String {
-    let mut entries: Vec<String> = current_path
-        .split(path_separator)
-        .filter(|p| !p.is_empty())
-        .map(|p| p.to_string())
-        .collect();
+    // Seren's managed CLI directory must LEAD the PATH: terminals spawn bare
+    // `claude`/`codex`, so a stale copy anywhere earlier in the user's PATH
+    // would shadow the verified managed install (#3709).
+    let mut managed_bins: Vec<String> = Vec::new();
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            managed_bins.push(format!("{}/.seren/cli-tools/bin", home));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        if !appdata.is_empty() {
+            managed_bins.push(format!("{}\\Seren\\cli-tools", appdata));
+        }
+    }
+
+    let mut entries: Vec<String> = managed_bins.clone();
+    entries.extend(
+        current_path
+            .split(path_separator)
+            .filter(|p| !p.is_empty() && !managed_bins.iter().any(|m| m == p))
+            .map(|p| p.to_string()),
+    );
 
     // Keep the user's order, but append missing common locations.
     // GUI apps don't source shell profiles so CLI install directories
-    // (e.g., Seren's managed CLI directory, ~/.claude/bin, %APPDATA%\npm)
-    // are typically missing from PATH.
+    // (e.g., ~/.claude/bin, %APPDATA%\npm) are typically missing from PATH.
     {
         use std::collections::HashSet;
 
@@ -442,7 +464,6 @@ pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &
         {
             let home = std::env::var("HOME").unwrap_or_default();
             if !home.is_empty() {
-                common_bins.push(format!("{}/.seren/cli-tools/bin", home));
                 common_bins.push(format!("{}/.claude/bin", home));
                 common_bins.push(format!("{}/.local/bin", home));
             }
@@ -481,7 +502,6 @@ pub(crate) fn extend_path_with_common_bins(current_path: &str, path_separator: &
             // npm global installs land here
             let appdata = std::env::var("APPDATA").unwrap_or_default();
             if !appdata.is_empty() {
-                common_bins.push(format!("{}\\Seren\\cli-tools", appdata));
                 common_bins.push(format!("{}\\npm", appdata));
             }
         }
@@ -894,6 +914,71 @@ mod tests {
             !removed,
             "sanitize_spawn_env must preserve PLAYWRIGHT_MCP_PING_TIMEOUT_MS for child MCP spawns"
         );
+    }
+
+    /// Regression guard for #3709.
+    ///
+    /// Terminals spawn bare `claude`/`codex` over this PATH, so the managed
+    /// cli-tools directory has to LEAD it. Appended at the end, a stale CLI
+    /// earlier in the user's PATH shadowed the verified managed copy the
+    /// updater had just installed.
+    #[test]
+    fn extend_path_leads_with_the_managed_cli_dir() {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            let home = std::env::var("HOME").expect("HOME must be set for this test");
+            let managed = format!("{}/.seren/cli-tools/bin", home);
+
+            // Even when the managed dir is already present at a late
+            // position, it must come back first — exactly once — while the
+            // other entries keep their relative order.
+            let input = format!("/usr/local/bin:/usr/bin:{}", managed);
+            let path = extend_path_with_common_bins(&input, ":");
+            let entries: Vec<&str> = path.split(':').collect();
+
+            assert_eq!(
+                entries.first(),
+                Some(&managed.as_str()),
+                "managed cli dir must lead the PATH, got: {path}"
+            );
+            assert_eq!(
+                entries.iter().filter(|p| **p == managed).count(),
+                1,
+                "managed cli dir must appear exactly once, got: {path}"
+            );
+            let usr_local = entries
+                .iter()
+                .position(|p| *p == "/usr/local/bin")
+                .expect("/usr/local/bin retained");
+            let usr_bin = entries
+                .iter()
+                .position(|p| *p == "/usr/bin")
+                .expect("/usr/bin retained");
+            assert!(
+                usr_local < usr_bin,
+                "existing PATH order must be preserved, got: {path}"
+            );
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let appdata = std::env::var("APPDATA").expect("APPDATA must be set for this test");
+            let managed = format!("{}\\Seren\\cli-tools", appdata);
+            let input = format!("C:\\Windows\\system32;{}", managed);
+            let path = extend_path_with_common_bins(&input, ";");
+            let entries: Vec<&str> = path.split(';').collect();
+
+            assert_eq!(
+                entries.first(),
+                Some(&managed.as_str()),
+                "managed cli dir must lead the PATH, got: {path}"
+            );
+            assert_eq!(
+                entries.iter().filter(|p| **p == managed).count(),
+                1,
+                "managed cli dir must appear exactly once, got: {path}"
+            );
+        }
     }
 }
 

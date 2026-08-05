@@ -1007,3 +1007,107 @@ describe("verified fail-closed updates (#3092)", () => {
     expect(store).toContain("https://docs.x.ai/");
   });
 });
+
+describe("failed self-update falls through to the managed install (#3706)", () => {
+  let tempDir: string;
+  let originalEnv: string | undefined;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(path.join(tmpdir(), "seren-selfupdate-test-"));
+    originalEnv = process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    process.env.SEREN_CLI_UPDATER_STATE_PATH = path.join(
+      tempDir,
+      "cli-update-state.json",
+    );
+  });
+
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env.SEREN_CLI_UPDATER_STATE_PATH;
+    } else {
+      process.env.SEREN_CLI_UPDATER_STATE_PATH = originalEnv;
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("native channel + failed self-update attempts the managed verified install instead of parking on an action card", async () => {
+    let selfUpdateCalls = 0;
+    let installCalled = false;
+    let resolved = "/Users/u/.local/bin/claude";
+    const actions: unknown[] = [];
+    const result = await backgroundUpdateCli({
+      label: "Claude Code",
+      bareCommand: "claude",
+      resolvedPath: "/Users/u/.local/bin/claude",
+      packageName: "@anthropic-ai/claude-code",
+      installPrefix: "/managed/cli-tools",
+      resolveInstalledPath: () => resolved,
+      state: {},
+      now: Date.now(),
+      onActionRequired: (event: unknown) => actions.push(event),
+      _versionOverrides: {
+        runInstalledVersion: async (probePath: string) =>
+          probePath === "/managed/cli-tools/bin/claude"
+            ? "2.1.216"
+            : "2.1.200",
+        runNpmView: async () => "2.1.216",
+        runNpmViewIntegrity: async () => "sha512-verified",
+        tryCliSelfUpdate: async () => {
+          selfUpdateCalls++;
+          return false;
+        },
+        runCliHealthCheck: async () => true,
+      },
+      _scannerOverrides: {
+        npmPackToDirectory: async () => "/tmp/claude-2.1.216.tgz",
+        verifyTarballIntegrity: () => true,
+        scanTarball: async () => ({
+          verdict: "pass",
+          flags: [],
+          candidate: {
+            version: "2.1.216",
+            tarballSha512: "verified-claude",
+            installScripts: { postinstall: "node install.cjs" },
+            declaredDependencies: ["@anthropic-ai/claude-code-darwin-arm64"],
+            binEntries: { claude: "bin/claude.exe" },
+            executableFiles: ["bin/claude.exe"],
+            networkHosts: [],
+            files: ["package.json"],
+            fileHashes: { "package.json": "package" },
+          },
+        }),
+        runNpmInstallFromTarball: async (
+          _tarball: string,
+          installOptions: Record<string, unknown>,
+        ) => {
+          expect(installOptions.installPrefix).toBe("/managed/cli-tools");
+          installCalled = true;
+          resolved = "/managed/cli-tools/bin/claude";
+        },
+      },
+    });
+
+    expect(selfUpdateCalls).toBe(1);
+    expect(installCalled).toBe(true);
+    expect(actions).toHaveLength(0);
+    expect(result).toMatchObject({
+      outcome: "success",
+      from: "2.1.200",
+      to: "2.1.216",
+      verifiedVersion: "2.1.216",
+    });
+  });
+});
+
+describe("stale pending-action purge (#3708)", () => {
+  it("purges persisted update_required cards in the same startup sweep as installation_required", () => {
+    const repoRoot = path.resolve(import.meta.dirname, "../..");
+    const registry = readFileSync(
+      path.join(repoRoot, "bin/browser-local/agent-registry.mjs"),
+      "utf8",
+    );
+
+    expect(registry).toContain('action?.reason === "installation_required"');
+    expect(registry).toContain('action?.reason === "update_required"');
+  });
+});
