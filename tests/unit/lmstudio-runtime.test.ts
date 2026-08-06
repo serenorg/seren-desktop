@@ -607,3 +607,150 @@ describe("LM Studio runtime wiring", () => {
     expect(runtimeSource).toContain("isThought: true");
   });
 });
+
+// =============================================================================
+// Memory-aware max-context auto-load (#3725)
+// =============================================================================
+
+const {
+  computeAutoContextLength,
+  kvBytesPerTokenFromGeometry,
+  ggufGeometryFromMetadata,
+} = lmStudioRuntime as {
+  computeAutoContextLength: (args: {
+    maxContextLength?: number | null;
+    weightsBytes?: number | null;
+    kvBytesPerToken?: number | null;
+    totalMemoryBytes?: number | null;
+  }) => number;
+  kvBytesPerTokenFromGeometry: (geometry: unknown) => number | null;
+  ggufGeometryFromMetadata: (
+    metadata: Record<string, unknown>,
+    arch: string,
+  ) => { totalKvHeads: number; keyDim: number; valueDim: number } | null;
+};
+
+const GiB = 1024 ** 3;
+
+describe("kvBytesPerTokenFromGeometry", () => {
+  it("sums key and value across every KV head in every layer", () => {
+    // Qwen3.6 35B A3B: 40 layers x 2 KV heads, head_dim 256, fp16.
+    // 40*2 total KV heads * (256+256) * 2 bytes = 81920 bytes/token.
+    expect(
+      kvBytesPerTokenFromGeometry({ totalKvHeads: 80, headDim: 256 }),
+    ).toBe(81920);
+  });
+
+  it("uses distinct key/value dims when provided (GGUF)", () => {
+    expect(
+      kvBytesPerTokenFromGeometry({ totalKvHeads: 80, keyDim: 256, valueDim: 128 }),
+    ).toBe(80 * (256 + 128) * 2);
+  });
+
+  it("returns null when geometry is incomplete", () => {
+    expect(kvBytesPerTokenFromGeometry({ totalKvHeads: 80 })).toBeNull();
+    expect(kvBytesPerTokenFromGeometry({ headDim: 256 })).toBeNull();
+    expect(kvBytesPerTokenFromGeometry({})).toBeNull();
+  });
+});
+
+describe("ggufGeometryFromMetadata", () => {
+  it("reads scalar GQA geometry (Qwen/Ornith-style)", () => {
+    const geometry = ggufGeometryFromMetadata(
+      {
+        "general.architecture": "qwen35moe",
+        "qwen35moe.block_count": 40,
+        "qwen35moe.attention.head_count": 16,
+        "qwen35moe.attention.head_count_kv": 2,
+        "qwen35moe.attention.key_length": 256,
+      },
+      "qwen35moe",
+    );
+    expect(geometry).toEqual({ totalKvHeads: 80, keyDim: 256, valueDim: 256 });
+    expect(kvBytesPerTokenFromGeometry(geometry)).toBe(81920);
+  });
+
+  it("sums a per-layer head_count_kv array (Gemma interleaved attention)", () => {
+    // 8 blocks of [8,8,8,8,8,1] => 328 total KV heads, key_length 512.
+    const headCountKv = Array.from({ length: 8 }, () => [8, 8, 8, 8, 8, 1]).flat();
+    const geometry = ggufGeometryFromMetadata(
+      {
+        "general.architecture": "gemma4",
+        "gemma4.block_count": 48,
+        "gemma4.attention.head_count": 16,
+        "gemma4.attention.head_count_kv": headCountKv,
+        "gemma4.attention.key_length": 512,
+      },
+      "gemma4",
+    );
+    expect(geometry).toEqual({ totalKvHeads: 328, keyDim: 512, valueDim: 512 });
+    // A scalar head_count fallback would wrongly yield 48*16=768 KV heads.
+    expect(kvBytesPerTokenFromGeometry(geometry)).toBe(328 * (512 + 512) * 2);
+  });
+});
+
+describe("computeAutoContextLength", () => {
+  const totalMemoryBytes = 64 * GiB;
+
+  it("caps at the 200K ceiling when model max and memory allow more (Qwen on 64 GB)", () => {
+    // Memory (0.75*64 GiB - ~19 GiB weights, /81920 B/token) and the trained
+    // max (262144) both exceed 204800, so the 200K product ceiling binds.
+    expect(
+      computeAutoContextLength({
+        maxContextLength: 262144,
+        weightsBytes: 20429364306,
+        kvBytesPerToken: 81920,
+        totalMemoryBytes,
+      }),
+    ).toBe(204800);
+  });
+
+  it("caps below max when memory is the binding constraint", () => {
+    // Heavy KV model: fits well under its trained max, rounded to 4096.
+    const target = computeAutoContextLength({
+      maxContextLength: 131072,
+      weightsBytes: 7 * GiB,
+      kvBytesPerToken: 671744,
+      totalMemoryBytes,
+    });
+    expect(target).toBeLessThan(131072);
+    expect(target).toBeGreaterThanOrEqual(8192);
+    expect(target % 4096).toBe(0);
+  });
+
+  it("never returns below the 8K floor even under tight memory", () => {
+    expect(
+      computeAutoContextLength({
+        maxContextLength: 131072,
+        weightsBytes: 60 * GiB,
+        kvBytesPerToken: 671744,
+        totalMemoryBytes: 16 * GiB,
+      }),
+    ).toBe(8192);
+  });
+
+  it("respects a small trained maximum as the ceiling", () => {
+    expect(
+      computeAutoContextLength({
+        maxContextLength: 4096,
+        weightsBytes: 1 * GiB,
+        kvBytesPerToken: 40960,
+        totalMemoryBytes,
+      }),
+    ).toBe(4096);
+  });
+
+  it("falls back to a conservative KV estimate when geometry is unknown", () => {
+    // With no kvBytesPerToken, the conservative constant still yields a safe,
+    // large window well above the old 8K default.
+    const target = computeAutoContextLength({
+      maxContextLength: 262144,
+      weightsBytes: 20 * GiB,
+      kvBytesPerToken: null,
+      totalMemoryBytes,
+    });
+    expect(target).toBeGreaterThan(8192);
+    expect(target).toBeLessThan(262144);
+    expect(target % 4096).toBe(0);
+  });
+});

@@ -3,7 +3,16 @@
 
 import { execFile, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { accessSync, constants as fsConstants, existsSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants as fsConstants,
+  existsSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TextDecoder } from "node:util";
@@ -39,6 +48,26 @@ const CONTEXT_SAFETY_FRACTION = 0.82;
 const AGGRESSIVE_CONTEXT_SAFETY_FRACTION = 0.58;
 const MIN_INPUT_BUDGET_TOKENS = 512;
 const TOOL_SCHEMA_TOKEN_SAFETY_MULTIPLIER = 1.35;
+// Every LM Studio model is loaded at a 200K context window, bounded by the
+// model's trained maximum and by what fits available memory. LM Studio's own
+// default is often 8K, which culls the ~276-tool Seren catalog down to a
+// handful and drops publisher discovery + local file tools. #3725
+const AUTO_CONTEXT_CEILING = 204800; // 200K (200 * 1024) tokens for every model
+const MODEL_MEMORY_BUDGET_FRACTION = 0.75; // share of total RAM for weights + KV cache
+const KV_CACHE_BYTES_PER_ELEMENT = 2; // fp16 KV cache
+const KV_CACHE_SAFETY_MULTIPLIER = 1.15; // headroom for runtime/estimation overhead
+const AUTO_CONTEXT_ROUNDING = 4096;
+const MIN_AUTO_CONTEXT_LENGTH = 8192;
+// Conservative fallback (~heavy MHA model) used only when the model's KV
+// geometry cannot be read, so an unknown model still gets a memory-safe window.
+const FALLBACK_KV_BYTES_PER_TOKEN = 393216;
+const GGUF_METADATA_SCAN_LIMIT_BYTES = 32 * 1024 * 1024;
+const LMSTUDIO_MODEL_INDEX_CACHE_PATH = path.join(
+  os.homedir(),
+  ".lmstudio",
+  ".internal",
+  "model-index-cache.json",
+);
 const SEREN_PUBLISHER_ROUTING_TOOL_NAMES = [
   "list_agent_publishers",
   "list_mcp_tools",
@@ -1614,6 +1643,410 @@ async function executeToolCall(session, toolCall, handlers) {
   }
 }
 
+function firstPositiveNumber(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+}
+
+/**
+ * KV-cache bytes per token of context. Every key/value head in every layer
+ * stores a key and a value vector per token; `totalKvHeads` sums the KV heads
+ * across all layers (so per-layer GQA models are counted exactly).
+ * `keyDim`/`valueDim` may differ (GGUF exposes both); HF configs share one
+ * `headDim` for both.
+ */
+export function kvBytesPerTokenFromGeometry(geometry) {
+  const totalKvHeads = firstPositiveNumber(geometry?.totalKvHeads);
+  const keyDim = firstPositiveNumber(geometry?.keyDim, geometry?.headDim);
+  const valueDim = firstPositiveNumber(geometry?.valueDim, geometry?.headDim);
+  if (!totalKvHeads || !keyDim || !valueDim) return null;
+  return totalKvHeads * (keyDim + valueDim) * KV_CACHE_BYTES_PER_ELEMENT;
+}
+
+/** Read attention geometry from a transformers/MLX `config.json`. */
+function kvGeometryFromHfConfig(configPath) {
+  const config = JSON.parse(readFileSync(configPath, "utf8"));
+  const text =
+    config && typeof config.text_config === "object" && config.text_config
+      ? config.text_config
+      : config;
+  const numLayers = firstPositiveNumber(
+    text.num_hidden_layers,
+    config.num_hidden_layers,
+  );
+  const numHeads = firstPositiveNumber(
+    text.num_attention_heads,
+    config.num_attention_heads,
+  );
+  const numKvHeads = firstPositiveNumber(
+    text.num_key_value_heads,
+    config.num_key_value_heads,
+    numHeads,
+  );
+  const hiddenSize = firstPositiveNumber(text.hidden_size, config.hidden_size);
+  const headDim = firstPositiveNumber(
+    text.head_dim,
+    config.head_dim,
+    hiddenSize && numHeads ? hiddenSize / numHeads : undefined,
+  );
+  if (!numLayers || !numKvHeads || !headDim) return null;
+  return { totalKvHeads: numLayers * numKvHeads, headDim };
+}
+
+const GGUF_FIXED_VALUE_SIZES = {
+  0: 1,
+  1: 1,
+  2: 2,
+  3: 2,
+  4: 4,
+  5: 4,
+  6: 4,
+  7: 1,
+  10: 8,
+  11: 8,
+  12: 8,
+};
+
+/** Sequential reader over a file, bounded so we never scan past the header. */
+function createGgufReader(fd) {
+  let offset = 0;
+  function read(length) {
+    if (offset + length > GGUF_METADATA_SCAN_LIMIT_BYTES) {
+      throw new Error("gguf metadata exceeds scan limit");
+    }
+    const buffer = Buffer.alloc(length);
+    let read = 0;
+    while (read < length) {
+      const got = readSync(fd, buffer, read, length - read, offset + read);
+      if (got <= 0) throw new Error("gguf metadata ended unexpectedly");
+      read += got;
+    }
+    offset += length;
+    return buffer;
+  }
+  const reader = {
+    readU32: () => read(4).readUInt32LE(0),
+    readU64: () => Number(read(8).readBigUInt64LE(0)),
+    readBytes: (length) => read(length),
+    skip: (length) => {
+      if (offset + length > GGUF_METADATA_SCAN_LIMIT_BYTES) {
+        throw new Error("gguf metadata exceeds scan limit");
+      }
+      offset += length;
+    },
+    readString() {
+      return this.readBytes(this.readU64()).toString("utf8");
+    },
+  };
+  return reader;
+}
+
+function readGgufScalar(reader, type) {
+  switch (type) {
+    case 0:
+      return reader.readBytes(1).readUInt8(0);
+    case 1:
+      return reader.readBytes(1).readInt8(0);
+    case 2:
+      return reader.readBytes(2).readUInt16LE(0);
+    case 3:
+      return reader.readBytes(2).readInt16LE(0);
+    case 4:
+      return reader.readU32();
+    case 5:
+      return reader.readBytes(4).readInt32LE(0);
+    case 6:
+      return reader.readBytes(4).readFloatLE(0);
+    case 7:
+      return reader.readBytes(1).readUInt8(0) !== 0;
+    case 8:
+      return reader.readString();
+    case 10:
+      return reader.readU64();
+    case 11:
+      return Number(reader.readBytes(8).readBigInt64LE(0));
+    case 12:
+      return reader.readBytes(8).readDoubleLE(0);
+    default:
+      throw new Error(`gguf scalar type ${type} unsupported`);
+  }
+}
+
+// Small numeric arrays can hold per-layer attention geometry (e.g. Gemma's
+// interleaved head_count_kv). Capture those; skip large arrays (tokenizer
+// vocab, merges) by size without materializing them. Returns the captured
+// values, or undefined when the array was skipped.
+const GGUF_NUMERIC_ARRAY_CAPTURE_LIMIT = 4096;
+function readGgufArray(reader) {
+  const elementType = reader.readU32();
+  const count = reader.readU64();
+  const fixedSize = GGUF_FIXED_VALUE_SIZES[elementType];
+  if (fixedSize != null && count <= GGUF_NUMERIC_ARRAY_CAPTURE_LIMIT) {
+    const values = [];
+    for (let index = 0; index < count; index += 1) {
+      values.push(readGgufScalar(reader, elementType));
+    }
+    return values;
+  }
+  if (fixedSize != null) {
+    reader.skip(fixedSize * count);
+    return undefined;
+  }
+  if (elementType === 8) {
+    for (let index = 0; index < count; index += 1) reader.skip(reader.readU64());
+    return undefined;
+  }
+  if (elementType === 9) {
+    for (let index = 0; index < count; index += 1) readGgufArray(reader);
+    return undefined;
+  }
+  throw new Error(`gguf array element type ${elementType} unsupported`);
+}
+
+/** Read attention geometry from a GGUF file's metadata header. */
+function kvGeometryFromGguf(ggufPath) {
+  const fd = openSync(ggufPath, "r");
+  try {
+    const reader = createGgufReader(fd);
+    if (reader.readBytes(4).toString("ascii") !== "GGUF") return null;
+    reader.readU32(); // version
+    reader.readU64(); // tensor count
+    const kvCount = reader.readU64();
+    const metadata = {};
+    let arch = null;
+    for (let index = 0; index < kvCount; index += 1) {
+      const key = reader.readString();
+      const type = reader.readU32();
+      if (type === 9) {
+        const values = readGgufArray(reader);
+        if (values !== undefined) metadata[key] = values;
+      } else {
+        metadata[key] = readGgufScalar(reader, type);
+      }
+      if (arch == null && typeof metadata["general.architecture"] === "string") {
+        arch = metadata["general.architecture"];
+      }
+      // Stop only once the exact attention keys are present. Breaking on a
+      // fallback-derived geometry (head_count in place of head_count_kv,
+      // embedding/heads in place of key_length) would read the wrong values,
+      // since key_length is emitted after head_count/embedding_length.
+      if (arch && hasExactGgufGeometry(metadata, arch)) break;
+    }
+    return arch ? ggufGeometryFromMetadata(metadata, arch) : null;
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function hasExactGgufGeometry(metadata, arch) {
+  const headCountKv = metadata[`${arch}.attention.head_count_kv`];
+  const hasHeadCountKv = Array.isArray(headCountKv)
+    ? headCountKv.length > 0
+    : firstPositiveNumber(headCountKv) != null;
+  return (
+    firstPositiveNumber(metadata[`${arch}.block_count`]) != null &&
+    hasHeadCountKv &&
+    firstPositiveNumber(metadata[`${arch}.attention.key_length`]) != null
+  );
+}
+
+// Total KV heads across all layers. `head_count_kv` is a scalar for uniform GQA
+// (Qwen, Llama) and a per-layer array for interleaved-attention models (Gemma).
+function totalKvHeadsFromMetadata(metadata, arch, numLayers) {
+  const headCountKv = metadata[`${arch}.attention.head_count_kv`];
+  if (Array.isArray(headCountKv)) {
+    return headCountKv.reduce(
+      (sum, value) => sum + (Number(value) > 0 ? Number(value) : 0),
+      0,
+    );
+  }
+  const perLayer = firstPositiveNumber(
+    headCountKv,
+    metadata[`${arch}.attention.head_count`],
+  );
+  return numLayers && perLayer ? numLayers * perLayer : null;
+}
+
+export function ggufGeometryFromMetadata(metadata, arch) {
+  const numLayers = firstPositiveNumber(metadata[`${arch}.block_count`]);
+  const numHeads = firstPositiveNumber(metadata[`${arch}.attention.head_count`]);
+  const totalKvHeads = totalKvHeadsFromMetadata(metadata, arch, numLayers);
+  const embedding = firstPositiveNumber(metadata[`${arch}.embedding_length`]);
+  const keyDim = firstPositiveNumber(
+    metadata[`${arch}.attention.key_length`],
+    embedding && numHeads ? embedding / numHeads : undefined,
+  );
+  const valueDim = firstPositiveNumber(
+    metadata[`${arch}.attention.value_length`],
+    keyDim,
+  );
+  if (!totalKvHeads || !keyDim || !valueDim) return null;
+  return { totalKvHeads, keyDim, valueDim };
+}
+
+/** Locate the model's on-disk directory + format via LM Studio's index cache. */
+function readLmStudioModelIndexEntry(modelId) {
+  if (!existsSync(LMSTUDIO_MODEL_INDEX_CACHE_PATH)) return null;
+  const parsed = JSON.parse(
+    readFileSync(LMSTUDIO_MODEL_INDEX_CACHE_PATH, "utf8"),
+  );
+  const models = Array.isArray(parsed?.models) ? parsed.models : [];
+  // The SDK model key maps to `containingDirSubpath` for safetensors models and
+  // to `defaultIdentifier`/`autoIdentifiers` for GGUF models.
+  return (
+    models.find((entry) => {
+      if (
+        entry?.containingDirSubpath === modelId ||
+        entry?.defaultIdentifier === modelId
+      ) {
+        return true;
+      }
+      if (
+        Array.isArray(entry?.autoIdentifiers) &&
+        entry.autoIdentifiers.includes(modelId)
+      ) {
+        return true;
+      }
+      const identifier =
+        typeof entry?.indexedModelIdentifier === "string"
+          ? entry.indexedModelIdentifier
+          : "";
+      return identifier === modelId || identifier.startsWith(`${modelId}@`);
+    }) ?? null
+  );
+}
+
+function findGgufFile(dir) {
+  const files = readdirSync(dir).filter((name) =>
+    name.toLowerCase().endsWith(".gguf"),
+  );
+  if (files.length === 0) return null;
+  // Multi-shard GGUFs keep the metadata in the first shard when sorted.
+  files.sort();
+  return path.join(dir, files[0]);
+}
+
+/**
+ * Best-effort KV-cache bytes-per-token for a model. Reads exact attention
+ * geometry from the model's own files (config.json for safetensors/MLX, GGUF
+ * metadata for GGUF); returns null when the geometry cannot be read so the
+ * caller falls back to a conservative constant. Never throws.
+ */
+export function estimateModelKvBytesPerToken(modelId) {
+  try {
+    const entry = readLmStudioModelIndexEntry(modelId);
+    const dir = entry?.concreteModelDirAbsolutePath;
+    if (!dir || !existsSync(dir)) return null;
+    if (entry.format === "gguf") {
+      const ggufPath = findGgufFile(dir);
+      if (!ggufPath) return null;
+      return kvBytesPerTokenFromGeometry(kvGeometryFromGguf(ggufPath) ?? {});
+    }
+    const configPath = path.join(dir, "config.json");
+    if (!existsSync(configPath)) return null;
+    return kvBytesPerTokenFromGeometry(kvGeometryFromHfConfig(configPath) ?? {});
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Target context window for a model: the 200K product ceiling, bounded by the
+ * model's trained maximum and by what fits available memory. Total RAM (not
+ * instantaneous free memory) is budgeted so the target is stable across runs;
+ * the memory bound only reduces the ceiling on memory-constrained machines, and
+ * a load-backoff handles the case where the target still does not fit. #3725
+ */
+export function computeAutoContextLength({
+  maxContextLength,
+  weightsBytes,
+  kvBytesPerToken,
+  totalMemoryBytes,
+}) {
+  const maxContext =
+    firstPositiveNumber(maxContextLength) ?? DEFAULT_CONTEXT_LENGTH;
+  const ceiling = Math.min(AUTO_CONTEXT_CEILING, maxContext);
+  const totalMemory = firstPositiveNumber(totalMemoryBytes);
+  if (!totalMemory) return Math.min(ceiling, MIN_AUTO_CONTEXT_LENGTH);
+
+  const perTokenBytes =
+    (firstPositiveNumber(kvBytesPerToken) ?? FALLBACK_KV_BYTES_PER_TOKEN) *
+    KV_CACHE_SAFETY_MULTIPLIER;
+  const kvBudgetBytes =
+    totalMemory * MODEL_MEMORY_BUDGET_FRACTION -
+    (firstPositiveNumber(weightsBytes) ?? 0);
+  const contextByMemory = Math.floor(kvBudgetBytes / perTokenBytes);
+
+  const rounded =
+    Math.floor(Math.min(ceiling, contextByMemory) / AUTO_CONTEXT_ROUNDING) *
+    AUTO_CONTEXT_ROUNDING;
+  if (rounded < MIN_AUTO_CONTEXT_LENGTH) {
+    return Math.min(ceiling, MIN_AUTO_CONTEXT_LENGTH);
+  }
+  return rounded;
+}
+
+async function resolveModelLoadFacts(client, modelId) {
+  try {
+    const infos = await client.system.listDownloadedModels("llm");
+    const match = (Array.isArray(infos) ? infos : []).find(
+      (info) => info?.modelKey === modelId || info?.path === modelId,
+    );
+    return {
+      maxContextLength: firstPositiveNumber(match?.maxContextLength),
+      weightsBytes: firstPositiveNumber(match?.sizeBytes),
+    };
+  } catch {
+    return { maxContextLength: null, weightsBytes: null };
+  }
+}
+
+async function loadModelAtLargestFittingContext(session, modelId, target) {
+  const floor = Math.min(target, MIN_AUTO_CONTEXT_LENGTH);
+  let attempt = target;
+  let lastError = null;
+  while (attempt >= floor) {
+    try {
+      const handle = await session.client.llm.load(modelId, {
+        verbose: false,
+        config: { contextLength: attempt, gpuStrictVramCap: true },
+      });
+      const contextLength = await handle
+        .getContextLength()
+        .catch(() => attempt);
+      if (attempt < target) {
+        console.warn(
+          `${session.logPrefix} loaded ${modelId} at reduced ${contextLength}-token context (target ${target} did not fit).`,
+        );
+      } else {
+        console.info(
+          `${session.logPrefix} loaded ${modelId} at ${contextLength}-token context (memory-fit maximum).`,
+        );
+      }
+      return { handle, contextLength };
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `${session.logPrefix} loading ${modelId} at ${attempt}-token context failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      if (attempt <= floor) break;
+      const halved =
+        Math.floor(attempt / 2 / AUTO_CONTEXT_ROUNDING) * AUTO_CONTEXT_ROUNDING;
+      attempt = Math.max(floor, halved);
+    }
+  }
+  throw new Error(
+    `Failed to load LM Studio model "${modelId}" at its memory-fit context window: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`,
+  );
+}
+
 async function ensureModelLoaded(session, modelId = session.currentModelId) {
   if (!modelId) {
     throw new Error(
@@ -1622,21 +2055,50 @@ async function ensureModelLoaded(session, modelId = session.currentModelId) {
   }
   if (session.loadedModelKey === modelId && session.contextLength) return;
 
+  const { maxContextLength, weightsBytes } = await resolveModelLoadFacts(
+    session.client,
+    modelId,
+  );
+  const target = computeAutoContextLength({
+    maxContextLength,
+    weightsBytes,
+    kvBytesPerToken: estimateModelKvBytesPerToken(modelId),
+    totalMemoryBytes: os.totalmem(),
+  });
+
   const loadedBefore = await session.client.llm.listLoaded().catch(() => []);
-  const wasLoaded = loadedBefore.some(
+  const existing = loadedBefore.find(
     (model) =>
       model.modelKey === modelId ||
       model.path === modelId ||
       model.identifier === modelId,
   );
-  const model = await session.client.llm.model(modelId, { verbose: false });
+  if (existing) {
+    const info = await existing.getModelInfo().catch(() => null);
+    const currentContext = firstPositiveNumber(info?.contextLength) ?? 0;
+    // Reuse an instance already loaded at (or above) the target; otherwise
+    // unload it so we can reload at the larger memory-fit window.
+    if (currentContext >= target) {
+      session.loadedModelKey = modelId;
+      session.loadedModelIdentifier = existing.identifier;
+      session.loadedBySession = false;
+      session.loadedModelHandle = existing;
+      session.contextLength = currentContext;
+      return;
+    }
+    await session.client.llm.unload(existing.identifier).catch(() => {});
+  }
+
+  const { handle, contextLength } = await loadModelAtLargestFittingContext(
+    session,
+    modelId,
+    target,
+  );
   session.loadedModelKey = modelId;
-  session.loadedModelIdentifier = model.identifier;
-  session.loadedBySession = !wasLoaded;
-  session.loadedModelHandle = model;
-  session.contextLength = await model
-    .getContextLength()
-    .catch(() => DEFAULT_CONTEXT_LENGTH);
+  session.loadedModelIdentifier = handle.identifier;
+  session.loadedBySession = true;
+  session.loadedModelHandle = handle;
+  session.contextLength = contextLength;
 }
 
 async function sendPromptToLmStudio(session, prompt, context) {
