@@ -430,6 +430,20 @@ export const FILE_TOOLS: ToolDefinition[] = [
 ];
 
 /**
+ * Built-in gateway tools that select or route to a different model. A chat turn
+ * answers as the model the user picked; it never decides which model answers, so
+ * these must not reach the interactive chat tool set. Without this exclusion a
+ * non-Claude model asked about itself looks itself up in the org private-models
+ * catalog (a Claude-only fallback), decides it "isn't in our catalog", and offers
+ * to re-run on a different model (#3721).
+ */
+const CHAT_EXCLUDED_BUILTIN_TOOLS = new Set<string>([
+  "chat_private_models",
+  "list_seren_agent_private_models",
+  "list_private_models",
+]);
+
+/**
  * Get all available tools, including file tools, local MCP tools, and Seren Gateway tools.
  * - File tools: Local file operations via Tauri (highest priority)
  * - Local MCP tools: User-added MCP servers via stdio (high priority)
@@ -447,6 +461,7 @@ export function getAllTools(modelId?: string): ToolDefinition[] {
   // Add built-in Seren tools (run_sql, list_projects, etc.) — always included,
   // like file tools. These bypass BM25 and publisher dispatch entirely.
   for (const schema of getBuiltinToolSchemas()) {
+    if (CHAT_EXCLUDED_BUILTIN_TOOLS.has(schema.name)) continue;
     const name = `seren__${schema.name}`;
     if (seenNames.has(name)) continue;
     const properties = { ...(schema.inputSchema?.properties ?? {}) };

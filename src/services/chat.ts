@@ -24,6 +24,7 @@ import type {
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
+import { getModelDisplayName } from "@/lib/rate-limit-fallback";
 import { executeTools, getAllTools } from "@/lib/tools";
 import {
   getCallablePublisherSlugs,
@@ -511,6 +512,18 @@ export async function* streamMessageWithTools(
     "Key Seren concepts: SerenBucks (billing credits), Publishers (third-party data services), " +
     "Skills (installable prompt-based capabilities from the seren-skills repo), " +
     "Gateway API (AI model access), MCP servers (tool integration), and Seren Desktop (this application).";
+
+  // Model identity (#3721) — mirror of the Rust orchestrator identity block in
+  // chat_model_worker.rs. Without it a non-Claude model asked about itself looks
+  // itself up in the org private-models catalog (a Claude-only fallback), decides
+  // it "isn't in our catalog", and offers to re-run on a different model.
+  systemContent +=
+    `\n\nModel identity: you are ${getModelDisplayName(model)} (\`${model}\`), ` +
+    "the AI model answering this conversation. The user selected you in the model " +
+    "picker. You cannot switch, become, or route this conversation to a different " +
+    "model, and you must not use any private-model or cloud-agent catalog tool to " +
+    "look up, verify, or select the model answering the user. If the user refers to " +
+    "your model by name, that request is already satisfied — that model is you.";
 
   // Tone and behavior instructions — must match Rust orchestrator copy at
   // src-tauri/src/orchestrator/chat_model_worker.rs TONE_INSTRUCTIONS.
