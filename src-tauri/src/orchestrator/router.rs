@@ -336,7 +336,7 @@ fn build_reason(
 }
 
 /// Convert a model ID to a human-readable name.
-fn humanize_model_id(model_id: &str) -> &str {
+pub(crate) fn humanize_model_id(model_id: &str) -> &str {
     match model_id {
         "anthropic/claude-opus-4-6" => "Claude Opus",
         "anthropic/claude-opus-4.5" => "Claude Opus",
@@ -356,6 +356,7 @@ fn humanize_model_id(model_id: &str) -> &str {
         "google/gemini-2.5-flash" => "Gemini Flash",
         "google/gemini-3-flash-preview" => "Gemini 3 Flash",
         "moonshotai/kimi-k2.5" => "Kimi K2.5",
+        "moonshotai/kimi-k3" => "Kimi K3",
         "z-ai/glm-5.1" => "GLM 5.1",
         "organization/private-model" => "Private Models",
         _ => model_id,

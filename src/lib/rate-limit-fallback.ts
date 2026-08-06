@@ -186,6 +186,8 @@ export function getModelDisplayName(serenModelId: string): string {
     "google/gemini-2.5-pro": "Gemini 2.5 Pro",
     "google/gemini-2.5-flash": "Gemini 2.5 Flash",
     "google/gemini-3-flash-preview": "Gemini 3 Flash",
+    "moonshotai/kimi-k2.5": "Kimi K2.5",
+    "moonshotai/kimi-k3": "Kimi K3",
   };
   return names[serenModelId] ?? serenModelId;
 }

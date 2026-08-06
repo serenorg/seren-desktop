@@ -582,6 +582,22 @@ created if missing.",
              variables to use any of your tools. Never ask the user to configure credentials \
              or look for keys like SEREN_API_KEY. Just call the tools directly."
                 .to_string(),
+            // Model identity (#3721) — a non-Claude model asked about itself would
+            // otherwise look itself up in the org private-models catalog (a
+            // Claude-only fallback), conclude it "isn't in our catalog", and offer
+            // to re-run on a different model. Tell it who it is and that model
+            // selection is not a chat-turn decision.
+            format!(
+                "Model identity: you are {} (`{}`), the AI model answering this \
+                 conversation. The user selected you in the model picker. You \
+                 cannot switch, become, or route this conversation to a different \
+                 model, and you must not use any private-model or cloud-agent \
+                 catalog tool to look up, verify, or select the model answering \
+                 the user. If the user refers to your model by name, that request \
+                 is already satisfied — that model is you.",
+                super::router::humanize_model_id(&routing.model_id),
+                routing.model_id
+            ),
             // File output rules (GH #1583, #1585) — tell the model how to
             // hit the user's requested path and format in one tool round.
             "File output rules:\n\
@@ -2805,6 +2821,47 @@ mod tests {
                 "Never claim a tool or capability is unavailable without first checking"
             ),
             "tone block must require verification before denying capabilities"
+        );
+    }
+
+    #[test]
+    fn system_prompt_states_model_identity() {
+        // #3721: a non-Claude chat model must be told which model it is, that it
+        // cannot switch models, and that it must not use the private-model /
+        // cloud-agent catalog tools to look itself up. Without this a model
+        // asked about itself decides it "isn't in our catalog" and offers to
+        // re-run on a different model.
+        let worker = ChatModelWorker::new();
+        let routing = RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "moonshotai/kimi-k3".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            project_root: None,
+        };
+
+        let body =
+            worker.build_request_body("hi", &[], &routing, "", &[], &[], None);
+        let system_msg = body["messages"][0]["content"].as_str().unwrap();
+
+        assert!(
+            system_msg.contains("Model identity:"),
+            "system prompt must carry the model-identity block"
+        );
+        assert!(
+            system_msg.contains("Kimi K3") && system_msg.contains("moonshotai/kimi-k3"),
+            "identity must name the humanized model and its slug"
+        );
+        assert!(
+            system_msg.contains("cannot switch, become, or route this conversation"),
+            "identity must forbid switching/routing to another model"
+        );
+        assert!(
+            system_msg.contains("must not use any private-model or cloud-agent"),
+            "identity must forbid using private-model/cloud-agent catalog tools to self-select"
         );
     }
 
