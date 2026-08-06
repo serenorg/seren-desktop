@@ -1,0 +1,14 @@
+{
+  "scenario": "[REDACTED]",
+  "runningFolders": [
+    "seren-3723-folder-alpha",
+    "seren-3723-folder-beta"
+  ],
+  "runningDotPresentInSidebar": true,
+  "expectation": "folder headers show a total thread count with no green active dot even while folders have running threads",
+  "evidence": {
+    "domRasterSaved": true,
+    "nativeCaptureSaved": true
+  },
+  "buildCommit": "[REDACTED]"
+}
