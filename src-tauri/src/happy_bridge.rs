@@ -226,6 +226,7 @@ impl HappyBridgeManager {
                 None,
             )
             .await,
+            crate::terminal::happy_terminal_project_roots(app),
         )?;
         let advertised_roots =
             crate::commands::happy_bridge::effective_advertised_roots(app, discovered_roots);
@@ -1171,6 +1172,24 @@ fn is_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -> bool 
         .any(|root| root == candidate)
 }
 
+/// Visibility scope for an already-running session, mirroring
+/// `isWithinAdvertisedRoots` in `validate.mjs`: spawning requires a path to *be*
+/// an advertised root, but a session already running inside one is in scope
+/// because the user shared that folder. Both sides are canonicalized first so a
+/// symlink cannot smuggle a path in. `Path::starts_with` matches whole
+/// components, so `/srv/project-secret` is not treated as inside
+/// `/srv/project` — the same boundary `validate.mjs` gets from its explicit
+/// separator check.
+fn is_within_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -> bool {
+    let Ok(candidate) = std::fs::canonicalize(cwd) else {
+        return false;
+    };
+    crate::commands::happy_bridge::saved_advertised_roots(app)
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .any(|root| candidate.starts_with(&root))
+}
+
 /// Serialize an already-canonical path in the same form Node's `realpath`
 /// returns. Windows' Rust canonicalizer uses verbatim paths (`\\?\C:\...` or
 /// `\\?\UNC\...`), while Node returns ordinary DOS/UNC paths. This conversion
@@ -1216,14 +1235,22 @@ fn canonical_happy_restoration_root<R: tauri::Runtime>(
 /// order they were seen. A failed lookup is reported rather than absorbed: an
 /// empty set is also what a user with no projects has, so absorbing it started a
 /// bridge that reported connected and then refused every remote spawn.
+/// `terminal_roots` are the folders holding CLI terminal panes. They are not
+/// conversations, so a folder used only for `claude` / `codex` panes had no row
+/// here and was filtered out of the consented set, leaving its panes
+/// unshareable. `HappyRemoteSettings` offers checkboxes for the same two
+/// sources, so #3144's invariant holds: nothing is advertised that the user was
+/// not shown and cannot withdraw.
 fn discovered_project_roots(
     conversations: Result<Vec<crate::commands::chat::UnifiedConversationRow>, String>,
+    terminal_roots: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let conversations =
         conversations.map_err(|error| format!("Failed to read Happy project folders: {error}"))?;
     Ok(conversations
         .into_iter()
         .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
+        .chain(terminal_roots)
         .fold(Vec::<String>::new(), |mut roots, root| {
             if !roots.iter().any(|existing| existing == &root) {
                 roots.push(root);
@@ -1273,6 +1300,8 @@ fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
             | "conversation_owner_lookup"
             | "provider_session_archive"
             | "provider_session_archive_lookup"
+            | "terminal_list_sessions"
+            | "terminal_transcript_path"
             | "identity_store"
     ) {
         return Err(error_response(id, -32601, "unknown supervisor method"));
@@ -1569,6 +1598,40 @@ async fn dispatch_supervisor_request(
             let conversation_id = required_uuid(&request.params, "conversationId")?;
             crate::commands::chat::delete_conversation(app.clone(), conversation_id).await?;
             Ok(json!({ "deleted": true }))
+        }
+        "terminal_list_sessions" => {
+            // Re-checked here rather than trusted: the bridge is the process
+            // parsing relay traffic, and the terminal source it feeds hands
+            // these paths straight back as session scope.
+            let sessions = crate::terminal::happy_terminal_sessions(app)
+                .into_iter()
+                .filter(|session| is_within_advertised_root(app, &session.cwd))
+                .collect::<Vec<_>>();
+            Ok(json!({ "sessions": sessions }))
+        }
+        "terminal_transcript_path" => {
+            let session_id = required_string(&request.params, "sessionId")?;
+            // A pane that left the advertised roots stops yielding a transcript
+            // as well as a listing, so revoking a folder also stops the reads.
+            let authorized = crate::terminal::happy_terminal_sessions(app)
+                .into_iter()
+                .any(|session| {
+                    session.session_id == session_id
+                        && is_within_advertised_root(app, &session.cwd)
+                });
+            if !authorized {
+                return Err("terminal session is not in an advertised root".to_string());
+            }
+            // Built by joining the home directory, never canonicalized, so it
+            // carries no Windows verbatim prefix Node would fail to open.
+            Ok(
+                match crate::terminal::happy_terminal_transcript_path(app, &session_id)
+                    .and_then(|path| path.to_str().map(ToOwned::to_owned))
+                {
+                    Some(path) => json!({ "path": path }),
+                    None => json!({}),
+                },
+            )
         }
         "identity_store" => {
             let identity = request
@@ -2081,6 +2144,55 @@ mod tests {
     }
 
     #[test]
+    fn terminal_session_scope_covers_subdirectories_but_not_prefix_siblings() {
+        // Terminal panes are listed by visibility, not spawn authority: a pane
+        // running inside a shared folder is in scope, while a sibling that
+        // merely shares a name prefix is a different folder entirely.
+        let consented = tempfile::tempdir().expect("temp dir");
+        let nested = consented.path().join("packages/app");
+        std::fs::create_dir_all(&nested).expect("nested dir");
+        let sibling_root = tempfile::tempdir().expect("temp dir");
+        let shared_prefix = sibling_root.path().join("project-secret");
+        std::fs::create_dir(&shared_prefix).expect("sibling dir");
+
+        let app = mock_app_with_roots(Some(vec![
+            consented.path().to_string_lossy().to_string(),
+            sibling_root.path().join("project").to_string_lossy().to_string(),
+        ]));
+
+        assert!(
+            super::is_within_advertised_root(app.handle(), &nested.to_string_lossy()),
+            "a pane inside a shared folder is visible"
+        );
+        assert!(
+            !super::is_within_advertised_root(app.handle(), &shared_prefix.to_string_lossy()),
+            "a shared name prefix is not containment"
+        );
+    }
+
+    #[test]
+    fn terminal_session_scope_fails_closed_without_roots() {
+        let candidate = tempfile::tempdir().expect("temp dir");
+        let app = mock_app_with_roots(None);
+        assert!(
+            !super::is_within_advertised_root(app.handle(), &candidate.path().to_string_lossy()),
+            "nothing is visible until the user shares a folder"
+        );
+    }
+
+    #[test]
+    fn supervisor_channel_accepts_terminal_session_methods() {
+        let listing =
+            parse_supervisor_line("{\"id\":1,\"method\":\"terminal_list_sessions\"}").expect("listing");
+        assert_eq!(listing.method, "terminal_list_sessions");
+        let transcript = parse_supervisor_line(
+            "{\"id\":2,\"method\":\"terminal_transcript_path\",\"params\":{\"sessionId\":\"a\"}}",
+        )
+        .expect("transcript");
+        assert_eq!(transcript.method, "terminal_transcript_path");
+    }
+
+    #[test]
     fn advertised_root_accepts_a_consented_root() {
         // Regression: the re-check intersected the saved roots against an empty
         // `discovered` set, so it returned false for every path and remote
@@ -2532,7 +2644,8 @@ mod tests {
         // Regression: the lookup was absorbed with `unwrap_or_default()`. On a
         // busy database the bridge started, advertised zero folders, reported
         // itself connected, and then refused every remote spawn silently.
-        let failure = discovered_project_roots(Err("database is locked".to_string()));
+        let failure =
+            discovered_project_roots(Err("database is locked".to_string()), Vec::new());
 
         assert!(
             failure.is_err_and(|error| error.contains("database is locked")),
@@ -2542,19 +2655,45 @@ mod tests {
 
     #[test]
     fn project_root_discovery_keeps_first_seen_distinct_roots() {
-        let roots = discovered_project_roots(Ok(conversations(vec![
-            conversation(Some("/workspace/alpha"), None),
-            // A conversation with no project falls back to where the agent ran.
-            conversation(None, Some("/workspace/beta")),
-            conversation(Some("/workspace/alpha"), Some("/workspace/gamma")),
-            conversation(None, None),
-        ])));
+        let roots = discovered_project_roots(
+            Ok(conversations(vec![
+                conversation(Some("/workspace/alpha"), None),
+                // A conversation with no project falls back to where the agent ran.
+                conversation(None, Some("/workspace/beta")),
+                conversation(Some("/workspace/alpha"), Some("/workspace/gamma")),
+                conversation(None, None),
+            ])),
+            Vec::new(),
+        );
 
         assert_eq!(
             roots.expect("a successful lookup yields roots"),
             vec![
                 "/workspace/alpha".to_string(),
                 "/workspace/beta".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn project_root_discovery_offers_folders_that_only_hold_terminal_panes() {
+        // A folder used only for `claude` / `codex` panes has no conversation
+        // row. Deriving candidates from conversations alone left it with no
+        // consent checkbox, so its panes could never reach the phone.
+        let roots = discovered_project_roots(
+            Ok(conversations(vec![conversation(Some("/workspace/alpha"), None)])),
+            vec![
+                "/workspace/terminal-only".to_string(),
+                // A folder holding both must not be offered twice.
+                "/workspace/alpha".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            roots.expect("a successful lookup yields roots"),
+            vec![
+                "/workspace/alpha".to_string(),
+                "/workspace/terminal-only".to_string(),
             ],
         );
     }
