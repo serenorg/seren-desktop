@@ -9,6 +9,7 @@ import {
   onCleanup,
   Show,
 } from "solid-js";
+import { filterModelsByQuery } from "@/lib/model-search";
 import { type Model, modelsService } from "@/services/models";
 
 interface SearchableModelSelectProps {
@@ -51,16 +52,7 @@ export const SearchableModelSelect: Component<SearchableModelSelectProps> = (
   }
 
   // Filter models based on search
-  const filteredModels = () => {
-    const query = search().toLowerCase();
-    if (!query) return models();
-    return models().filter(
-      (m) =>
-        m.name.toLowerCase().includes(query) ||
-        m.id.toLowerCase().includes(query) ||
-        m.provider.toLowerCase().includes(query),
-    );
-  };
+  const filteredModels = () => filterModelsByQuery(models(), search());
 
   // Get display name for current value
   const selectedModelName = () => {

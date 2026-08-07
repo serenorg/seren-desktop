@@ -13,6 +13,7 @@ import {
   untrack,
 } from "solid-js";
 import { ProviderIcon } from "@/components/chat/ProviderIcon";
+import { filterModelsByQuery } from "@/lib/model-search";
 import {
   PROVIDER_CONFIGS,
   type ProviderId,
@@ -218,34 +219,17 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => {
 
   // Filter models: show the live list when no search, filter it when typing
   const filteredModels = createMemo(() => {
-    const query = searchQuery().toLowerCase().trim();
+    const query = searchQuery().trim();
 
     if (isPrivateChat()) {
-      const models = privateModels();
-      if (!query) {
-        return models;
-      }
-      return models.filter(
-        (model) =>
-          model.name.toLowerCase().includes(query) ||
-          model.id.toLowerCase().includes(query),
-      );
-    }
-
-    // No search query - show curated defaults
-    if (!query) {
-      return defaultModels();
+      return filterModelsByQuery(privateModels(), query);
     }
 
     // Search filters the same live list the empty picker shows. For Seren
     // that list is the publisher's advertised catalog — the only IDs
     // `POST /publishers/seren-models/chat/completions` routes. A broader
     // discovery catalog let search surface IDs that 404 on send (#3683).
-    return defaultModels().filter(
-      (model) =>
-        model.name.toLowerCase().includes(query) ||
-        model.id.toLowerCase().includes(query),
-    );
+    return filterModelsByQuery(defaultModels(), query);
   });
 
   const currentModel = () => {
