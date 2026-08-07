@@ -3059,26 +3059,53 @@ pub struct TerminalApproval {
     pub options: Vec<TerminalApprovalOption>,
 }
 
-/// Modals that share the numbered-option shape but must never be answered by a
-/// remote peer. Granting filesystem trust is not an agent approval, and a phone
-/// tapping "Yes" would authorize a folder the user never opened.
-const NON_APPROVAL_MODAL_MARKERS: [&str; 2] = ["trust this folder", "do you trust the files"];
+/// Whether a numbered modal is asking the user to grant *filesystem trust*
+/// rather than approve an agent action. These must never be answered by a
+/// remote peer: Codex states plainly that trusting a directory lets
+/// project-local config, hooks and exec policies load, so a phone tapping "Yes"
+/// would authorize code execution in a folder the user never opened.
+///
+/// Matched on intent rather than one vendor's sentence, because the two CLIs
+/// word it differently and have both reworded it: Claude asks "Do you trust the
+/// files in this folder?" and Codex asks "Do you trust the contents of this
+/// directory?". A real approval that happens to name a trusted directory is
+/// refused too — failing closed is the safe direction for this one.
+///
+/// `haystack` is the lowercased question plus every option label.
+fn is_filesystem_trust_modal(haystack: &str) -> bool {
+    haystack.contains("trust")
+        && ["folder", "directory", "files", "contents"]
+            .iter()
+            .any(|scope| haystack.contains(scope))
+}
 
 /// Lead-ins observed on the real TUIs: Claude asks `Do you want to …?`, Codex
-/// asks `Allow Codex to run \`…\``. A bare question mark also qualifies so a
-/// reworded prompt still registers.
+/// asks `Would you like to run the following command?`. A bare question mark
+/// also qualifies so a reworded prompt still registers.
 fn is_approval_question(line: &str) -> bool {
     let lowered = line.to_lowercase();
     lowered.starts_with("do you want")
+        || lowered.starts_with("would you like")
         || lowered.starts_with("allow codex to run")
         || lowered.starts_with("allow ")
         || lowered.ends_with('?')
 }
 
-/// Parse `1. Yes` / `❯2. No` / `  3. Yes, and don't ask again`, returning the
+/// Selection cursors the CLIs draw beside the highlighted option. Claude uses
+/// `❯` (U+276F) and Codex uses `›` (U+203A) — leaving either out drops the
+/// highlighted option, which then makes the surviving options start at 2 and
+/// fails the contiguity check for the whole block.
+const OPTION_CURSOR_GLYPHS: [char; 6] = ['❯', '›', '>', '*', ' ', '\t'];
+
+/// How many rows above an option block are searched for its question. Codex
+/// puts the command echo and an `Environment:` line between the two, so the
+/// nearest non-empty row is not the question.
+const APPROVAL_QUESTION_LOOKBACK_LINES: usize = 6;
+
+/// Parse `1. Yes` / `❯2. No` / `› 3. Yes, and don't ask again`, returning the
 /// digit and its label.
 fn parse_approval_option(line: &str) -> Option<(u32, String)> {
-    let trimmed = line.trim_start_matches(['❯', '>', '*', ' ', '\t']);
+    let trimmed = line.trim_start_matches(OPTION_CURSOR_GLYPHS);
     let (digits, rest) = trimmed.split_at(trimmed.find(|c: char| !c.is_ascii_digit())?);
     let index: u32 = digits.parse().ok()?;
     if index == 0 {
@@ -3087,6 +3114,49 @@ fn parse_approval_option(line: &str) -> Option<(u32, String)> {
     let label = rest.strip_prefix('.').or_else(|| rest.strip_prefix(')'))?;
     let label = label.trim();
     (!label.is_empty()).then(|| (index, label.to_string()))
+}
+
+/// Collect the options drawn in `block`, folding wrapped label rows back into
+/// the option they belong to.
+///
+/// Codex wraps a long option label onto an indented continuation row. Treating
+/// that row as a block boundary truncated the list to a single option, so the
+/// approval was discarded. Rows before the first option are the question and
+/// surrounding context, and are skipped.
+///
+/// Returns `None` unless the options are numbered `1..=n` in order, which is
+/// what separates a real option list from a numbered diff or file listing.
+fn collect_approval_options(block: &[String]) -> Option<Vec<TerminalApprovalOption>> {
+    let mut options: Vec<TerminalApprovalOption> = Vec::new();
+    for line in block {
+        match parse_approval_option(line) {
+            Some((index, label)) => {
+                if index as usize != options.len() + 1 {
+                    return None;
+                }
+                options.push(TerminalApprovalOption {
+                    option_id: index.to_string(),
+                    label,
+                });
+            }
+            // An indented row after an option is that option's wrapped label.
+            None => {
+                let Some(last) = options.last_mut() else {
+                    continue;
+                };
+                if !line.starts_with([' ', '\t']) {
+                    return None;
+                }
+                let continuation = line.trim();
+                if continuation.is_empty() {
+                    return None;
+                }
+                last.label.push(' ');
+                last.label.push_str(continuation);
+            }
+        }
+    }
+    (options.len() >= 2).then_some(options)
 }
 
 fn approval_request_id(question: &str, options: &[TerminalApprovalOption]) -> String {
@@ -3106,50 +3176,47 @@ fn approval_request_id(question: &str, options: &[TerminalApprovalOption]) -> St
 pub(crate) fn detect_terminal_approval(lines: &[String]) -> Option<TerminalApproval> {
     let mut end = lines.len();
     while end > 0 {
-        // Find the last line that looks like an option, then walk up while the
-        // indices stay contiguous.
+        // Find the last line that looks like an option, then take the run of
+        // non-blank rows it sits in. A blank row is the boundary both TUIs draw
+        // around the block, and it keeps the walk from reaching back into the
+        // command echo above.
         let Some(last) = (0..end).rev().find(|i| parse_approval_option(&lines[*i]).is_some())
         else {
             return None;
         };
         let mut first = last;
-        while first > 0 && parse_approval_option(&lines[first - 1]).is_some() {
+        while first > 0 && !lines[first - 1].trim().is_empty() {
             first -= 1;
         }
 
-        let mut options = Vec::new();
-        let mut expected = 1;
-        for line in &lines[first..=last] {
-            let (index, label) = parse_approval_option(line)?;
-            if index != expected {
-                options.clear();
-                break;
-            }
-            expected += 1;
-            options.push(TerminalApprovalOption {
-                option_id: index.to_string(),
-                label,
-            });
-        }
-
-        if options.len() >= 2 {
-            let question = lines[..first]
+        if let Some(options) = collect_approval_options(&lines[first..=last]) {
+            // Look back from the first *option* row, not the start of the run:
+            // whether the question and the options are separated by a blank row
+            // differs between the two CLIs, so the run may already contain the
+            // question and its surrounding context.
+            let first_option = (first..=last)
+                .find(|i| parse_approval_option(&lines[*i]).is_some())
+                .unwrap_or(first);
+            // The question is not always the row directly above the options:
+            // Codex prints the command it wants to run, and an `Environment:`
+            // line, in between. Scan back a bounded number of rows for the one
+            // that actually reads as a question.
+            let question = lines[..first_option]
                 .iter()
                 .rev()
-                .find(|line| !line.trim().is_empty())
-                .map(|line| line.trim().to_string())
-                .unwrap_or_default();
-            if is_approval_question(&question) {
+                .filter(|line| !line.trim().is_empty())
+                .take(APPROVAL_QUESTION_LOOKBACK_LINES)
+                .map(|line| line.trim())
+                .find(|line| is_approval_question(line));
+            if let Some(question) = question {
+                let question = question.to_string();
                 let haystack = format!("{question} {}", options
                     .iter()
                     .map(|option| option.label.as_str())
                     .collect::<Vec<_>>()
                     .join(" "))
                 .to_lowercase();
-                if NON_APPROVAL_MODAL_MARKERS
-                    .iter()
-                    .any(|marker| haystack.contains(marker))
-                {
+                if is_filesystem_trust_modal(&haystack) {
                     return None;
                 }
                 return Some(TerminalApproval {
@@ -4325,16 +4392,42 @@ mod tests {
     #[test]
     fn detects_a_codex_exec_approval_screen() {
         // Wording taken from the shipped codex binary's own strings.
+        // Captured from codex 0.147.0 driven through a PTY and rendered by
+        // `TerminalGrid`, replacing a fixture that had been written from the
+        // binary's strings rather than a drawn screen. Three things only the
+        // real screen shows: the cursor is `›` and not `❯`, a long label wraps
+        // onto its own row, and the question is three rows above the options
+        // with the command echo in between. Each one alone dropped the
+        // approval, so no Codex prompt ever reached a phone (#3741).
         let approval = detect_terminal_approval(&screen(&[
-            "Allow Codex to run `rm -rf build`?",
-            "❯ 1. Yes",
-            "  2. Yes, and don't ask again for commands that start with `rm`",
-            "  3. No",
+            "• Running curl -sS https://example.com -o /dev/null",
+            "",
+            "  Would you like to run the following command?",
+            "",
+            "  Environment: local",
+            "",
+            "  $ curl -sS https://example.com -o /dev/null",
+            "",
+            "› 1. Yes, proceed (y)",
+            "  2. Yes, and don't ask again for commands that start with `curl -sS https://example.com -o /dev/",
+            "     null` (p)",
+            "  3. No, and tell Codex what to do differently (esc)",
+            "",
+            "  Press enter to confirm or esc",
         ]))
         .expect("a pending approval");
 
+        assert_eq!(approval.question, "Would you like to run the following command?");
         assert_eq!(approval.options.len(), 3);
+        assert_eq!(approval.options[0].option_id, "1");
+        assert_eq!(approval.options[0].label, "Yes, proceed (y)");
         assert_eq!(approval.options[1].option_id, "2");
+        assert_eq!(
+            approval.options[1].label,
+            "Yes, and don't ask again for commands that start with `curl -sS https://example.com -o /dev/ null` (p)",
+            "a wrapped label is rejoined rather than ending the option block",
+        );
+        assert_eq!(approval.options[2].label, "No, and tell Codex what to do differently (esc)");
     }
 
     #[test]
@@ -4349,6 +4442,62 @@ mod tests {
                 "Enter to confirm · Esc to cancel",
             ])),
             None
+        );
+    }
+
+    #[test]
+    fn refuses_the_real_codex_directory_trust_modal() {
+        // Captured from codex 0.147.0 through a PTY. Codex words this nothing
+        // like Claude does, so the old literal markers missed it entirely; it
+        // stayed unanswerable only because the description happened to wrap
+        // between the question and the options. Widening the question lookback
+        // removes that accident, and Codex says outright that trusting the
+        // directory loads project-local config, hooks and exec policies — so a
+        // phone must never be offered this (#3741).
+        assert_eq!(
+            detect_terminal_approval(&screen(&[
+                "> You are in /work/project",
+                "  Do you trust the contents of this directory?",
+                "  Working with untrusted contents comes with higher risk of prompt injection.",
+                "  Trusting the directory allows project-local config, hooks, and exec",
+                "  policies to load.",
+                "",
+                "› 1. Yes, continue",
+                "  2. No, quit",
+                "",
+                "  Press enter to continue",
+            ])),
+            None,
+            "granting filesystem trust is not an agent approval",
+        );
+    }
+
+    #[test]
+    fn detects_the_real_claude_write_approval_screen() {
+        // Captured from claude 2.1.224 through a PTY. Claude keeps its question
+        // directly above the options with no blank row between, the opposite of
+        // Codex's layout — both must work off one detector (#3741).
+        let approval = detect_terminal_approval(&screen(&[
+            "⏺ Write(probe.txt)",
+            "────────────────────────────────────────",
+            " Create file",
+            " probe.txt",
+            "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+            "  1 banana",
+            "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
+            "Do you want to create probe.txt?",
+            " ❯ 1. Yes",
+            "  2. Yes, allow all edits during this session (shift+tab)",
+            "   3. No",
+            "",
+            "Esc to cancel · Tab to amend",
+        ]))
+        .expect("a pending approval");
+
+        assert_eq!(approval.question, "Do you want to create probe.txt?");
+        assert_eq!(
+            approval.options.iter().map(|o| o.label.as_str()).collect::<Vec<_>>(),
+            vec!["Yes", "Yes, allow all edits during this session (shift+tab)", "No"],
         );
     }
 
@@ -6314,3 +6463,4 @@ mod tests {
         assert_eq!(diff.cols_total, 4);
     }
 }
+
