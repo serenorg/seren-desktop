@@ -7,13 +7,16 @@ import {
   createProviderSource,
   validateBridgeConfig,
 } from "./happy-bridge/provider-source.mjs";
+import { createCompositeSource } from "./happy-bridge/composite-source.mjs";
 import { createHappyLayer } from "./happy-bridge/happy-layer.mjs";
 import { createSupervisorChannel } from "./happy-bridge/supervisor-channel.mjs";
+import { createTerminalSource } from "./happy-bridge/terminal-source.mjs";
 
 let client = null;
 let input = null;
 let supervisorChannel = null;
 let happyLayer = null;
+let source = null;
 let shuttingDown = false;
 
 function startInputReader() {
@@ -67,6 +70,7 @@ async function shutdown(exitCode = 0) {
     // Keep the provider RPC socket open until Happy has unwound any in-flight
     // remote spawn; that cleanup may still need provider terminate/list calls.
     await Promise.allSettled([happyLayer?.close()]);
+    source?.close();
     await Promise.allSettled([client?.close()]);
   })();
   await Promise.race([
@@ -100,10 +104,11 @@ try {
     },
   });
   await client.connect();
-  const source = createProviderSource({
-    client,
-    config,
-    debugLog: (message) => console.error(`happy-bridge: ${message}`),
+  const debugLog = (message) => console.error(`happy-bridge: ${message}`);
+  source = createCompositeSource({
+    provider: createProviderSource({ client, config, debugLog }),
+    terminal: createTerminalSource({ supervisorChannel, debugLog }),
+    debugLog,
   });
   const sessions = await source.listSessions();
   console.error(`happy-bridge: config ok, ${sessions.length} sessions`);

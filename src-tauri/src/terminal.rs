@@ -2958,6 +2958,103 @@ pub fn terminal_list_agent_descriptors(app: AppHandle) -> Vec<TerminalAgentDescr
     read_descriptor_store(&app).agents
 }
 
+/// A running CLI-agent terminal pane, described for the Happy bridge's terminal
+/// session source.
+///
+/// Panes with no `cli_kind` are deliberately absent. A plain shell reachable
+/// from the relay is the unscoped `bash` exposure revoked in #3578, and it must
+/// not return through the terminal source.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct HappyTerminalSession {
+    /// The terminal buffer id. Stable across app restarts — `restoreAgents`
+    /// reuses it — so a Happy relay binding keyed on it survives too.
+    pub session_id: String,
+    pub agent_type: &'static str,
+    pub cwd: String,
+    pub title: String,
+    /// The CLI's own session UUID, which names its transcript on disk.
+    pub agent_session_id: Option<String>,
+    pub launch_mode: TerminalLaunchMode,
+    pub created_at: i64,
+}
+
+/// Describe every *running* CLI-agent pane. Exited panes are omitted: the
+/// bridge reports a pane that leaves this list as terminated, which both ends a
+/// live remote session and keeps a long-dead pane from being republished on
+/// every bridge start.
+pub fn happy_terminal_sessions(app: &AppHandle) -> Vec<HappyTerminalSession> {
+    let state = app.state::<TerminalState>();
+    let Ok(buffers) = state.buffers.lock() else {
+        log::warn!("[Terminal] Failed to lock buffers while listing Happy terminal sessions");
+        return Vec::new();
+    };
+    buffers
+        .values()
+        .filter_map(|process| happy_terminal_session(&process.info))
+        .collect()
+}
+
+fn happy_terminal_session(info: &TerminalBufferInfo) -> Option<HappyTerminalSession> {
+    if !matches!(info.status, TerminalStatus::Running) {
+        return None;
+    }
+    let cli_kind = info.cli_kind?;
+    let cwd = info.cwd.clone()?;
+    Some(HappyTerminalSession {
+        session_id: info.id.clone(),
+        agent_type: match cli_kind {
+            TerminalCliKind::Claude => "claude-code",
+            TerminalCliKind::Codex => "codex",
+        },
+        cwd,
+        title: info.title.clone(),
+        agent_session_id: info.session_id.clone(),
+        launch_mode: info.launch_mode,
+        created_at: info.created_at,
+    })
+}
+
+/// Resolve the on-disk transcript a CLI-agent pane is writing, so the bridge can
+/// read its conversation. `None` until the CLI has materialized the session —
+/// Claude creates its file on first activity, and Codex does not even choose a
+/// session id until then.
+///
+/// Codex resolution walks the whole rollout tree, so the bridge caches the
+/// answer and only asks again while it is still `None`.
+pub fn happy_terminal_transcript_path(app: &AppHandle, session_id: &str) -> Option<PathBuf> {
+    let (cli_kind, cwd, agent_session_id) = {
+        let state = app.state::<TerminalState>();
+        let buffers = state.buffers.lock().ok()?;
+        let info = &buffers.get(session_id)?.info;
+        (
+            info.cli_kind?,
+            info.cwd.clone()?,
+            info.session_id.clone()?,
+        )
+    };
+    // Doubles as path-injection defense: neither branch touches the filesystem
+    // with an id that is not a UUID.
+    let agent_session_id = canonical_session_uuid(&agent_session_id).ok()?;
+    match cli_kind {
+        TerminalCliKind::Claude => {
+            let root = crate::claude_memory::claude_projects_root().ok()?;
+            let path = crate::claude_memory::session_jsonl_path(
+                &root,
+                Path::new(&cwd),
+                &agent_session_id,
+            );
+            path.is_file().then_some(path)
+        }
+        TerminalCliKind::Codex => {
+            let root = codex_sessions_root()?;
+            codex_transcripts_for_session(&root, &agent_session_id)
+                .into_iter()
+                .next()
+        }
+    }
+}
+
 #[tauri::command]
 pub fn terminal_forget_agent(app: AppHandle, state: State<'_, TerminalState>, buffer_id: String) {
     mutate_descriptors(&app, &state, |agents| {
@@ -3829,6 +3926,88 @@ pub fn terminal_claude_version() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn buffer_info(
+        cli_kind: Option<TerminalCliKind>,
+        status: TerminalStatus,
+        cwd: Option<&str>,
+    ) -> TerminalBufferInfo {
+        TerminalBufferInfo {
+            id: TEST_UUID.to_string(),
+            instance_id: "instance".to_string(),
+            title: "Claude Code".to_string(),
+            cwd: cwd.map(ToOwned::to_owned),
+            command: None,
+            cli_kind,
+            launch_mode: TerminalLaunchMode::Normal,
+            session_id: Some(TEST_UUID.to_string()),
+            session_resumable: true,
+            cols: 100,
+            rows: 28,
+            status,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn happy_terminal_sessions_exclude_plain_shells() {
+        // A relay-reachable plain shell is the unscoped `bash` exposure revoked
+        // in #3578. It must not return through the terminal session source.
+        assert_eq!(
+            happy_terminal_session(&buffer_info(None, TerminalStatus::Running, Some("/tmp"))),
+            None,
+        );
+        assert!(
+            happy_terminal_session(&buffer_info(
+                Some(TerminalCliKind::Claude),
+                TerminalStatus::Running,
+                Some("/tmp"),
+            ))
+            .is_some(),
+            "a running Claude pane is exposed"
+        );
+    }
+
+    #[test]
+    fn happy_terminal_sessions_exclude_exited_and_rootless_panes() {
+        assert_eq!(
+            happy_terminal_session(&buffer_info(
+                Some(TerminalCliKind::Claude),
+                TerminalStatus::Exited,
+                Some("/tmp"),
+            )),
+            None,
+            "an exited pane leaves the list so the bridge reports it terminated"
+        );
+        assert_eq!(
+            happy_terminal_session(&buffer_info(
+                Some(TerminalCliKind::Codex),
+                TerminalStatus::Running,
+                None,
+            )),
+            None,
+            "a pane with no cwd cannot be scope-checked, so it is not exposed"
+        );
+    }
+
+    #[test]
+    fn happy_terminal_sessions_map_cli_kind_to_agent_type() {
+        let claude = happy_terminal_session(&buffer_info(
+            Some(TerminalCliKind::Claude),
+            TerminalStatus::Running,
+            Some("/tmp"),
+        ))
+        .expect("claude pane");
+        let codex = happy_terminal_session(&buffer_info(
+            Some(TerminalCliKind::Codex),
+            TerminalStatus::Running,
+            Some("/tmp"),
+        ))
+        .expect("codex pane");
+        assert_eq!(claude.agent_type, "claude-code");
+        assert_eq!(codex.agent_type, "codex");
+    }
 
     #[test]
     fn terminal_title_uses_first_command_word() {
