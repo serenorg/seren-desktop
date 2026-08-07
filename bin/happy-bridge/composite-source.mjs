@@ -25,12 +25,17 @@ export function createCompositeSource({ provider, terminal, debugLog = () => {} 
           // A terminal listing failure must not blank the provider sessions the
           // phone is already using.
           debugLog(`terminal session listing failed: ${error}`);
-          return [];
+          // Distinguished from an empty listing below: a user with no panes
+          // returns the same `[]`, and forgetting who owns what on a transient
+          // failure sends every later call for those panes to the provider.
+          return null;
         }),
       ]);
-      terminalSessionIds.clear();
-      for (const session of terminalSessions) terminalSessionIds.add(session.sessionId);
-      return [...providerSessions, ...terminalSessions];
+      if (terminalSessions) {
+        terminalSessionIds.clear();
+        for (const session of terminalSessions) terminalSessionIds.add(session.sessionId);
+      }
+      return [...providerSessions, ...(terminalSessions ?? [])];
     },
 
     subscribe(onEvent) {
