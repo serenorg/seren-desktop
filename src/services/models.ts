@@ -1,6 +1,7 @@
 // ABOUTME: Models service for fetching the searchable AI model catalog.
 // ABOUTME: Serves the live SerenModels publisher catalog — the set chat can route.
 
+import { providerLabel } from "@/lib/model-search";
 import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 
 export interface Model {
@@ -23,39 +24,8 @@ export const modelsService = {
     return models.map((model) => ({
       id: model.id,
       name: model.name,
-      provider: extractProvider(model.id),
+      provider: providerLabel(model.id),
       contextWindow: model.contextWindow,
     }));
   },
 };
-
-function extractProvider(modelId: string): string {
-  const providerMap: Record<string, string> = {
-    anthropic: "Anthropic",
-    openai: "OpenAI",
-    google: "Google",
-    "meta-llama": "Meta",
-    meta: "Meta",
-    mistralai: "Mistral AI",
-    mistral: "Mistral AI",
-    cohere: "Cohere",
-    perplexity: "Perplexity",
-    deepseek: "DeepSeek",
-    qwen: "Qwen",
-    minimax: "MiniMax",
-    moonshotai: "MoonshotAI",
-    "x-ai": "xAI",
-    "z-ai": "Z.ai",
-    microsoft: "Microsoft",
-    nvidia: "NVIDIA",
-    amazon: "Amazon",
-    inflection: "Inflection",
-  };
-
-  const providerSlug = modelId.split("/")[0]?.toLowerCase() || "";
-  return providerMap[providerSlug] || capitalize(providerSlug);
-}
-
-function capitalize(str: string): string {
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
