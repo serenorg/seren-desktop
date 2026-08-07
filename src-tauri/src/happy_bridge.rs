@@ -1302,6 +1302,7 @@ fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
             | "provider_session_archive_lookup"
             | "terminal_list_sessions"
             | "terminal_transcript_path"
+            | "terminal_submit_prompt"
             | "identity_store"
     ) {
         return Err(error_response(id, -32601, "unknown supervisor method"));
@@ -1632,6 +1633,24 @@ async fn dispatch_supervisor_request(
                     None => json!({}),
                 },
             )
+        }
+        "terminal_submit_prompt" => {
+            let session_id = required_string(&request.params, "sessionId")?;
+            let prompt = required_string(&request.params, "prompt")?;
+            // Same fail-closed scope check the listing uses. A pane that left
+            // the advertised roots stops accepting remote prompts at the same
+            // moment it stops being visible.
+            let authorized = crate::terminal::happy_terminal_sessions(app)
+                .into_iter()
+                .any(|session| {
+                    session.session_id == session_id
+                        && is_within_advertised_root(app, &session.cwd)
+                });
+            if !authorized {
+                return Err("terminal session is not in an advertised root".to_string());
+            }
+            let typed = crate::terminal::happy_terminal_submit_prompt(app, &session_id, &prompt)?;
+            Ok(json!({ "accepted": true, "prompt": typed }))
         }
         "identity_store" => {
             let identity = request

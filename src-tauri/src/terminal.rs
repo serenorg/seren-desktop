@@ -3034,6 +3034,106 @@ pub fn happy_terminal_project_roots(app: &AppHandle) -> Vec<String> {
         })
 }
 
+/// Bracketed-paste terminator. Stripped from remote text so a payload cannot
+/// close its own paste bracket and have the remainder read as keystrokes.
+const PASTE_END: &str = "\x1b[201~";
+const PASTE_START: &str = "\x1b[200~";
+
+/// Reduce remote text to something a CLI pane can only read as typing.
+///
+/// Drops the paste terminator first, then every C0 control character except
+/// `\n` and `\t` plus `DEL`. Without this a paired device could send `\x03` to
+/// interrupt the agent, or an escape sequence to drive the emulator — the
+/// unscoped-`bash` shape revoked in #3578 arriving as a prompt.
+fn sanitize_remote_prompt(text: &str) -> String {
+    text.replace(PASTE_END, "")
+        .chars()
+        .filter(|ch| !ch.is_control() || *ch == '\n' || *ch == '\t')
+        .collect()
+}
+
+/// Type a prompt into a CLI-agent pane on behalf of a paired device and submit
+/// it.
+///
+/// Bracketed paste (when the TUI has the mode on) is what keeps a multi-line
+/// prompt one prompt: the CLI takes the whole payload as literal text instead of
+/// submitting at each newline. The trailing `\r` is the submit, sent outside the
+/// bracket so it is the only key the TUI ever sees from a remote peer.
+///
+/// Plain shells are refused here as well as in the listing: a pane the bridge
+/// cannot see must also be a pane it cannot type into.
+/// Returns the text actually typed into the pane. The caller stores that rather
+/// than what it sent, so echo matching compares against one authority on what
+/// sanitization produced instead of reimplementing the rules.
+pub fn happy_terminal_submit_prompt(
+    app: &AppHandle,
+    session_id: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    let prompt = sanitize_remote_prompt(prompt);
+    if prompt.trim().is_empty() {
+        return Err("prompt is empty after sanitization".to_string());
+    }
+
+    let state = app.state::<TerminalState>();
+    let (writer, bracketed) = {
+        let buffers = state
+            .buffers
+            .lock()
+            .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        let process = buffers
+            .get(session_id)
+            .ok_or_else(|| "terminal session not found".to_string())?;
+        if process.info.cli_kind.is_none() {
+            return Err("terminal session is not a CLI agent".to_string());
+        }
+        if !matches!(process.info.status, TerminalStatus::Running) {
+            return Err("terminal session is not running".to_string());
+        }
+        let bracketed = process
+            .grid
+            .lock()
+            .map(|grid| grid.bracketed_paste)
+            .unwrap_or(false);
+        (Arc::clone(&process.writer), bracketed)
+    };
+
+    let payload = if bracketed {
+        format!("{PASTE_START}{prompt}{PASTE_END}\r")
+    } else {
+        format!("{prompt}\r")
+    };
+
+    let mut writer = writer
+        .lock()
+        .map_err(|err| format!("Terminal writer mutex poisoned: {err}"))?;
+    writer
+        .write_all(payload.as_bytes())
+        .map_err(|err| format!("Failed to write remote prompt: {err}"))?;
+    writer
+        .flush()
+        .map_err(|err| format!("Failed to flush remote prompt: {err}"))?;
+    drop(writer);
+
+    // A submitted prompt is what makes the session resumable, exactly as it is
+    // for input typed on this machine.
+    let descriptor = {
+        let mut buffers = state
+            .buffers
+            .lock()
+            .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        buffers.get_mut(session_id).and_then(|process| {
+            record_terminal_input_for_resume(process, &payload)
+                .then(|| descriptor_from_info(&process.info))
+                .flatten()
+        })
+    };
+    if let Some(descriptor) = descriptor {
+        upsert_descriptor(app, &state, descriptor);
+    }
+    Ok(prompt)
+}
+
 /// Resolve the on-disk transcript a CLI-agent pane is writing, so the bridge can
 /// read its conversation. `None` until the CLI has materialized the session —
 /// Claude creates its file on first activity, and Codex does not even choose a
@@ -3967,6 +4067,41 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    #[test]
+    fn remote_prompt_sanitization_strips_signals_and_escapes() {
+        // A raw write would let a paired device interrupt the agent or drive the
+        // emulator. Only text a user could have typed may survive.
+        assert_eq!(sanitize_remote_prompt("run tests\u{3}"), "run tests");
+        assert_eq!(
+            sanitize_remote_prompt("look\u{1b}[2Jhere"),
+            "look[2Jhere",
+            "the ESC introducing a control sequence is removed"
+        );
+        assert_eq!(sanitize_remote_prompt("a\u{7f}b"), "ab");
+        assert_eq!(sanitize_remote_prompt("submit\rnow"), "submitnow");
+    }
+
+    #[test]
+    fn remote_prompt_sanitization_cannot_escape_its_paste_bracket() {
+        // Closing the bracket early would make the remainder keystrokes again.
+        // The terminator goes first, then the interrupt it was smuggling.
+        assert_eq!(
+            sanitize_remote_prompt("hi\u{1b}[201~\u{3}rm -rf /"),
+            "hirm -rf /"
+        );
+        assert!(!sanitize_remote_prompt("hi\u{1b}[201~ping").contains(PASTE_END));
+    }
+
+    #[test]
+    fn remote_prompt_sanitization_keeps_multi_line_text() {
+        // Newlines survive because bracketed paste delivers them as text; that
+        // is what keeps a multi-line phone prompt a single prompt.
+        assert_eq!(
+            sanitize_remote_prompt("first line\nsecond line\twith tab"),
+            "first line\nsecond line\twith tab"
+        );
     }
 
     #[test]
