@@ -53,11 +53,15 @@ describe("#1735 A2 — codex spawn attaches an 'error' listener so missing binar
     // structured per-session error event the UI can show.
     const fnIdx = providersRuntime.indexOf("function attachProcessListeners(");
     expect(fnIdx).toBeGreaterThan(0);
-    const fn = providersRuntime.slice(fnIdx, fnIdx + 2000);
+    const fn = providersRuntime.slice(fnIdx, fnIdx + 3000);
     expect(fn).toMatch(/session\.process\.on\(\s*"error"/);
     // The listener must emit a provider://error so the UI surfaces a
     // recoverable per-session failure rather than the runtime dying
-    // silently from the user's POV.
-    expect(fn).toMatch(/emit\([\s\S]*?provider:\/\/error/);
+    // silently from the user's POV. Anchored to the 'error' listener so a
+    // provider://error emitted elsewhere in the function cannot satisfy it.
+    const errorListenerIdx = fn.search(/session\.process\.on\(\s*"error"/);
+    expect(fn.slice(errorListenerIdx)).toMatch(
+      /emit\([\s\S]*?provider:\/\/error/,
+    );
   });
 });

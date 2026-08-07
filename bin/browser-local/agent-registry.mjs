@@ -9,6 +9,7 @@ import {
   existsSync,
   openSync,
   readSync,
+  statSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -249,6 +250,46 @@ async function isCommandAvailable(command) {
   }
 }
 
+/**
+ * Agents whose stored credentials the upstream service has rejected.
+ *
+ * A credential file survives server-side invalidation intact — same keys, same
+ * shape, still parseable — so file existence alone reports an agent as
+ * authenticated forever while every request 401s. Recording an observed
+ * rejection is what makes the state reachable by the UI. Cleared when a
+ * credential file is rewritten (i.e. the user signed in again). #3729.
+ */
+const invalidatedAgentCredentials = new Map();
+
+export function markAgentCredentialsInvalid(agentType) {
+  invalidatedAgentCredentials.set(agentType, Date.now());
+}
+
+export function clearAgentCredentialsInvalid(agentType) {
+  invalidatedAgentCredentials.delete(agentType);
+}
+
+/**
+ * True when a rejection has been observed and no credential file has been
+ * written since. Deliberately does NOT call upstream — availability is polled
+ * often and must stay free.
+ */
+function hasObservedInvalidCredentials(agentType, paths) {
+  const invalidatedAt = invalidatedAgentCredentials.get(agentType);
+  if (invalidatedAt === undefined) return false;
+  for (const candidate of paths) {
+    try {
+      if (statSync(candidate).mtimeMs > invalidatedAt) {
+        invalidatedAgentCredentials.delete(agentType);
+        return false;
+      }
+    } catch {
+      // Missing or unreadable candidate cannot clear the flag.
+    }
+  }
+  return true;
+}
+
 function hasAnyCredentialPath(paths) {
   return paths.some((candidate) => {
     try {
@@ -295,10 +336,10 @@ function hasClaudeCredentials() {
   ]);
 }
 
-function hasCodexCredentials() {
+function codexCredentialPaths() {
   const home = os.homedir();
   const appData = process.env.APPDATA;
-  return Boolean(process.env.OPENAI_API_KEY) || hasAnyCredentialPath([
+  return [
     path.join(home, ".codex", "auth.json"),
     path.join(home, ".codex", "credentials.json"),
     ...(appData
@@ -307,7 +348,16 @@ function hasCodexCredentials() {
           path.join(appData, "OpenAI", "Codex", "auth.json"),
         ]
       : []),
-  ]);
+  ];
+}
+
+function hasCodexCredentials() {
+  if (process.env.OPENAI_API_KEY) return true;
+  const paths = codexCredentialPaths();
+  // An invalidated ChatGPT token leaves auth.json on disk and syntactically
+  // valid, so presence alone is not evidence of a usable credential. #3729.
+  if (hasObservedInvalidCredentials("codex", paths)) return false;
+  return hasAnyCredentialPath(paths);
 }
 
 function hasGrokCredentials() {
@@ -1317,3 +1367,6 @@ export { AGENT_CLI_PROVISIONING as _AGENT_CLI_PROVISIONING };
 export {
   assertAgentCliProvisioningComplete as _assertAgentCliProvisioningComplete,
 };
+// Exported so the #3729 regression can assert that an observed credential
+// rejection actually flips reported auth status, against the real filesystem.
+export { isAgentAuthenticated as _isAgentAuthenticated };

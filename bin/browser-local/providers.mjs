@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import readline from "node:readline";
 import {
   createBrowserLocalAgentRegistry,
+  markAgentCredentialsInvalid,
   resolveInstalledCodexBinary,
 } from "./agent-registry.mjs";
 import {
@@ -333,7 +334,20 @@ function isAuthError(message) {
     lower.includes("auth required") ||
     lower.includes("please run /login") ||
     lower.includes("login required") ||
-    lower.includes("not logged in")
+    lower.includes("not logged in") ||
+    // Server-side credential invalidation is the most common real Codex auth
+    // failure and none of the phrases above appear in it. Match the
+    // machine-readable code first so upstream wording changes cannot silently
+    // un-fix this, and keep the prose forms as a fallback. #3729.
+    lower.includes("token_invalidated") ||
+    lower.includes("token has been invalidated") ||
+    // A bare 401 from Codex's own API endpoints is the failure the user
+    // actually hits: the prompt cannot connect and they see only
+    // "Reconnecting... 2/5". 401 means unauthorized by definition — rate
+    // limiting is 429 — so this is always a credential problem. Found by
+    // driving the real CLI with an invalid credential; the wording above
+    // covers only the background models refresh. #3729
+    lower.includes("401 unauthorized")
   );
 }
 
@@ -1564,6 +1578,29 @@ function handleLine(emit, session, line) {
   }
 }
 
+/**
+ * Raises Codex credential invalidation exactly once per session.
+ *
+ * The upstream 401 repeats every few seconds for as long as the session lives,
+ * so this must be idempotent or it would bury the log it is trying to make
+ * useful and re-open the login flow on a loop.
+ */
+function reportCodexAuthInvalidated(emit, session, detail) {
+  if (session.authInvalidatedReported) return;
+  session.authInvalidatedReported = true;
+  markAgentCredentialsInvalid("codex");
+  emit("provider://login-required", {
+    sessionId: session.id,
+    agentType: "codex",
+    reason: detail,
+  });
+  emit("provider://error", {
+    sessionId: session.id,
+    error:
+      "Codex sign-in expired. Finish the login in the Terminal window, then send your message again.",
+  });
+}
+
 function attachProcessListeners(
   emit,
   sessions,
@@ -1576,6 +1613,14 @@ function attachProcessListeners(
     const message = String(chunk).trim();
     if (message.length > 0) {
       console.log(`${logPrefix} ${message}`);
+      // Codex reports server-side credential invalidation only here, as a log
+      // line on its own stderr — the models refresh keeps serving a cached
+      // catalog and no RPC ever fails, so nothing downstream could notice. The
+      // user was left with a thread that looked healthy and silently degraded.
+      // This is the only place the signal exists, so recovery starts here. #3729
+      if (isAuthError(message)) {
+        reportCodexAuthInvalidated(emit, session, message);
+      }
     }
   });
 
@@ -1673,6 +1718,10 @@ function attachProcessListeners(
   });
 }
 
+// Exported so the #3729 regression can drive the real stderr listener with a
+// real child process emitting the real upstream invalidation line.
+export { attachProcessListeners as _attachProcessListeners };
+
 export function createProviderHandlers({
   emit: rawEmit,
   runtimeMode = "provider-runtime",
@@ -1764,11 +1813,16 @@ export function createProviderHandlers({
       return await callback(session);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new Error(
-        isAuthError(message)
-          ? "Agent authentication required. Run the login flow and try again."
-          : message,
-      );
+      if (isAuthError(message)) {
+        // The model-list refresh is the first thing to notice an invalidated
+        // token, and it runs long before the user tries to spawn. Record it so
+        // availability stops reporting a stale `authenticated: true`. #3729.
+        markAgentCredentialsInvalid("codex");
+        throw new Error(
+          "Codex sign-in required. Finish the login, then reload the model list.",
+        );
+      }
+      throw new Error(message);
     } finally {
       tempSessions.delete(session.id);
       try {
@@ -2191,10 +2245,23 @@ export function createProviderHandlers({
       sessions.delete(sessionId);
       killChildTree(processHandle);
       await serenMcpProxy?.close();
+      const authFailed = isAuthError(message);
+      if (authFailed) {
+        // Codex is the only agent with a launchLogin() and, until now, no way
+        // to reach it: every other runtime emits this event and agent.store
+        // answers it by auto-opening the login flow. Emit before the error so
+        // the ordering matches acp-runtime.mjs. #3729.
+        markAgentCredentialsInvalid("codex");
+        emit("provider://login-required", {
+          sessionId,
+          agentType: "codex",
+          reason: message,
+        });
+      }
       emit("provider://error", {
         sessionId,
-        error: isAuthError(message)
-          ? "Agent authentication required. Run the login flow and try again."
+        error: authFailed
+          ? "Codex sign-in required. Finish the login, then start the agent again."
           : message,
       });
       throw error;
