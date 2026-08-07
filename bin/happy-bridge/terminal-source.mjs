@@ -19,6 +19,37 @@ const MAX_TRACKED_ECHOES = 16;
 const REMOTE_UNSUPPORTED =
   "This is a terminal pane on the desktop. Type into it there.";
 
+/**
+ * Approval options are numbered on screen, so their ids are digits and match
+ * none of the layer's affirmative/deny vocabularies. Classifying the label
+ * gives `selectApprovalOption` something to reason about when a phone answers
+ * with a plain approve/deny rather than naming an option.
+ */
+export function classifyApprovalOption(label) {
+  const text = String(label ?? "").toLowerCase();
+  if (/^(no|don't|do not|cancel|reject|deny)\b/.test(text)) return "reject_once";
+  if (/don't ask again|allow all|remember|this session|future|always/.test(text)) {
+    return "allow_always";
+  }
+  return "allow_once";
+}
+
+function approvalEventPayload(approval) {
+  const options = (Array.isArray(approval?.options) ? approval.options : []).map(
+    (option) => ({
+      optionId: option.optionId,
+      name: option.label,
+      kind: classifyApprovalOption(option.label),
+    }),
+  );
+  return {
+    requestId: approval.requestId,
+    toolName: "Terminal approval",
+    description: approval.question,
+    options,
+  };
+}
+
 function normalizeSession(session) {
   return {
     sessionId: session.sessionId,
@@ -193,6 +224,44 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
     });
   }
 
+  /**
+   * Approvals are drawn on screen and never written to either CLI's transcript,
+   * so they are polled from the rendered grid rather than read from the tail.
+   */
+  async function syncApproval(sessionId, entry) {
+    let approval = null;
+    try {
+      const response = await supervisorChannel.call("terminal_pending_approval", {
+        sessionId,
+      });
+      approval = response?.approval ?? null;
+    } catch (error) {
+      debugLog(`terminal approval poll failed: ${error}`);
+      return;
+    }
+
+    const requestId = approval?.requestId ?? null;
+    if (requestId === entry.approvalRequestId) return;
+
+    if (entry.approvalRequestId) {
+      // Answered on the desktop, or replaced by a different prompt. Either way
+      // the card the phone is showing is no longer actionable.
+      emit({
+        kind: "permission-resolved",
+        sessionId,
+        payload: { requestId: entry.approvalRequestId },
+      });
+    }
+    entry.approvalRequestId = requestId;
+    if (approval) {
+      emit({
+        kind: "permission-request",
+        sessionId,
+        payload: approvalEventPayload(approval),
+      });
+    }
+  }
+
   async function advance(sessionId, entry) {
     if (!entry.path) {
       entry.path = await resolveTranscriptPath(sessionId);
@@ -234,6 +303,7 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
             announced: false,
             busy: false,
             echoes: [],
+            approvalRequestId: null,
           };
           tracked.set(summary.sessionId, entry);
           // Announce first and read on the next tick. The layer resolves a
@@ -249,6 +319,7 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
         } catch (error) {
           debugLog(`terminal transcript read failed: ${error}`);
         }
+        await syncApproval(summary.sessionId, entry);
       }
       for (const [sessionId, entry] of tracked) {
         if (seen.has(sessionId)) continue;
@@ -308,7 +379,21 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
       return { accepted: true, sessionId };
     },
 
-    respondToPermission: rejectRemoteWrite,
+    async respondToPermission(sessionId, requestId, optionId) {
+      const entry = tracked.get(sessionId);
+      if (!entry) throw new Error("terminal session is no longer available");
+      // Rust re-reads the screen and refuses if the prompt changed, so a stale
+      // answer cannot land on whatever replaced it.
+      await supervisorChannel.call("terminal_respond_to_approval", {
+        sessionId,
+        requestId,
+        optionId,
+      });
+      entry.approvalRequestId = null;
+      emit({ kind: "permission-resolved", sessionId, payload: { requestId } });
+      return { ok: true };
+    },
+
     respondToDiffProposal: rejectRemoteWrite,
     spawn: rejectRemoteWrite,
 
