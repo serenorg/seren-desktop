@@ -298,6 +298,44 @@ function estimatePromptContextTokens(
   return estimateTokens(`${prompt ?? ""}\n\n${contextText}`);
 }
 
+/**
+ * A retired session must never hold an admission slot for the length of a turn.
+ * Promotion waits for the promoted session's prompt to be accepted, but caps
+ * that wait: any provider that cannot report acceptance still gets its retired
+ * child reaped promptly rather than at turn completion. #3727.
+ */
+const PROMPT_ACCEPTANCE_TIMEOUT_MS = 5_000;
+
+/** Sessions whose next prompt acceptance someone is waiting on. */
+const promptAcceptanceWaiters = new Map<string, Array<() => void>>();
+
+function notifyPromptAccepted(sessionId: string): void {
+  const waiters = promptAcceptanceWaiters.get(sessionId);
+  if (!waiters) return;
+  promptAcceptanceWaiters.delete(sessionId);
+  for (const resolve of waiters) resolve();
+}
+
+/**
+ * Resolves when `sessionId`'s in-flight prompt is accepted by the agent CLI, or
+ * after a bounded ceiling — never rejects, because the caller's job is to free
+ * capacity, not to police the turn.
+ */
+function waitForPromptAccepted(sessionId: string): Promise<void> {
+  return new Promise<void>((resolve) => {
+    let settled = false;
+    const settleOnce = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const waiters = promptAcceptanceWaiters.get(sessionId) ?? [];
+    waiters.push(settleOnce);
+    promptAcceptanceWaiters.set(sessionId, waiters);
+    setTimeout(settleOnce, PROMPT_ACCEPTANCE_TIMEOUT_MS);
+  });
+}
+
 /** Await a session ready promise with a timeout to prevent infinite hangs */
 function waitForSessionReady(sessionId: string): Promise<void> {
   // Note: this only resolves the initial ready promise set up in spawnSession.
@@ -1428,6 +1466,17 @@ function usesClaudeMemory(agentType: AgentType): boolean {
   return agentType === "claude-code" || agentType === "claude-codex";
 }
 
+/**
+ * Whether spawning this agent type consumes a local Claude admission slot.
+ *
+ * A paired thread spawns a real `claude-code` planner through the same runtime
+ * gate, so it competes for the same bounded capacity even though the frontend
+ * only ever holds the `claude-codex` wrapper. #3727.
+ */
+function agentTypeTakesClaudeSlot(agentType: AgentType): boolean {
+  return agentType === "claude-code" || agentType === "claude-codex";
+}
+
 function encodeClaudeProjectDirForPath(cwd: string): string {
   const normalized = cwd
     .replace(/\\/g, "/")
@@ -1756,6 +1805,12 @@ export interface AgentState {
   error: string | null;
   /** CLI install progress message */
   installStatus: string | null;
+  /**
+   * Set while a spawn is waiting for a local Claude admission slot. The runtime
+   * has always emitted a queued status with a position; nothing consumed it, so
+   * the user watched a spinner for 110s and then got a hard error. #3727.
+   */
+  claudeQueueNotice: string | null;
   /**
    * Most recent CLI auto-updater scan rejection (#1646). Null when no
    * rejection has been recorded this session. Set by
@@ -2199,6 +2254,18 @@ function clearSpawnFailures(conversationId: string): void {
   spawnFailureTimestamps.delete(conversationId);
 }
 
+/**
+ * Slot exhaustion is backpressure, not a defect: capacity is bounded and the
+ * spawn simply arrived while every slot was held. Treating it as a terminal
+ * error left the user with a dead-end failure and no retry, when reclaiming an
+ * idle holder would have admitted them immediately. #3727.
+ */
+function isClaudeCapacityError(message: string): boolean {
+  return message
+    .toLowerCase()
+    .includes("waiting for a local claude session slot");
+}
+
 function isRetryableClaudeInitError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -2212,17 +2279,94 @@ function isRetryableClaudeInitError(message: string): boolean {
   );
 }
 
-function getIdleClaudeSessionIds(excludeConversationId?: string): string[] {
+/**
+ * Session ids the runtime reports as holding a Claude admission slot.
+ *
+ * Returns the ids the frontend actually holds in `state.sessions` — a paired
+ * thread's inner planner is mapped back to its wrapper — so a caller can reason
+ * about capacity without inferring it from agent-type strings. Falls back to
+ * `null` if the runtime cannot be reached, so callers can keep their existing
+ * behaviour rather than reclaiming blindly. #3727.
+ */
+/**
+ * How long an unpromoted standby may hold its Claude slot. A standby exists to
+ * make the *next* submit invisible; if that submit never comes, the slot is
+ * worth more to another thread than the warm-up is to this one. #3727.
+ */
+const STANDBY_MAX_IDLE_MS = 10 * 60 * 1000;
+
+function isStandbyExpired(session: { info: { createdAt: string } }): boolean {
+  const createdAt = Date.parse(session.info.createdAt);
+  if (!Number.isFinite(createdAt)) return false;
+  return Date.now() - createdAt >= STANDBY_MAX_IDLE_MS;
+}
+
+/**
+ * Whether a warm standby can take a second Claude slot without starving every
+ * other thread.
+ *
+ * A standby is additive and unpromoted standbys are exempt from idle reclaim,
+ * so one conversation can otherwise pin two of a very small number of slots
+ * indefinitely. Requires a free slot to remain after the standby is spawned.
+ * On an unreachable runtime this returns true, preserving the previous
+ * behaviour rather than silently disabling predictive compaction. #3727.
+ */
+async function hasStandbyHeadroom(): Promise<boolean> {
+  try {
+    const capacity = await providerService.getClaudeCapacity();
+    return (
+      capacity.active.length + capacity.pending.length + 1 < capacity.limit
+    );
+  } catch (error) {
+    console.warn(
+      "[AgentStore] Claude capacity unavailable; allowing standby warm-up:",
+      error,
+    );
+    return true;
+  }
+}
+
+async function getClaudeSlotOwnerIds(): Promise<Set<string> | null> {
+  try {
+    const capacity = await providerService.getClaudeCapacity();
+    return new Set(capacity.active.map((holder) => holder.ownerSessionId));
+  } catch (error) {
+    console.warn(
+      "[AgentStore] Claude capacity unavailable; falling back to local session types:",
+      error,
+    );
+    return null;
+  }
+}
+
+function getIdleClaudeSessionIds(
+  excludeConversationId?: string,
+  slotOwnerIds?: Set<string> | null,
+): string[] {
   const activeId = state.activeSessionId;
   const navTarget = activeNavigationThreadIdGetter?.() ?? null;
   return Object.entries(state.sessions)
     .filter(([id, session]) => {
-      if (session.info.agentType !== "claude-code") return false;
+      // Prefer the runtime's account of who holds a slot. Only when it is
+      // unavailable do we fall back to the agent-type guess, which cannot see
+      // a paired thread's planner at all.
+      if (slotOwnerIds) {
+        if (!slotOwnerIds.has(id)) return false;
+      } else if (session.info.agentType !== "claude-code") {
+        return false;
+      }
       if (id === activeId) return false;
       // Warm standby sessions must NOT be reclaimed — they are the whole
       // point of predictive compaction. Killing one mid-warm-up defeats
       // the invisibility budget for the next user submit. #1631.
-      if (session.role === "standby") return false;
+      //
+      // The exemption means "not reclaimable while warming", not "immortal":
+      // a standby whose user never came back was previously held forever,
+      // pinning a slot no thread could take. Past its expiry it is an
+      // ordinary reclaim candidate. #3727.
+      if (session.role === "standby" && !isStandbyExpired(session)) {
+        return false;
+      }
       if (session.ownedByRunId) return false;
       if (
         excludeConversationId &&
@@ -2327,6 +2471,10 @@ export const agentStore = {
 
   get installStatus() {
     return state.installStatus;
+  },
+
+  get claudeQueueNotice() {
+    return state.claudeQueueNotice;
   },
 
   get cliUpdateActionRequired() {
@@ -3316,12 +3464,21 @@ export const agentStore = {
       // session is alive, the predictive path aborts silently and serving
       // stays intact. Killing serving here would catastrophically replace
       // the live session mid-turn.
+      //
+      // The gate is the source of truth for which spawns take a slot, so this
+      // runs for every Claude-backed agent type rather than the one string
+      // that happened to be checked here. A paired thread's planner is a real
+      // Claude session and must be able to make room for itself. #3727.
       if (
-        resolvedAgentType === "claude-code" &&
+        agentTypeTakesClaudeSlot(resolvedAgentType) &&
         initRetryAttempt === 0 &&
         opts?.role !== "standby"
       ) {
-        const idleSessions = getIdleClaudeSessionIds(localSessionId);
+        const slotOwnerIds = await getClaudeSlotOwnerIds();
+        const idleSessions = getIdleClaudeSessionIds(
+          localSessionId,
+          slotOwnerIds,
+        );
         for (const idleId of idleSessions) {
           console.log(
             "[AgentStore] Reclaiming idle Claude session before spawn:",
@@ -3848,11 +4005,14 @@ export const agentStore = {
             });
           }
           if (
-            resolvedAgentType === "claude-code" &&
+            agentTypeTakesClaudeSlot(resolvedAgentType) &&
             !reclaimedIdleClaude &&
             isRetryableClaudeInitError(initFailure)
           ) {
-            const idleClaude = getIdleClaudeSessionIds(localSessionId);
+            const idleClaude = getIdleClaudeSessionIds(
+              localSessionId,
+              await getClaudeSlotOwnerIds(),
+            );
             if (idleClaude.length > 0) {
               const evictedId = idleClaude[0];
               console.warn(
@@ -3910,8 +4070,14 @@ export const agentStore = {
               initRetryAttempt: initRetryAttempt + 1,
             });
           }
-          if (resolvedAgentType === "claude-code" && !reclaimedIdleClaude) {
-            const idleClaude = getIdleClaudeSessionIds(localSessionId);
+          if (
+            agentTypeTakesClaudeSlot(resolvedAgentType) &&
+            !reclaimedIdleClaude
+          ) {
+            const idleClaude = getIdleClaudeSessionIds(
+              localSessionId,
+              await getClaudeSlotOwnerIds(),
+            );
             if (idleClaude.length > 0) {
               const evictedId = idleClaude[0];
               console.warn(
@@ -3988,6 +4154,7 @@ export const agentStore = {
         if (!happyArchiveAllowsCommit()) {
           return abortHappyArchivedSpawn();
         }
+        setState("claudeQueueNotice", null);
         return info.id;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -4032,6 +4199,43 @@ export const agentStore = {
             });
         }
         tempUnsubscribe();
+        setState("claudeQueueNotice", null);
+
+        // Capacity exhaustion is not a dead end. Every slot was held when this
+        // spawn queued, but a holder may be idle and reclaimable now — the
+        // pre-spawn reclaim ran before the queue formed. Reclaim and retry once
+        // rather than handing the user a terminal error. #3727.
+        if (isClaudeCapacityError(message) && !reclaimedIdleClaude) {
+          const idleClaude = getIdleClaudeSessionIds(
+            localSessionId,
+            await getClaudeSlotOwnerIds(),
+          );
+          if (idleClaude.length > 0) {
+            const evictedId = idleClaude[0];
+            console.warn(
+              "[AgentStore] Claude slots exhausted; reclaiming idle holder and retrying:",
+              evictedId,
+            );
+            await this.terminateSession(evictedId);
+            terminatedSessionIds.delete(spawnKey);
+            setState("isLoading", false);
+            return this.spawnSession(cwd, resolvedAgentType, {
+              ...opts,
+              initRetryAttempt: 0,
+              reclaimedIdleClaude: true,
+            });
+          }
+          console.warn(
+            "[AgentStore] Claude slots exhausted and every holder is busy; surfacing capacity pressure",
+          );
+          setState(
+            "error",
+            `All ${agentDisplayName(resolvedAgentType)} sessions are busy. Finish or stop another agent thread, then try again.`,
+          );
+          setState("isLoading", false);
+          return null;
+        }
+
         setState("error", message);
         setState("isLoading", false);
         return null;
@@ -4063,6 +4267,29 @@ export const agentStore = {
       // state.sessions when this fires (the spawn promise is still
       // pending). Auto-trigger launchLogin so the user can finish
       // signing in without knowing the CLI command. (#1476)
+      // The runtime reports queue position while a spawn waits for capacity.
+      // Surface it: the session is not in state.sessions yet, so this must run
+      // ahead of the session-routing dropout below. #3727.
+      if (
+        event.type === "sessionStatus" &&
+        (event.data as { status?: string }).status === "queued"
+      ) {
+        const position = (event.data as { queuePosition?: number })
+          .queuePosition;
+        setState(
+          "claudeQueueNotice",
+          typeof position === "number" && position > 0
+            ? `Waiting for a free Claude session (position ${position}). Existing threads keep running.`
+            : "Waiting for a free Claude session. Existing threads keep running.",
+        );
+        return;
+      }
+
+      if (event.type === "promptAccepted") {
+        notifyPromptAccepted(event.data.sessionId);
+        return;
+      }
+
       if (event.type === "loginRequired") {
         const data = event.data;
         console.log(
@@ -5495,6 +5722,18 @@ export const agentStore = {
         // (#1673); concurrency is gated by `predictiveCompactInFlight` and
         // the module-level predictive-compaction mutex.
 
+        // A standby is additive: it holds a second Claude slot from warm-up
+        // until the user's next submit, which may never come. That is a fine
+        // trade when there is room and a bad one when it starves every other
+        // thread, so check real capacity first and fall back to reactive
+        // compaction rather than taking the last slot. #3727.
+        if (!(await hasStandbyHeadroom())) {
+          console.info(
+            "[AgentStore] Predictive compaction skipped — no Claude capacity headroom for a standby; falling back to reactive",
+          );
+          return { outcome: "declined_no_capacity" };
+        }
+
         // #1713 / #1829: synthetic-transcript pre-warm. When enabled, build
         // a synthetic JSONL on disk that splices the structured summary in
         // front of the parent's preserved tail and resume the standby
@@ -6132,16 +6371,33 @@ export const agentStore = {
       skipProviderKill: true,
     });
 
-    try {
-      // Dispatch on the promoted session.
-      await this.sendPrompt(prompt, context, options, standbyId);
-    } finally {
-      // Phase 2: now that dispatch has settled, reap the old child.
+    // Phase 2 must not wait for the whole turn. `sendPrompt` resolves only at
+    // turn completion, so reaping there kept a logically dead session holding
+    // one of a very small number of Claude admission slots for minutes, and a
+    // queued spawn elsewhere would time out waiting for it. Reap as soon as the
+    // promoted session's prompt is accepted — the #1686 requirement is that
+    // SIGTERM cannot race the standby's first turn, and acceptance is exactly
+    // that boundary. #3727.
+    const reapRetiredSession = async () => {
       try {
         await providerService.terminateSession(servingSessionId);
       } catch (error) {
         console.warn("[AgentStore] Deferred provider terminate failed:", error);
       }
+    };
+
+    const acceptance = waitForPromptAccepted(standbyId).then(() => {
+      void reapRetiredSession();
+    });
+
+    try {
+      // Dispatch on the promoted session.
+      await this.sendPrompt(prompt, context, options, standbyId);
+    } finally {
+      // The turn ended (or failed) — make sure the retired child is gone even
+      // if acceptance never arrived.
+      notifyPromptAccepted(standbyId);
+      await acceptance;
     }
     return true;
   },
@@ -7216,6 +7472,7 @@ export const agentStore = {
       isLoading: false,
       error: null,
       installStatus: null,
+      claudeQueueNotice: null,
       cliScanRejection: null,
       cliUpdateActionRequired: null,
       pendingPermissions: [],

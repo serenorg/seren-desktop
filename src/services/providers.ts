@@ -564,6 +564,18 @@ export interface McpDegradedEvent {
 }
 
 /**
+ * Emitted the instant the agent CLI accepts a prompt, before the turn runs.
+ *
+ * Separates "the handoff is safely done" from "the turn is finished" so a
+ * standby promotion can reap the retired child immediately instead of holding
+ * its admission slot for the length of a turn. #3727.
+ */
+export interface PromptAcceptedEvent {
+  sessionId: string;
+  agentSessionId?: string;
+}
+
+/**
  * Emitted after an agent deliberately uses an explicit OAuth connection on a
  * successful publisher call. The renderer persists it as this thread's active
  * provider account so the header and subsequent calls stay aligned.
@@ -593,6 +605,7 @@ export type AgentEvent =
   | { type: "error"; data: ErrorEvent }
   | { type: "loginRequired"; data: LoginRequiredEvent }
   | { type: "oauthAccountSelected"; data: OAuthAccountSelectedEvent }
+  | { type: "promptAccepted"; data: PromptAcceptedEvent }
   | { type: "mcpDegraded"; data: McpDegradedEvent };
 
 /**
@@ -794,6 +807,41 @@ export async function buildSyntheticTranscript(
  */
 export async function listSessions(): Promise<AgentSessionInfo[]> {
   return invokeProvider<AgentSessionInfo[]>("provider_list_sessions");
+}
+
+/** One holder of a local Claude admission slot (#3727). */
+export interface ClaudeSlotHolder {
+  /** The runtime session actually holding the slot. */
+  sessionId: string;
+  agentType: string;
+  status: string;
+  createdAt: string | null;
+  pid: number | null;
+  /**
+   * The session id the frontend holds in its own map — the paired wrapper for
+   * an inner planner, otherwise identical to `sessionId`.
+   */
+  ownerSessionId: string;
+  ownerAgentType: string;
+  pairedRole: string | null;
+}
+
+export interface ClaudeCapacity {
+  limit: number;
+  active: ClaudeSlotHolder[];
+  /** Session ids waiting for a slot, in queue order. */
+  pending: string[];
+}
+
+/**
+ * Read local Claude process capacity from the runtime's admission gate.
+ *
+ * Capacity must never be inferred from the frontend session map: a paired
+ * thread's planner is a real Claude session holding a real slot, and the
+ * frontend only ever holds the wrapper. #3727.
+ */
+export async function getClaudeCapacity(): Promise<ClaudeCapacity> {
+  return invokeProvider<ClaudeCapacity>("provider_claude_capacity");
 }
 
 /**
@@ -1134,6 +1182,7 @@ const EVENT_SUFFIXES = {
   diff: "diff",
   planUpdate: "plan-update",
   promptComplete: "prompt-complete",
+  promptAccepted: "prompt-accepted",
   permissionRequest: "permission-request",
   permissionResolved: "permission-resolved",
   diffProposal: "diff-proposal",
@@ -1322,6 +1371,12 @@ export async function subscribeToSession(
         "mcpDegraded",
       ),
     ),
+    subscribeToEvent<PromptAcceptedEvent>(
+      "promptAccepted",
+      createHandler<{ type: "promptAccepted"; data: PromptAcceptedEvent }>(
+        "promptAccepted",
+      ),
+    ),
   ]);
 }
 
@@ -1388,6 +1443,9 @@ export async function subscribeToAllEvents(
     ),
     subscribeToEvent<McpDegradedEvent>("mcpDegraded", (data) =>
       callback({ type: "mcpDegraded", data }),
+    ),
+    subscribeToEvent<PromptAcceptedEvent>("promptAccepted", (data) =>
+      callback({ type: "promptAccepted", data }),
     ),
   ]);
 }

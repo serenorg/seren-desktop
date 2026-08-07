@@ -88,6 +88,10 @@ function registerProviderHandlers() {
   registerHandler("provider_terminate", providerHandlers.terminateSession);
   registerHandler("provider_list_sessions", providerHandlers.listSessions);
   registerHandler(
+    "provider_claude_capacity",
+    providerHandlers.getClaudeCapacity,
+  );
+  registerHandler(
     "provider_set_permission_mode",
     providerHandlers.setPermissionMode,
   );

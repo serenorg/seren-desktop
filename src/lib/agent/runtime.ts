@@ -71,6 +71,7 @@ export const [state, setState] = createStore<AgentState>({
   isLoading: false,
   error: null,
   installStatus: null,
+  claudeQueueNotice: null,
   cliScanRejection: null,
   cliUpdateActionRequired: null,
   pendingPermissions: [],

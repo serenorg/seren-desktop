@@ -63,6 +63,10 @@ export class PredictiveCompactMutex {
  *   retry was in flight. Not a defect — the error event handler's
  *   graceful-cancel branch already restores UI state. Chat fallback would
  *   be wrong, since the user's intent was to stop, not to switch modes.
+ * - `declined_no_capacity`: the predictive path would have had to take the
+ *   last local Claude slot to warm a standby. A standby is a latency
+ *   optimisation, so it yields to real threads and the caller compacts
+ *   reactively instead. Not a failure. #3727.
  * - `failed_catastrophic`: unrecoverable failure (spawn failed, summary API
  *   threw after refresh, agent runtime broken). Chat fallback is correct.
  */
@@ -72,6 +76,7 @@ export type CompactionOutcome =
   | "skipped_nothing_to_compact"
   | "retry_still_too_long"
   | "cancelled"
+  | "declined_no_capacity"
   | "failed_catastrophic";
 
 /**

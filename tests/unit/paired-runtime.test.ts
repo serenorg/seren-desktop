@@ -152,9 +152,19 @@ function createHarness() {
       };
     }),
     sendPrompt: vi.fn(
-      async ({ sessionId }: { sessionId: string; prompt: string }) => {
+      async ({
+        sessionId,
+        onAccepted,
+      }: {
+        sessionId: string;
+        prompt: string;
+        onAccepted?: () => void;
+      }) => {
         const session = innerSessions.get(sessionId);
         if (!session) throw new Error(`Session not found: ${sessionId}`);
+        // Real inner runtimes report acceptance the moment the CLI takes the
+        // prompt, before any of the turn has run (#3727).
+        onAccepted?.();
         const text = session.scriptedTurnText.shift() ?? "ok";
         wrappedEmit("provider://message-chunk", { sessionId, text });
         wrappedEmit("provider://prompt-complete", {
@@ -238,6 +248,76 @@ describe("paired runtime — spawn", () => {
     expect(codexSpawn?.approvalPolicy).toBe("on-failure");
     expect(codexSpawn?.sandboxMode).toBe("workspace-write");
     expect(codexSpawn?.codexDefaultIntent).toBe("paired-executor");
+  });
+
+  /**
+   * #3727 root cause 1. A paired thread's planner is a real `claude-code`
+   * session holding a real admission slot, but `listSessions()` reports only
+   * the wrapper (`claude-codex`, pid null). Capacity accounting therefore
+   * could not see it, a paired spawn never made room for itself, and a live
+   * paired thread was never reclaimable — so a new paired thread died on
+   * "Timed out after 110000ms waiting for a local Claude session slot".
+   *
+   * The inner planner must be attributable to the wrapper the frontend holds.
+   */
+  it("attributes its inner planner to the wrapper thread for capacity accounting", async () => {
+    const info = await spawnPaired(h);
+
+    const plannerSpawn = h.inner.spawnSession.mock.calls.find(
+      (c) => c[0].agentType === "claude-code",
+    )?.[0];
+    expect(plannerSpawn).toBeDefined();
+
+    const inner = h.paired.describeInnerSessions();
+    const planner = inner.find(
+      (entry: { role: string }) => entry.role === "planner",
+    );
+
+    expect(planner).toBeDefined();
+    expect(planner.pairedSessionId).toBe(info.id);
+    // The id the frontend holds is the wrapper, never the inner planner —
+    // that mismatch is precisely what made the slot invisible.
+    expect(planner.innerSessionId).not.toBe(info.id);
+
+    const wrapperOnly = (await h.paired.listSessions()).map(
+      (s: { id: string; agentType: string }) => s.agentType,
+    );
+    expect(wrapperOnly).toEqual([PAIRED_AGENT_TYPE]);
+  });
+
+  /**
+   * #3727 root cause 2. Standby promotion held the retired session's admission
+   * slot until `sendPrompt` resolved — i.e. for the whole turn, which can run
+   * for minutes. Paired threads previously had no acceptance boundary at all
+   * ("This provider does not expose an explicit prompt acceptance boundary"),
+   * so they were stuck on the slow path. A paired turn's acceptance is its
+   * first inner prompt being taken.
+   */
+  it("reports prompt acceptance once, well before the paired turn completes", async () => {
+    const info = await spawnPaired(h);
+
+    const acceptedAt: string[] = [];
+    await h.paired.sendPrompt({
+      sessionId: info.id,
+      prompt: "ship it",
+      onAccepted: () => acceptedAt.push("accepted"),
+    });
+
+    // Exactly one acceptance for a turn that fans out across several inner
+    // turns — a second would reap the retired child twice.
+    expect(acceptedAt).toEqual(["accepted"]);
+  });
+
+  it("stops reporting an inner planner once the paired thread is torn down", async () => {
+    const info = await spawnPaired(h);
+    expect(h.paired.describeInnerSessions()).toHaveLength(2);
+
+    await h.paired.terminateSession({ sessionId: info.id });
+
+    // Both halves must be released, or capacity accounting leaks a phantom
+    // holder that no reclaim can ever free.
+    expect(h.paired.describeInnerSessions()).toEqual([]);
+    expect(h.inner.terminateSession.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it("returns a composite agentSessionId carrying both inner remote ids", async () => {

@@ -521,6 +521,74 @@ function cliVersionFallback() {
   }
 }
 
+/**
+ * Spawns `target` Claude sessions against one runtime, then prompts every live
+ * session concurrently. Reports where readiness or prompting actually breaks
+ * down, so the admission cap can be set from measurement instead of a guess.
+ *
+ * Run with the gate raised out of the way, e.g.
+ *   SEREN_CLAUDE_SESSION_LIMIT=12 node scripts/experiment-claude-concurrency.mjs --probe 8
+ */
+async function runConcurrencyProbe(target) {
+  const runtimes = [];
+  try {
+    const primary = await startRuntime(PRIMARY_PORT, "runtime-1");
+    runtimes.push(primary);
+    await checkClaude(primary);
+
+    const live = [];
+    const spawns = [];
+    for (let i = 1; i <= target; i += 1) {
+      const label = "S" + i;
+      const session = await spawnMeasured(primary, label);
+      spawns.push({
+        label,
+        status: session.status,
+        spawnToReadyMs: session.spawnToReadyMs ?? null,
+        error: session.error ?? null,
+      });
+      if (session.status !== "ready") {
+        console.log("[probe] " + label + " FAILED: " + session.error);
+        break;
+      }
+      live.push(session);
+      console.log(
+        "[probe] " +
+          label +
+          " ready spawnToReadyMs=" +
+          session.spawnToReadyMs +
+          " liveSessions=" +
+          live.length,
+      );
+    }
+
+    const promptStart = process.hrtime.bigint();
+    await Promise.all(
+      live.map((session, idx) => promptMeasured(primary, session, "S" + (idx + 1))),
+    );
+    const wallMs = Number(process.hrtime.bigint() - promptStart) / 1e6;
+
+    console.log(
+      "PROBE_JSON: " +
+        JSON.stringify({
+          generatedAt: new Date().toISOString(),
+          targetSessions: target,
+          liveSessions: live.length,
+          concurrentPromptWallMs: Math.round(wallMs),
+          spawns,
+          prompts: live.map((session, idx) => ({
+            label: "S" + (idx + 1),
+            status: session.prompt?.status ?? "unknown",
+            promptRoundTripMs: session.prompt?.promptRoundTripMs ?? null,
+            error: session.prompt?.error ?? null,
+          })),
+        }),
+    );
+  } finally {
+    await Promise.all(runtimes.map((runtime) => closeRuntime(runtime)));
+  }
+}
+
 async function main() {
   ensureSandboxSpecBin();
   if (process.argv.includes("--queue-proof")) {
@@ -533,6 +601,25 @@ async function main() {
     }
     return;
   }
+  // `--probe N` measures how many concurrent Claude sessions the machine and
+  // CLI actually tolerate, which is what the admission cap should be derived
+  // from. The A/B/C flow below only ever proves 3 and cannot justify a higher
+  // number. #3727.
+  const probeIdx = process.argv.indexOf("--probe");
+  if (probeIdx !== -1) {
+    const target = Number(process.argv[probeIdx + 1] ?? "8");
+    try {
+      await runConcurrencyProbe(target);
+    } catch (error) {
+      console.error(
+        "[probe] BLOCKER: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const runtimes = [];
   let outcome = "serialize";
   let blocker = null;
