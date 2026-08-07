@@ -25,6 +25,10 @@ import {
   startPairing,
   updateAdvertisedRoots,
 } from "@/services/happyRemote";
+import {
+  type TerminalAgentDescriptor,
+  terminalStore,
+} from "@/stores/terminal.store";
 
 const DESCRIPTION =
   "Use your phone to monitor and control agents running in Seren Desktop. Sessions are end-to-end encrypted and only reachable while this app is open.";
@@ -74,14 +78,24 @@ const StoreMark: Component<{ platform: "apple" | "google" }> = (props) => (
   </Show>
 );
 
+/**
+ * The project folders a user can share, from both places one exists: agent
+ * conversations and CLI terminal panes. A folder used only for `claude` /
+ * `codex` panes has no conversation row, so listing conversations alone offered
+ * it no checkbox and its panes could never be shared. The Rust bridge derives
+ * its advertised set from the same two sources, so nothing is advertised that
+ * is not offered here to withdraw (#3144).
+ */
 function uniqueRoots(
   rows: Awaited<ReturnType<typeof listConversations>>,
+  terminalAgents: TerminalAgentDescriptor[],
 ): string[] {
   const roots: string[] = [];
-  for (const row of rows) {
-    const root = row.project_root ?? row.agent_cwd;
+  const add = (root: string | null | undefined) => {
     if (root && !roots.includes(root)) roots.push(root);
-  }
+  };
+  for (const row of rows) add(row.project_root ?? row.agent_cwd);
+  for (const agent of terminalAgents) add(agent.cwd);
   return roots;
 }
 
@@ -122,11 +136,12 @@ export const HappyRemoteSettings: Component = () => {
 
   const loadRoots = async () => {
     try {
-      const [rows, saved] = await Promise.all([
+      const [rows, terminalAgents, saved] = await Promise.all([
         listConversations({ kind: "agent" }),
+        terminalStore.listAgentDescriptors(),
         getAdvertisedRoots(),
       ]);
-      const discovered = uniqueRoots(rows);
+      const discovered = uniqueRoots(rows, terminalAgents);
       setRoots(discovered);
       setAdvertisedRoots(
         saved === null ? [] : saved.filter((root) => discovered.includes(root)),

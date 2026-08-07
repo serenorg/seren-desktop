@@ -226,6 +226,7 @@ impl HappyBridgeManager {
                 None,
             )
             .await,
+            crate::terminal::happy_terminal_project_roots(app),
         )?;
         let advertised_roots =
             crate::commands::happy_bridge::effective_advertised_roots(app, discovered_roots);
@@ -1234,14 +1235,22 @@ fn canonical_happy_restoration_root<R: tauri::Runtime>(
 /// order they were seen. A failed lookup is reported rather than absorbed: an
 /// empty set is also what a user with no projects has, so absorbing it started a
 /// bridge that reported connected and then refused every remote spawn.
+/// `terminal_roots` are the folders holding CLI terminal panes. They are not
+/// conversations, so a folder used only for `claude` / `codex` panes had no row
+/// here and was filtered out of the consented set, leaving its panes
+/// unshareable. `HappyRemoteSettings` offers checkboxes for the same two
+/// sources, so #3144's invariant holds: nothing is advertised that the user was
+/// not shown and cannot withdraw.
 fn discovered_project_roots(
     conversations: Result<Vec<crate::commands::chat::UnifiedConversationRow>, String>,
+    terminal_roots: Vec<String>,
 ) -> Result<Vec<String>, String> {
     let conversations =
         conversations.map_err(|error| format!("Failed to read Happy project folders: {error}"))?;
     Ok(conversations
         .into_iter()
         .filter_map(|conversation| conversation.project_root.or(conversation.agent_cwd))
+        .chain(terminal_roots)
         .fold(Vec::<String>::new(), |mut roots, root| {
             if !roots.iter().any(|existing| existing == &root) {
                 roots.push(root);
@@ -2635,7 +2644,8 @@ mod tests {
         // Regression: the lookup was absorbed with `unwrap_or_default()`. On a
         // busy database the bridge started, advertised zero folders, reported
         // itself connected, and then refused every remote spawn silently.
-        let failure = discovered_project_roots(Err("database is locked".to_string()));
+        let failure =
+            discovered_project_roots(Err("database is locked".to_string()), Vec::new());
 
         assert!(
             failure.is_err_and(|error| error.contains("database is locked")),
@@ -2645,19 +2655,45 @@ mod tests {
 
     #[test]
     fn project_root_discovery_keeps_first_seen_distinct_roots() {
-        let roots = discovered_project_roots(Ok(conversations(vec![
-            conversation(Some("/workspace/alpha"), None),
-            // A conversation with no project falls back to where the agent ran.
-            conversation(None, Some("/workspace/beta")),
-            conversation(Some("/workspace/alpha"), Some("/workspace/gamma")),
-            conversation(None, None),
-        ])));
+        let roots = discovered_project_roots(
+            Ok(conversations(vec![
+                conversation(Some("/workspace/alpha"), None),
+                // A conversation with no project falls back to where the agent ran.
+                conversation(None, Some("/workspace/beta")),
+                conversation(Some("/workspace/alpha"), Some("/workspace/gamma")),
+                conversation(None, None),
+            ])),
+            Vec::new(),
+        );
 
         assert_eq!(
             roots.expect("a successful lookup yields roots"),
             vec![
                 "/workspace/alpha".to_string(),
                 "/workspace/beta".to_string()
+            ],
+        );
+    }
+
+    #[test]
+    fn project_root_discovery_offers_folders_that_only_hold_terminal_panes() {
+        // A folder used only for `claude` / `codex` panes has no conversation
+        // row. Deriving candidates from conversations alone left it with no
+        // consent checkbox, so its panes could never reach the phone.
+        let roots = discovered_project_roots(
+            Ok(conversations(vec![conversation(Some("/workspace/alpha"), None)])),
+            vec![
+                "/workspace/terminal-only".to_string(),
+                // A folder holding both must not be offered twice.
+                "/workspace/alpha".to_string(),
+            ],
+        );
+
+        assert_eq!(
+            roots.expect("a successful lookup yields roots"),
+            vec![
+                "/workspace/alpha".to_string(),
+                "/workspace/terminal-only".to_string(),
             ],
         );
     }

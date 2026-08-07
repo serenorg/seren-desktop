@@ -3015,6 +3015,25 @@ fn happy_terminal_session(info: &TerminalBufferInfo) -> Option<HappyTerminalSess
     })
 }
 
+/// The project folders the user has run CLI-agent panes in, for the Happy
+/// advertised-root candidate set.
+///
+/// Read from the persisted descriptors rather than live buffers so a folder
+/// keeps offering its consent checkbox between app runs, matching how agent
+/// conversations keep offering theirs.
+pub fn happy_terminal_project_roots(app: &AppHandle) -> Vec<String> {
+    read_descriptor_store(app)
+        .agents
+        .into_iter()
+        .filter_map(|descriptor| descriptor.cwd)
+        .fold(Vec::<String>::new(), |mut roots, root| {
+            if !roots.iter().any(|existing| existing == &root) {
+                roots.push(root);
+            }
+            roots
+        })
+}
+
 /// Resolve the on-disk transcript a CLI-agent pane is writing, so the bridge can
 /// read its conversation. `None` until the CLI has materialized the session —
 /// Claude creates its file on first activity, and Codex does not even choose a
