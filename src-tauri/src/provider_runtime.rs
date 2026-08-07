@@ -6,9 +6,11 @@ use std::borrow::Cow;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -54,6 +56,7 @@ struct ProviderRuntimeProcess {
     config: ProviderRuntimeConfig,
     spawned_at: Instant,
     restart_budget_rearmed: bool,
+    output_health: Arc<ChildOutputHealth>,
 }
 
 pub struct ProviderRuntimeState {
@@ -167,7 +170,7 @@ impl ProviderRuntimeState {
                 deadline.as_secs(),
             );
 
-            pipe_child_output(&mut child, &config.token);
+            let output_health = pipe_child_output(&mut child, &config.token);
 
             match wait_for_provider_runtime_with_deadline(&config, &mut child, *deadline).await {
                 Ok(()) => {
@@ -176,6 +179,7 @@ impl ProviderRuntimeState {
                         config: config.clone(),
                         spawned_at: Instant::now(),
                         restart_budget_rearmed: false,
+                        output_health,
                     });
                     drop(guard);
                     *self.last_config.lock().await = Some(config.clone());
@@ -657,45 +661,327 @@ fn validation_cli_home_override(
         .map(PathBuf::from)
 }
 
-fn pipe_child_output(child: &mut Child, ws_token: &str) {
-    if let Some(stdout) = child.stdout.take() {
-        let token = ws_token.to_string();
-        tauri::async_runtime::spawn(async move {
-            let mut lines = BufReader::new(stdout).lines();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => log::info!(
-                        "[ProviderRuntime stdout] {}",
-                        redact_provider_child_output(&line, &token)
-                    ),
-                    Ok(None) => break,
-                    Err(err) => {
-                        log::warn!("[ProviderRuntime stdout] Read error: {}", err);
-                        break;
-                    }
-                }
+/// Which of the child's two output pipes a reader task is draining.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChildChannel {
+    Stdout,
+    Stderr,
+}
+
+impl ChildChannel {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
+}
+
+/// Per-channel liveness counters, written by the reader task and read by the
+/// runtime monitor. A child must never be able to silence its own diagnostic
+/// channel without that showing up somewhere (#3728).
+#[derive(Debug, Default)]
+struct ChannelActivity {
+    lines: AtomicU64,
+    /// Bytes currently held in an unterminated line. A channel parked here for
+    /// a long stretch is the exact signature of the framing bug this replaced.
+    pending_bytes: AtomicU64,
+    pending_since_ms: AtomicU64,
+    truncated_lines: AtomicU64,
+    closed: AtomicBool,
+    /// EOF or I/O error, recorded once so the monitor can report it against
+    /// child liveness (which only the monitor knows).
+    close_reason: std::sync::Mutex<Option<String>>,
+    stall_reported: AtomicBool,
+}
+
+/// Shared handle to both channels' liveness, held by the runtime process record
+/// so the monitor loop can supervise the readers.
+#[derive(Debug)]
+struct ChildOutputHealth {
+    started: Instant,
+    stdout: ChannelActivity,
+    stderr: ChannelActivity,
+}
+
+impl ChildOutputHealth {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            stdout: ChannelActivity::default(),
+            stderr: ChannelActivity::default(),
+        }
+    }
+
+    fn channel(&self, channel: ChildChannel) -> &ChannelActivity {
+        match channel {
+            ChildChannel::Stdout => &self.stdout,
+            ChildChannel::Stderr => &self.stderr,
+        }
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.started.elapsed().as_millis() as u64
+    }
+}
+
+/// A single child output line is capped here. Past the cap the reader emits
+/// what it has with an explicit truncation marker and resynchronises at the
+/// next newline.
+///
+/// `BufReader::lines()` had no such cap: one newline-free write parked the
+/// reader in an ever-growing internal buffer and every following line was
+/// absorbed into that pending line and never logged — no EOF, no error, no log
+/// entry, and unbounded parent memory growth. #3728.
+const MAX_CHILD_LINE_BYTES: usize = 64 * 1024;
+
+/// Read size for draining a child pipe.
+const CHILD_READ_CHUNK_BYTES: usize = 16 * 1024;
+
+/// How long a channel may hold an unterminated line before the monitor calls it
+/// out. Real lines complete in microseconds, so this only fires on a genuinely
+/// pathological child — no false positives from a legitimately quiet channel.
+const CHILD_LINE_STALL_THRESHOLD: Duration = Duration::from_secs(60);
+
+/// Splits a byte stream into log lines with a hard per-line ceiling.
+///
+/// Holds only raw bytes between chunks, so a read boundary falling inside a
+/// multi-byte character is harmless; decoding happens once per completed line
+/// and is lossy, so one bad byte degrades a single line instead of killing the
+/// channel.
+#[derive(Debug, Default)]
+struct LineFramer {
+    pending: Vec<u8>,
+    dropped: usize,
+    dropped_reported: usize,
+    overflowed: bool,
+    truncated_lines: u64,
+}
+
+impl LineFramer {
+    /// Feeds a chunk, appending every emitted line to `out`.
+    fn push(&mut self, chunk: &[u8], out: &mut Vec<String>) {
+        let mut rest = chunk;
+        while let Some(idx) = rest.iter().position(|byte| *byte == b'\n') {
+            let (head, tail) = rest.split_at(idx);
+            self.absorb(head, out);
+            self.end_line(out);
+            rest = &tail[1..];
+        }
+        self.absorb(rest, out);
+    }
+
+    /// Flushes a trailing unterminated line at EOF.
+    fn finish(&mut self, out: &mut Vec<String>) {
+        if !self.pending.is_empty() || self.overflowed {
+            self.end_line(out);
+        }
+    }
+
+    fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Buffers up to the cap, then emits **immediately**.
+    ///
+    /// Emitting here rather than at the next newline is the whole fix: a child
+    /// that writes without ever terminating a line can no longer keep the
+    /// channel dark, because output stops depending on the child's cooperation.
+    fn absorb(&mut self, bytes: &[u8], out: &mut Vec<String>) {
+        if bytes.is_empty() {
+            return;
+        }
+        if self.overflowed {
+            self.dropped += bytes.len();
+            // Report progress while discarding, so a child that never writes
+            // another newline still cannot leave the channel silent. One line
+            // per cap's worth of dropped bytes bounds the log volume.
+            if self.dropped - self.dropped_reported >= MAX_CHILD_LINE_BYTES {
+                self.dropped_reported = self.dropped;
+                out.push(format!(
+                    "…[still discarding an oversized line: {} bytes dropped]",
+                    self.dropped
+                ));
             }
-        });
+            return;
+        }
+        let room = MAX_CHILD_LINE_BYTES - self.pending.len();
+        if bytes.len() < room {
+            self.pending.extend_from_slice(bytes);
+            return;
+        }
+        self.pending.extend_from_slice(&bytes[..room]);
+        let mut text = self.take_pending();
+        text.push_str(&format!(
+            " …[truncated at {MAX_CHILD_LINE_BYTES} bytes, resynchronising]"
+        ));
+        out.push(text);
+        self.truncated_lines += 1;
+        self.overflowed = true;
+        self.dropped = bytes.len() - room;
+    }
+
+    /// Closes the current line at a newline (or at EOF).
+    fn end_line(&mut self, out: &mut Vec<String>) {
+        if self.overflowed {
+            out.push(format!(
+                "…[dropped {} bytes before the next line break]",
+                self.dropped
+            ));
+            self.pending.clear();
+            self.dropped = 0;
+            self.dropped_reported = 0;
+            self.overflowed = false;
+            return;
+        }
+        out.push(self.take_pending());
+    }
+
+    fn take_pending(&mut self) -> String {
+        let mut text = String::from_utf8_lossy(&self.pending).into_owned();
+        // Children on Windows terminate with CRLF; keep the log free of stray CR.
+        if text.ends_with('\r') {
+            text.pop();
+        }
+        self.pending.clear();
+        text
+    }
+}
+
+fn pipe_child_output(child: &mut Child, ws_token: &str) -> Arc<ChildOutputHealth> {
+    let health = Arc::new(ChildOutputHealth::new());
+
+    if let Some(stdout) = child.stdout.take() {
+        spawn_channel_reader(
+            stdout,
+            ChildChannel::Stdout,
+            ws_token.to_string(),
+            Arc::clone(&health),
+        );
     }
 
     if let Some(stderr) = child.stderr.take() {
-        let token = ws_token.to_string();
-        tauri::async_runtime::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            loop {
-                match lines.next_line().await {
-                    Ok(Some(line)) => log::warn!(
-                        "[ProviderRuntime stderr] {}",
-                        redact_provider_child_output(&line, &token)
-                    ),
-                    Ok(None) => break,
-                    Err(err) => {
-                        log::warn!("[ProviderRuntime stderr] Read error: {}", err);
-                        break;
-                    }
-                }
+        spawn_channel_reader(
+            stderr,
+            ChildChannel::Stderr,
+            ws_token.to_string(),
+            Arc::clone(&health),
+        );
+    }
+
+    health
+}
+
+fn spawn_channel_reader<R>(
+    source: R,
+    channel: ChildChannel,
+    ws_token: String,
+    health: Arc<ChildOutputHealth>,
+) where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
+    tauri::async_runtime::spawn(async move {
+        let close_reason = drain_child_channel(source, channel, &health, |line| {
+            let redacted = redact_provider_child_output(&line, &ws_token);
+            match channel {
+                ChildChannel::Stdout => log::info!("[ProviderRuntime stdout] {}", redacted),
+                ChildChannel::Stderr => log::warn!("[ProviderRuntime stderr] {}", redacted),
             }
-        });
+        })
+        .await;
+
+        let activity = health.channel(channel);
+        activity.closed.store(true, Ordering::Relaxed);
+        if let Ok(mut slot) = activity.close_reason.lock() {
+            *slot = Some(close_reason.clone());
+        }
+        // The reader task cannot tell whether the child is still alive; the
+        // monitor can, and escalates from there. Log loudly either way — a
+        // channel ending is never routine while the app is running.
+        log::error!(
+            "[ProviderRuntime {}] Output capture ended ({}) after {} lines",
+            channel.label(),
+            close_reason,
+            activity.lines.load(Ordering::Relaxed),
+        );
+    });
+}
+
+/// Drains one child pipe through the framer, handing every completed line to
+/// `on_line`, and returns why the channel ended.
+///
+/// Only genuine EOF or a real I/O error can end this loop — an oversized or
+/// non-UTF-8 line degrades a single line and the channel keeps delivering.
+async fn drain_child_channel<R, F>(
+    source: R,
+    channel: ChildChannel,
+    health: &ChildOutputHealth,
+    mut on_line: F,
+) -> String
+where
+    R: tokio::io::AsyncRead + Unpin,
+    F: FnMut(String),
+{
+    let mut reader = BufReader::new(source);
+    let mut framer = LineFramer::default();
+    let mut chunk = vec![0_u8; CHILD_READ_CHUNK_BYTES];
+    let mut lines: Vec<String> = Vec::new();
+
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => {
+                framer.finish(&mut lines);
+                emit_channel_lines(channel, &mut lines, &framer, health, &mut on_line);
+                record_pending(health, channel, 0);
+                return "EOF".to_string();
+            }
+            Ok(read) => {
+                framer.push(&chunk[..read], &mut lines);
+                emit_channel_lines(channel, &mut lines, &framer, health, &mut on_line);
+                record_pending(health, channel, framer.pending_len());
+            }
+            Err(err) => {
+                framer.finish(&mut lines);
+                emit_channel_lines(channel, &mut lines, &framer, health, &mut on_line);
+                record_pending(health, channel, 0);
+                return format!("read error: {err}");
+            }
+        }
+    }
+}
+
+fn emit_channel_lines<F>(
+    channel: ChildChannel,
+    lines: &mut Vec<String>,
+    framer: &LineFramer,
+    health: &ChildOutputHealth,
+    on_line: &mut F,
+) where
+    F: FnMut(String),
+{
+    if lines.is_empty() {
+        return;
+    }
+    let activity = health.channel(channel);
+    activity
+        .truncated_lines
+        .store(framer.truncated_lines, Ordering::Relaxed);
+    for line in lines.drain(..) {
+        on_line(line);
+        activity.lines.fetch_add(1, Ordering::Relaxed);
+    }
+    activity.stall_reported.store(false, Ordering::Relaxed);
+}
+
+fn record_pending(health: &ChildOutputHealth, channel: ChildChannel, pending: usize) {
+    let activity = health.channel(channel);
+    let previous = activity.pending_bytes.swap(pending as u64, Ordering::Relaxed);
+    if pending == 0 {
+        activity.pending_since_ms.store(0, Ordering::Relaxed);
+    } else if previous == 0 {
+        activity
+            .pending_since_ms
+            .store(health.now_ms(), Ordering::Relaxed);
     }
 }
 
@@ -706,10 +992,56 @@ fn pipe_child_output(child: &mut Child, ws_token: &str) {
 /// environment, so the parent-env scan below cannot see it, yet the runtime or
 /// one of its children could still echo it into a logged line.
 fn redact_provider_child_output(line: &str, ws_token: &str) -> String {
-    let runtime_secret_values = std::env::vars()
-        .filter_map(|(name, value)| is_seren_secret_env_name(&name).then_some(value))
-        .chain(std::iter::once(ws_token.to_string()));
-    redact_provider_child_output_with_values(line, runtime_secret_values)
+    let runtime_secret_values = provider_secret_env_snapshot();
+    redact_provider_child_output_with_values(
+        line,
+        runtime_secret_values
+            .iter()
+            .cloned()
+            .chain(std::iter::once(ws_token.to_string())),
+    )
+}
+
+/// Rebuilding the secret list per line meant a full environment walk on the
+/// hottest path in this file, and `std::env::vars()` panics on non-UTF-8
+/// environment content — a panic there killed the capture task silently, which
+/// is indistinguishable from the framing bug it sat next to (#3728).
+///
+/// Snapshot instead, and refresh on a short interval so a newly issued session
+/// lease is still covered without paying for a scan per line. `vars_os` with
+/// lossy conversion cannot panic.
+fn provider_secret_env_snapshot() -> Arc<Vec<String>> {
+    const SNAPSHOT_MAX_AGE: Duration = Duration::from_secs(1);
+    static SNAPSHOT: OnceLock<std::sync::RwLock<(Instant, Arc<Vec<String>>)>> = OnceLock::new();
+
+    let cell = SNAPSHOT.get_or_init(|| {
+        std::sync::RwLock::new((
+            Instant::now()
+                .checked_sub(SNAPSHOT_MAX_AGE)
+                .unwrap_or_else(Instant::now),
+            Arc::new(Vec::new()),
+        ))
+    });
+
+    if let Ok(guard) = cell.read()
+        && guard.0.elapsed() < SNAPSHOT_MAX_AGE
+    {
+        return Arc::clone(&guard.1);
+    }
+
+    let values: Vec<String> = std::env::vars_os()
+        .filter_map(|(name, value)| {
+            is_seren_secret_env_name(&name.to_string_lossy())
+                .then(|| value.to_string_lossy().into_owned())
+        })
+        .filter(|value| !value.is_empty())
+        .collect();
+    let snapshot = Arc::new(values);
+
+    if let Ok(mut guard) = cell.write() {
+        *guard = (Instant::now(), Arc::clone(&snapshot));
+    }
+    snapshot
 }
 
 fn is_seren_secret_env_name(name: &str) -> bool {
@@ -822,6 +1154,57 @@ fn should_rearm(spawned_at: Instant, already_rearmed: bool, now: Instant) -> boo
     !already_rearmed && now.duration_since(spawned_at) >= RESTART_REARM_UPTIME
 }
 
+/// Reports output-capture anomalies on a runtime child that is still alive.
+///
+/// A live child with a dead or parked diagnostic channel looks perfectly
+/// healthy to `try_wait` and to the HTTP health endpoint, which is how #3728
+/// stayed invisible for 8.5 hours. Each anomaly is reported once per channel
+/// until that channel produces again, so a persistent condition cannot spam
+/// the log it is trying to protect.
+fn collect_output_channel_anomalies(health: &ChildOutputHealth) -> Vec<String> {
+    let mut anomalies = Vec::new();
+    for channel in [ChildChannel::Stdout, ChildChannel::Stderr] {
+        let activity = health.channel(channel);
+        if activity.stall_reported.load(Ordering::Relaxed) {
+            continue;
+        }
+
+        if activity.closed.load(Ordering::Relaxed) {
+            let reason = activity
+                .close_reason
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            activity.stall_reported.store(true, Ordering::Relaxed);
+            anomalies.push(format!(
+                "{} capture ended ({}) while the runtime child is still alive; \
+                 diagnostics from this channel are being lost",
+                channel.label(),
+                reason,
+            ));
+            continue;
+        }
+
+        let pending = activity.pending_bytes.load(Ordering::Relaxed);
+        if pending == 0 {
+            continue;
+        }
+        let since = activity.pending_since_ms.load(Ordering::Relaxed);
+        let held = health.now_ms().saturating_sub(since);
+        if Duration::from_millis(held) >= CHILD_LINE_STALL_THRESHOLD {
+            activity.stall_reported.store(true, Ordering::Relaxed);
+            anomalies.push(format!(
+                "{} has held {} bytes of an unterminated line for {}s",
+                channel.label(),
+                pending,
+                held / 1000,
+            ));
+        }
+    }
+    anomalies
+}
+
 /// Watches for provider runtime process death and attempts bounded auto-restart.
 fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -829,6 +1212,7 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
             tokio::time::sleep(Duration::from_secs(5)).await;
 
             let state = app.state::<ProviderRuntimeState>();
+            let mut output_anomalies: Vec<String> = Vec::new();
             let (exited, should_rearm_budget) = {
                 let mut guard = state.process.lock().await;
                 match guard.as_mut() {
@@ -836,6 +1220,8 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                     Some(proc) => match proc.child.try_wait() {
                         Ok(None) => {
                             // Still running.
+                            output_anomalies =
+                                collect_output_channel_anomalies(&proc.output_health);
                             let rearm = should_rearm(
                                 proc.spawned_at,
                                 proc.restart_budget_rearmed,
@@ -858,6 +1244,15 @@ fn spawn_process_monitor(app: AppHandle) -> tokio::task::JoinHandle<()> {
                     },
                 }
             };
+
+            for anomaly in &output_anomalies {
+                log::error!("[ProviderRuntime] {}", anomaly);
+                crate::support::report_runtime_error(
+                    &app,
+                    "provider_runtime.output_channel_lost",
+                    anomaly,
+                );
+            }
 
             if should_rearm_budget {
                 log::info!(
@@ -1122,6 +1517,7 @@ pub async fn provider_force_kill_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::AsyncBufReadExt;
     use tokio::process::Command as TokioCommand;
 
     #[test]
@@ -1360,6 +1756,7 @@ mod tests {
             config: dummy_config(),
             spawned_at: Instant::now(),
             restart_budget_rearmed: false,
+            output_health: Arc::new(ChildOutputHealth::new()),
         });
 
         // Hold the process lock as the monitor loop would, releasing it while
@@ -1415,6 +1812,7 @@ mod tests {
             config: dummy_config(),
             spawned_at: Instant::now(),
             restart_budget_rearmed: false,
+            output_health: Arc::new(ChildOutputHealth::new()),
         });
 
         state.kill_sync();
@@ -1708,6 +2106,278 @@ mod tests {
                 .join("embedded-runtime")
                 .join("provider-runtime")
                 .join("provider-runtime.mjs")
+        );
+    }
+
+    // ========================================================================
+    // #3728 — child output capture
+    // ========================================================================
+
+    /// Drains a real child's stderr through the production reader and returns
+    /// every line it delivered. The child, the pipe and the framing are all
+    /// real; only the log sink is swapped for a collector so the test can
+    /// assert on what would have been logged.
+    async fn capture_child_stderr(script: &str) -> (Vec<String>, String, Arc<ChildOutputHealth>) {
+        let mut child = test_shell_command(script)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn output-capture child");
+        let stderr = child.stderr.take().expect("child stderr pipe");
+        let health = Arc::new(ChildOutputHealth::new());
+
+        let mut captured: Vec<String> = Vec::new();
+        let reason = drain_child_channel(stderr, ChildChannel::Stderr, &health, |line| {
+            captured.push(line)
+        })
+        .await;
+
+        let _ = child.wait().await;
+        (captured, reason, health)
+    }
+
+    #[cfg(windows)]
+    fn oversized_stderr_script(blob_bytes: usize) -> String {
+        format!(
+            "[Console]::Error.Write('x' * {blob_bytes}); \
+             [Console]::Error.Write(\"`nafter-blob-1`nafter-blob-2`n\")"
+        )
+    }
+
+    #[cfg(not(windows))]
+    fn oversized_stderr_script(blob_bytes: usize) -> String {
+        format!(
+            "{{ head -c {blob_bytes} /dev/zero | tr '\\0' 'x'; \
+             printf '\\nafter-blob-1\\nafter-blob-2\\n'; }} 1>&2"
+        )
+    }
+
+    /// The regression test for #3728.
+    ///
+    /// A newline-free blob larger than the cap used to park `next_line()`
+    /// forever: the blob never arrived and every following line was absorbed
+    /// into the same pending line and lost. Assert the blob is delivered
+    /// truncated AND that the ordinary lines after it still arrive.
+    #[tokio::test]
+    async fn oversized_line_is_truncated_and_the_channel_keeps_delivering() {
+        let overflow = 4096;
+        let script = oversized_stderr_script(MAX_CHILD_LINE_BYTES + overflow);
+
+        let (lines, reason, health) = capture_child_stderr(&script).await;
+
+        assert_eq!(reason, "EOF", "channel must end on genuine EOF only");
+        assert!(
+            lines.iter().all(|line| line.len() < MAX_CHILD_LINE_BYTES * 2),
+            "no delivered line may grow unbounded, got lengths {:?}",
+            lines.iter().map(|l| l.len()).collect::<Vec<_>>(),
+        );
+        assert!(
+            lines[0].ends_with("bytes, resynchronising]"),
+            "the oversized line must be capped and marked: {:?}",
+            &lines[0][lines[0].len().saturating_sub(60)..],
+        );
+        assert_eq!(
+            lines[1],
+            format!("…[dropped {overflow} bytes before the next line break]"),
+        );
+        // The whole point of #3728: everything after the oversized line still
+        // reaches the log. On `main` these two lines never arrived at all.
+        assert_eq!(lines[2], "after-blob-1");
+        assert_eq!(lines[3], "after-blob-2");
+        assert_eq!(
+            health.stderr.truncated_lines.load(Ordering::Relaxed),
+            1,
+            "the truncation must be counted for the monitor",
+        );
+    }
+
+    /// The 8.5-hour outage in #3728, reproduced in about a second.
+    ///
+    /// A child that writes without ever terminating a line used to park
+    /// `next_line()` indefinitely: nothing reached the log, no EOF, no error,
+    /// and the parent's buffer grew without bound. Capture must now deliver
+    /// output from a child that never emits a newline at all.
+    #[tokio::test]
+    async fn a_child_that_never_writes_a_newline_cannot_silence_the_channel() {
+        let blob_bytes = MAX_CHILD_LINE_BYTES * 3;
+        #[cfg(windows)]
+        let script = format!(
+            "[Console]::Error.Write('x' * {blob_bytes}); Start-Sleep -Milliseconds 200"
+        );
+        #[cfg(not(windows))]
+        let script = format!(
+            "{{ head -c {blob_bytes} /dev/zero | tr '\\0' 'x'; sleep 0.2; }} 1>&2"
+        );
+
+        let (lines, _reason, health) = capture_child_stderr(&script).await;
+
+        let lengths: Vec<usize> = lines.iter().map(|line| line.len()).collect();
+
+        // On `main` this child produced NOTHING: `next_line()` never saw a
+        // newline, so the reader sat parked exactly as it did for 8.5 hours.
+        assert!(
+            lines.len() >= 3,
+            "a newline-free child must not be able to silence its own channel, got {lengths:?}",
+        );
+        assert_eq!(
+            health.stderr.truncated_lines.load(Ordering::Relaxed),
+            1,
+            "the oversized line is counted once, not once per chunk",
+        );
+        assert!(
+            lines[0].len() <= MAX_CHILD_LINE_BYTES + 128,
+            "the first line must be capped, got {lengths:?}",
+        );
+        // Everything after the cap is a short progress/summary line, so the
+        // channel stays demonstrably alive without flooding the log.
+        assert!(
+            lines[1..].iter().all(|line| line.len() < 256),
+            "discard reporting must stay bounded, got {lengths:?}",
+        );
+        assert!(
+            lines[1].contains("still discarding"),
+            "the discard phase must report progress: {:?}",
+            lines[1],
+        );
+        assert!(
+            lines.last().is_some_and(|line| line.contains("dropped")),
+            "EOF must summarise what was discarded: {:?}",
+            lines.last(),
+        );
+    }
+
+    /// A non-UTF-8 byte must degrade one line, not destroy the channel.
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn invalid_utf8_degrades_one_line_and_the_channel_survives() {
+        let script = "{ printf 'bad-\\xff-byte\\n'; printf 'still-alive\\n'; } 1>&2";
+        let (lines, reason, _health) = capture_child_stderr(script).await;
+
+        assert_eq!(reason, "EOF");
+        assert_eq!(lines.len(), 2, "got {lines:?}");
+        assert!(
+            lines[0].starts_with("bad-") && lines[0].ends_with("-byte"),
+            "invalid byte must be replaced, not fatal: {:?}",
+            lines[0],
+        );
+        assert_eq!(lines[1], "still-alive");
+    }
+
+    /// A line split across read boundaries — including mid-multibyte-character
+    /// — must reassemble intact, because framing buffers bytes and decodes
+    /// only at the newline.
+    #[test]
+    fn framer_reassembles_lines_split_mid_multibyte_character() {
+        let mut framer = LineFramer::default();
+        let mut out = Vec::new();
+        let text = "héllo wörld";
+        let bytes = text.as_bytes();
+
+        for byte in bytes {
+            framer.push(&[*byte], &mut out);
+        }
+        assert!(out.is_empty(), "no newline yet, nothing may be emitted");
+        framer.push(b"\n", &mut out);
+
+        assert_eq!(out, vec![text.to_string()]);
+    }
+
+    /// Overflow must resynchronise exactly at the next newline: the capped
+    /// line reports what it dropped, and the line after it is intact.
+    #[test]
+    fn framer_resyncs_at_the_next_newline_after_overflow() {
+        let mut framer = LineFramer::default();
+        let mut out = Vec::new();
+        let overflow = 100_usize;
+
+        framer.push(&vec![b'a'; MAX_CHILD_LINE_BYTES + overflow], &mut out);
+        assert_eq!(
+            out.len(),
+            1,
+            "the cap must flush immediately, not wait for a newline",
+        );
+        assert!(out[0].starts_with(&"a".repeat(64)));
+        assert!(out[0].ends_with("bytes, resynchronising]"));
+
+        framer.push(b"\nnext-line\n", &mut out);
+
+        assert_eq!(out.len(), 3);
+        assert_eq!(
+            out[1],
+            format!("…[dropped {overflow} bytes before the next line break]"),
+        );
+        assert_eq!(out[2], "next-line");
+        assert_eq!(framer.truncated_lines, 1);
+    }
+
+    /// CRLF children must not leave a stray CR in the log line.
+    #[test]
+    fn framer_strips_carriage_returns() {
+        let mut framer = LineFramer::default();
+        let mut out = Vec::new();
+        framer.push(b"windows-line\r\nunix-line\n", &mut out);
+        assert_eq!(out, vec!["windows-line", "unix-line"]);
+    }
+
+    /// A channel that ended while the child is still alive is the #3728
+    /// signature and must be reported — once, not every monitor tick.
+    #[test]
+    fn monitor_reports_a_closed_channel_on_a_live_child_exactly_once() {
+        let health = ChildOutputHealth::new();
+        health.stderr.closed.store(true, Ordering::Relaxed);
+        *health.stderr.close_reason.lock().unwrap() = Some("EOF".to_string());
+
+        let first = collect_output_channel_anomalies(&health);
+        assert_eq!(first.len(), 1, "got {first:?}");
+        assert!(first[0].contains("stderr capture ended (EOF)"));
+
+        assert!(
+            collect_output_channel_anomalies(&health).is_empty(),
+            "a persistent condition must not spam the log it protects",
+        );
+    }
+
+    /// A channel parked mid-line past the threshold is reported; a channel
+    /// that is merely quiet is not.
+    #[test]
+    fn monitor_reports_a_parked_line_but_not_a_quiet_channel() {
+        let health = ChildOutputHealth::new();
+        assert!(
+            collect_output_channel_anomalies(&health).is_empty(),
+            "a quiet channel with nothing pending is normal",
+        );
+
+        health.stdout.pending_bytes.store(4096, Ordering::Relaxed);
+        health.stdout.pending_since_ms.store(0, Ordering::Relaxed);
+        assert!(
+            collect_output_channel_anomalies(&health).is_empty(),
+            "a partial line younger than the threshold is normal",
+        );
+
+        // Backdate the partial line past the stall threshold.
+        let stalled = ChildOutputHealth {
+            started: Instant::now() - (CHILD_LINE_STALL_THRESHOLD + Duration::from_secs(5)),
+            stdout: ChannelActivity::default(),
+            stderr: ChannelActivity::default(),
+        };
+        stalled.stdout.pending_bytes.store(4096, Ordering::Relaxed);
+        stalled.stdout.pending_since_ms.store(0, Ordering::Relaxed);
+
+        let anomalies = collect_output_channel_anomalies(&stalled);
+        assert_eq!(anomalies.len(), 1, "got {anomalies:?}");
+        assert!(anomalies[0].contains("stdout has held 4096 bytes"));
+    }
+
+    /// Part 4 must not change what gets scrubbed. `vars_os` cannot panic on
+    /// non-UTF-8 environment content the way `vars()` did.
+    #[test]
+    fn secret_env_snapshot_is_reusable_and_non_panicking() {
+        let first = provider_secret_env_snapshot();
+        let second = provider_secret_env_snapshot();
+        assert_eq!(first, second);
+        assert!(
+            first.iter().all(|value| !value.is_empty()),
+            "empty values would blanket-replace every character in a line",
         );
     }
 }
