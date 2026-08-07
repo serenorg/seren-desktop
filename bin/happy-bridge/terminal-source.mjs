@@ -10,9 +10,14 @@ const POLL_INTERVAL_MS = 2_000;
 // thread readable on a phone, not the whole file.
 const HISTORY_EVENT_LIMIT = 40;
 const READ_CHUNK_BYTES = 1024 * 1024;
+// A prompt sent from a phone comes back in the CLI transcript with nothing to
+// say where it came from. Remember it just long enough to recognize the echo;
+// past this the CLI clearly never wrote it and the entry is dead weight.
+const ECHO_TTL_MS = 5 * 60_000;
+const MAX_TRACKED_ECHOES = 16;
 
 const REMOTE_UNSUPPORTED =
-  "This is a terminal pane on the desktop. Type into it there — remote prompting is not available yet.";
+  "This is a terminal pane on the desktop. Type into it there.";
 
 function normalizeSession(session) {
   return {
@@ -35,8 +40,31 @@ function normalizeSession(session) {
  * @param {{supervisorChannel: {call: (method: string, params?: object) => Promise<any>}, debugLog?: (message: string) => void}} options
  */
 export function createTerminalSource({ supervisorChannel, debugLog = () => {} }) {
-  /** @type {Map<string, {summary: object, path: string|null, offset: number, pending: string, replayed: boolean, announced: boolean, busy: boolean}>} */
+  /** @type {Map<string, {summary: object, path: string|null, offset: number, pending: string, replayed: boolean, announced: boolean, busy: boolean, echoes: Array<{text: string, at: number}>}>} */
   const tracked = new Map();
+
+  /**
+   * Happy renders the peer's own prompt the moment it is sent, and the CLI then
+   * writes that same text into its transcript. Marking the echo as remote lets
+   * `translate.mjs` drop it, which is the difference between one bubble and two.
+   */
+  function claimEcho(entry, text) {
+    const now = Date.now();
+    let claimed = false;
+    entry.echoes = entry.echoes.filter((echo) => {
+      if (now - echo.at > ECHO_TTL_MS) return false;
+      if (claimed || echo.text !== text) return true;
+      claimed = true;
+      return false;
+    });
+    return claimed;
+  }
+
+  function rememberEcho(entry, text) {
+    entry.echoes.push({ text, at: Date.now() });
+    // A prompt whose echo never arrives must not pin the list forever.
+    if (entry.echoes.length > MAX_TRACKED_ECHOES) entry.echoes.shift();
+  }
   let listeners = new Set();
   let pollTimer = null;
   let polling = false;
@@ -122,8 +150,25 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
         if (!includeStatus) continue;
       }
       if (event.kind === "turn-complete") entry.busy = false;
-      emit({ kind: event.kind, sessionId, payload: { ...event.payload } });
+      emitTranscriptEvent(sessionId, entry, event);
     }
+  }
+
+  /**
+   * Every transcript-derived event leaves through here so echo suppression can
+   * never be bypassed by a second emit path — including history replay, which a
+   * prompt sent moments earlier can still land in.
+   */
+  function emitTranscriptEvent(sessionId, entry, event, extra = {}) {
+    const origin =
+      event.kind === "user-message" && claimEcho(entry, event.payload?.text)
+        ? { origin: "remote" }
+        : {};
+    emit({
+      kind: event.kind,
+      sessionId,
+      payload: { ...event.payload, ...extra, ...origin },
+    });
   }
 
   async function replayHistory(sessionId, entry) {
@@ -138,7 +183,7 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
       if (event.kind === "turn-complete") entry.busy = false;
     }
     for (const event of trimmed) {
-      emit({ kind: event.kind, sessionId, payload: { ...event.payload, replay: true } });
+      emitTranscriptEvent(sessionId, entry, event, { replay: true });
     }
     entry.replayed = true;
     emit({
@@ -188,6 +233,7 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
             replayed: false,
             announced: false,
             busy: false,
+            echoes: [],
           };
           tracked.set(summary.sessionId, entry);
           // Announce first and read on the next tick. The layer resolves a
@@ -245,7 +291,23 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
       return () => listeners.delete(onEvent);
     },
 
-    sendPrompt: rejectRemoteWrite,
+    async sendPrompt(sessionId, text) {
+      const entry = tracked.get(sessionId);
+      if (!entry) throw new Error("terminal session is no longer available");
+      const response = await supervisorChannel.call("terminal_submit_prompt", {
+        sessionId,
+        prompt: text,
+      });
+      if (response?.accepted !== true) {
+        throw new Error("The terminal pane did not accept the prompt.");
+      }
+      // Track what was actually typed, not what was sent: sanitization may have
+      // changed it, and the transcript will echo the typed form.
+      rememberEcho(entry, typeof response.prompt === "string" ? response.prompt : text);
+      entry.busy = true;
+      return { accepted: true, sessionId };
+    },
+
     respondToPermission: rejectRemoteWrite,
     respondToDiffProposal: rejectRemoteWrite,
     spawn: rejectRemoteWrite,
