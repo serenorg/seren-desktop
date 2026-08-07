@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     env,
+    hash::{DefaultHasher, Hash, Hasher},
     io::{Read, Write},
     path::{Path, PathBuf},
     sync::{
@@ -3034,6 +3035,135 @@ pub fn happy_terminal_project_roots(app: &AppHandle) -> Vec<String> {
         })
 }
 
+/// One selectable answer on a CLI approval prompt. `option_id` is the digit the
+/// TUI expects, so answering never needs cursor movement.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalApprovalOption {
+    pub option_id: String,
+    pub label: String,
+}
+
+/// An approval the CLI is currently drawing and waiting on.
+///
+/// These are rendered UI, never written to either CLI's transcript, which is
+/// why the transcript reader cannot see them and this has to read the screen.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalApproval {
+    /// Digest of the rendered question and options. Answering re-derives it and
+    /// refuses on a mismatch, so a stale reply cannot land on the prompt that
+    /// replaced the one the phone saw.
+    pub request_id: String,
+    pub question: String,
+    pub options: Vec<TerminalApprovalOption>,
+}
+
+/// Modals that share the numbered-option shape but must never be answered by a
+/// remote peer. Granting filesystem trust is not an agent approval, and a phone
+/// tapping "Yes" would authorize a folder the user never opened.
+const NON_APPROVAL_MODAL_MARKERS: [&str; 2] = ["trust this folder", "do you trust the files"];
+
+/// Lead-ins observed on the real TUIs: Claude asks `Do you want to …?`, Codex
+/// asks `Allow Codex to run \`…\``. A bare question mark also qualifies so a
+/// reworded prompt still registers.
+fn is_approval_question(line: &str) -> bool {
+    let lowered = line.to_lowercase();
+    lowered.starts_with("do you want")
+        || lowered.starts_with("allow codex to run")
+        || lowered.starts_with("allow ")
+        || lowered.ends_with('?')
+}
+
+/// Parse `1. Yes` / `❯2. No` / `  3. Yes, and don't ask again`, returning the
+/// digit and its label.
+fn parse_approval_option(line: &str) -> Option<(u32, String)> {
+    let trimmed = line.trim_start_matches(['❯', '>', '*', ' ', '\t']);
+    let (digits, rest) = trimmed.split_at(trimmed.find(|c: char| !c.is_ascii_digit())?);
+    let index: u32 = digits.parse().ok()?;
+    if index == 0 {
+        return None;
+    }
+    let label = rest.strip_prefix('.').or_else(|| rest.strip_prefix(')'))?;
+    let label = label.trim();
+    (!label.is_empty()).then(|| (index, label.to_string()))
+}
+
+fn approval_request_id(question: &str, options: &[TerminalApprovalOption]) -> String {
+    let mut hasher = DefaultHasher::new();
+    question.hash(&mut hasher);
+    for option in options {
+        option.option_id.hash(&mut hasher);
+        option.label.hash(&mut hasher);
+    }
+    format!("terminal-approval-{:016x}", hasher.finish())
+}
+
+/// Recover the approval a pane is waiting on from its rendered screen.
+///
+/// Reads bottom-up because a TUI draws the live prompt last, so the newest
+/// numbered block is the one awaiting an answer.
+pub(crate) fn detect_terminal_approval(lines: &[String]) -> Option<TerminalApproval> {
+    let mut end = lines.len();
+    while end > 0 {
+        // Find the last line that looks like an option, then walk up while the
+        // indices stay contiguous.
+        let Some(last) = (0..end).rev().find(|i| parse_approval_option(&lines[*i]).is_some())
+        else {
+            return None;
+        };
+        let mut first = last;
+        while first > 0 && parse_approval_option(&lines[first - 1]).is_some() {
+            first -= 1;
+        }
+
+        let mut options = Vec::new();
+        let mut expected = 1;
+        for line in &lines[first..=last] {
+            let (index, label) = parse_approval_option(line)?;
+            if index != expected {
+                options.clear();
+                break;
+            }
+            expected += 1;
+            options.push(TerminalApprovalOption {
+                option_id: index.to_string(),
+                label,
+            });
+        }
+
+        if options.len() >= 2 {
+            let question = lines[..first]
+                .iter()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .map(|line| line.trim().to_string())
+                .unwrap_or_default();
+            if is_approval_question(&question) {
+                let haystack = format!("{question} {}", options
+                    .iter()
+                    .map(|option| option.label.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "))
+                .to_lowercase();
+                if NON_APPROVAL_MODAL_MARKERS
+                    .iter()
+                    .any(|marker| haystack.contains(marker))
+                {
+                    return None;
+                }
+                return Some(TerminalApproval {
+                    request_id: approval_request_id(&question, &options),
+                    question,
+                    options,
+                });
+            }
+        }
+        end = first;
+    }
+    None
+}
+
 /// Bracketed-paste terminator. Stripped from remote text so a payload cannot
 /// close its own paste bracket and have the remainder read as keystrokes.
 const PASTE_END: &str = "\x1b[201~";
@@ -3062,6 +3192,94 @@ fn sanitize_remote_prompt(text: &str) -> String {
 ///
 /// Plain shells are refused here as well as in the listing: a pane the bridge
 /// cannot see must also be a pane it cannot type into.
+/// Render a pane's visible screen as plain text lines, one per grid row.
+fn rendered_grid_lines(grid: &TerminalGrid) -> Vec<String> {
+    let snapshot = grid.snapshot();
+    let cols = snapshot.cols as usize;
+    if cols == 0 {
+        return Vec::new();
+    }
+    snapshot
+        .cells
+        .chunks(cols)
+        .map(|row| {
+            row.iter()
+                .map(|cell| char::from_u32(cell.ch).filter(|ch| *ch != '\0').unwrap_or(' '))
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
+        .collect()
+}
+
+/// The approval a CLI pane is currently waiting on, if any.
+pub fn happy_terminal_pending_approval(
+    app: &AppHandle,
+    session_id: &str,
+) -> Option<TerminalApproval> {
+    let state = app.state::<TerminalState>();
+    let grid = {
+        let buffers = state.buffers.lock().ok()?;
+        let process = buffers.get(session_id)?;
+        process.info.cli_kind?;
+        if !matches!(process.info.status, TerminalStatus::Running) {
+            return None;
+        }
+        Arc::clone(&process.grid)
+    };
+    let lines = grid.lock().ok().map(|grid| rendered_grid_lines(&grid))?;
+    detect_terminal_approval(&lines)
+}
+
+/// Answer a pending approval on behalf of a paired device.
+///
+/// The screen is re-read here rather than trusted from when the phone was told
+/// about it: between the two, the desktop user may have answered, the CLI may
+/// have moved on, or a different prompt may now occupy the same rows. Requiring
+/// the same `request_id` — a digest of the rendered prompt — means a stale reply
+/// is refused instead of landing on whatever replaced it.
+pub fn happy_terminal_respond_to_approval(
+    app: &AppHandle,
+    session_id: &str,
+    request_id: &str,
+    option_id: &str,
+) -> Result<(), String> {
+    let approval = happy_terminal_pending_approval(app, session_id)
+        .ok_or_else(|| "no approval is pending on this terminal".to_string())?;
+    if approval.request_id != request_id {
+        return Err("the approval prompt changed before the answer arrived".to_string());
+    }
+    let option = approval
+        .options
+        .iter()
+        .find(|option| option.option_id == option_id)
+        .ok_or_else(|| "approval option was not offered".to_string())?;
+
+    let state = app.state::<TerminalState>();
+    let writer = {
+        let buffers = state
+            .buffers
+            .lock()
+            .map_err(|err| format!("Terminal state mutex poisoned: {err}"))?;
+        let process = buffers
+            .get(session_id)
+            .ok_or_else(|| "terminal session not found".to_string())?;
+        Arc::clone(&process.writer)
+    };
+    // Only the digit. Never arbitrary bytes, and never a newline the TUI could
+    // read as a second answer.
+    let mut writer = writer
+        .lock()
+        .map_err(|err| format!("Terminal writer mutex poisoned: {err}"))?;
+    writer
+        .write_all(option.option_id.as_bytes())
+        .map_err(|err| format!("Failed to answer approval: {err}"))?;
+    writer
+        .flush()
+        .map_err(|err| format!("Failed to flush approval answer: {err}"))?;
+    Ok(())
+}
+
 /// Returns the text actually typed into the pane. The caller stores that rather
 /// than what it sent, so echo matching compares against one authority on what
 /// sanitization produced instead of reimplementing the rules.
@@ -4067,6 +4285,103 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    fn screen(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|line| line.to_string()).collect()
+    }
+
+    #[test]
+    fn detects_a_real_claude_approval_screen() {
+        // Captured from claude 2.1.224 driven through a PTY.
+        let approval = detect_terminal_approval(&screen(&[
+            " Create file",
+            "approval-test.txt",
+            "  1 banana",
+            "",
+            " Do you want to create approval-test.txt?",
+            "❯1. Yes",
+            "   2. Yes, allow all edits during this session (shift+tab)",
+            "  3. No",
+            "",
+            "Esc to cancel · Tab to amend",
+        ]))
+        .expect("a pending approval");
+
+        assert_eq!(approval.question, "Do you want to create approval-test.txt?");
+        assert_eq!(
+            approval.options,
+            vec![
+                TerminalApprovalOption { option_id: "1".into(), label: "Yes".into() },
+                TerminalApprovalOption {
+                    option_id: "2".into(),
+                    label: "Yes, allow all edits during this session (shift+tab)".into(),
+                },
+                TerminalApprovalOption { option_id: "3".into(), label: "No".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn detects_a_codex_exec_approval_screen() {
+        // Wording taken from the shipped codex binary's own strings.
+        let approval = detect_terminal_approval(&screen(&[
+            "Allow Codex to run `rm -rf build`?",
+            "❯ 1. Yes",
+            "  2. Yes, and don't ask again for commands that start with `rm`",
+            "  3. No",
+        ]))
+        .expect("a pending approval");
+
+        assert_eq!(approval.options.len(), 3);
+        assert_eq!(approval.options[1].option_id, "2");
+    }
+
+    #[test]
+    fn refuses_to_treat_the_folder_trust_modal_as_an_approval() {
+        // Same numbered shape, but answering it from a phone would grant
+        // filesystem trust to a folder the user never opened.
+        assert_eq!(
+            detect_terminal_approval(&screen(&[
+                "Quick safety check: Is this a project you created or one you trust?",
+                "❯1. Yes, I trust this folder",
+                "  2. No, exit",
+                "Enter to confirm · Esc to cancel",
+            ])),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_screens_with_no_pending_prompt() {
+        assert_eq!(detect_terminal_approval(&screen(&[])), None);
+        assert_eq!(
+            detect_terminal_approval(&screen(&[
+                "Ran 1 shell command",
+                "  1 banana",
+                "hello-from-approval",
+            ])),
+            None,
+            "a numbered diff line is not an option list"
+        );
+    }
+
+    #[test]
+    fn request_id_changes_when_the_prompt_changes() {
+        // The id is what stops a late answer landing on a different prompt.
+        let first = detect_terminal_approval(&screen(&[
+            "Do you want to create a.txt?",
+            "❯1. Yes",
+            "  2. No",
+        ]))
+        .expect("first");
+        let second = detect_terminal_approval(&screen(&[
+            "Do you want to create b.txt?",
+            "❯1. Yes",
+            "  2. No",
+        ]))
+        .expect("second");
+        assert_ne!(first.request_id, second.request_id);
     }
 
     #[test]

@@ -1190,6 +1190,18 @@ fn is_within_advertised_root<R: tauri::Runtime>(app: &AppHandle<R>, cwd: &str) -
         .any(|root| candidate.starts_with(&root))
 }
 
+/// A terminal pane is reachable only while it is a live CLI pane inside a
+/// folder the user still shares. Re-checked on every supervisor call rather
+/// than once at listing time, so revoking a folder revokes reads, prompts, and
+/// approval answers at the same moment.
+fn terminal_session_is_authorized(app: &AppHandle, session_id: &str) -> bool {
+    crate::terminal::happy_terminal_sessions(app)
+        .into_iter()
+        .any(|session| {
+            session.session_id == session_id && is_within_advertised_root(app, &session.cwd)
+        })
+}
+
 /// Serialize an already-canonical path in the same form Node's `realpath`
 /// returns. Windows' Rust canonicalizer uses verbatim paths (`\\?\C:\...` or
 /// `\\?\UNC\...`), while Node returns ordinary DOS/UNC paths. This conversion
@@ -1303,6 +1315,8 @@ fn parse_supervisor_line(line: &str) -> Result<SupervisorRequest, Value> {
             | "terminal_list_sessions"
             | "terminal_transcript_path"
             | "terminal_submit_prompt"
+            | "terminal_pending_approval"
+            | "terminal_respond_to_approval"
             | "identity_store"
     ) {
         return Err(error_response(id, -32601, "unknown supervisor method"));
@@ -1614,13 +1628,7 @@ async fn dispatch_supervisor_request(
             let session_id = required_string(&request.params, "sessionId")?;
             // A pane that left the advertised roots stops yielding a transcript
             // as well as a listing, so revoking a folder also stops the reads.
-            let authorized = crate::terminal::happy_terminal_sessions(app)
-                .into_iter()
-                .any(|session| {
-                    session.session_id == session_id
-                        && is_within_advertised_root(app, &session.cwd)
-                });
-            if !authorized {
+            if !terminal_session_is_authorized(app, &session_id) {
                 return Err("terminal session is not in an advertised root".to_string());
             }
             // Built by joining the home directory, never canonicalized, so it
@@ -1640,17 +1648,38 @@ async fn dispatch_supervisor_request(
             // Same fail-closed scope check the listing uses. A pane that left
             // the advertised roots stops accepting remote prompts at the same
             // moment it stops being visible.
-            let authorized = crate::terminal::happy_terminal_sessions(app)
-                .into_iter()
-                .any(|session| {
-                    session.session_id == session_id
-                        && is_within_advertised_root(app, &session.cwd)
-                });
-            if !authorized {
+            if !terminal_session_is_authorized(app, &session_id) {
                 return Err("terminal session is not in an advertised root".to_string());
             }
             let typed = crate::terminal::happy_terminal_submit_prompt(app, &session_id, &prompt)?;
             Ok(json!({ "accepted": true, "prompt": typed }))
+        }
+        "terminal_pending_approval" => {
+            let session_id = required_string(&request.params, "sessionId")?;
+            if !terminal_session_is_authorized(app, &session_id) {
+                return Err("terminal session is not in an advertised root".to_string());
+            }
+            Ok(
+                match crate::terminal::happy_terminal_pending_approval(app, &session_id) {
+                    Some(approval) => json!({ "approval": approval }),
+                    None => json!({}),
+                },
+            )
+        }
+        "terminal_respond_to_approval" => {
+            let session_id = required_string(&request.params, "sessionId")?;
+            let request_id = required_string(&request.params, "requestId")?;
+            let option_id = required_string(&request.params, "optionId")?;
+            if !terminal_session_is_authorized(app, &session_id) {
+                return Err("terminal session is not in an advertised root".to_string());
+            }
+            crate::terminal::happy_terminal_respond_to_approval(
+                app,
+                &session_id,
+                &request_id,
+                &option_id,
+            )?;
+            Ok(json!({ "ok": true }))
         }
         "identity_store" => {
             let identity = request
