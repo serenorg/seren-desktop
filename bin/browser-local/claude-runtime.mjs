@@ -760,12 +760,34 @@ function buildSessionStatus(session, status = session.status) {
   };
 }
 
+/**
+ * Concurrent local Claude sessions the admission gate will admit.
+ *
+ * Measured, not guessed (#3727). `scripts/experiment-claude-concurrency.mjs
+ * --probe 8` on macOS 26.5 / arm64 with Claude Code 2.1.224 spawned 8
+ * concurrent sessions to ready and prompted all 8 concurrently with zero
+ * failures; spawn-to-ready degraded only 343ms → 427ms across the run. The CLI
+ * tolerates far more than the previous default of 3.
+ *
+ * The observed ceiling in real usage is lower than the machine ceiling: the
+ * local desktop DB shows at most 5 Claude-slot-consuming threads active in any
+ * 5-minute window, and ≥4 in 0.34% of windows. 6 covers every observed window
+ * with headroom while staying well inside the measured-safe range.
+ *
+ * Caveat worth respecting before raising this further: the probe measures
+ * spawn plus a trivial prompt, not sustained large-context turns with heavy
+ * tool use, which cost far more memory per session.
+ */
+const DEFAULT_CLAUDE_SESSION_LIMIT = 6;
+
 function resolveClaudeSessionLimit() {
   const configured = Number.parseInt(
     process.env.SEREN_CLAUDE_SESSION_LIMIT ?? "",
     10,
   );
-  return Number.isFinite(configured) && configured > 0 ? configured : 3;
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_CLAUDE_SESSION_LIMIT;
 }
 
 function normalizeModelRecords(result) {
@@ -2804,12 +2826,27 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     onQueued(sessionId, position) {
       const metadata = admissionMetadata.get(sessionId);
       if (!metadata) return;
+      // Name the slot holders whenever a queue forms. Without this the log
+      // records that a spawn waited but never which sessions it waited on,
+      // which is exactly the evidence #3727 needed and did not have.
+      const holders = admissionGate
+        .activeIds()
+        .map((heldBy) => {
+          const held = sessions.get(heldBy);
+          return `${heldBy}(${held?.status ?? "unknown"},${held?.agentType ?? "?"})`;
+        })
+        .join(" ");
       console.log(
         claudeLogPrefix +
           " session queued sessionId=" +
           sessionId +
           " position=" +
-          position,
+          position +
+          " limit=" +
+          admissionGate.limit +
+          " holders=[" +
+          holders +
+          "]",
       );
       emit("provider://session-status", {
         ...buildSessionStatus(
@@ -3355,6 +3392,13 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
         session_id: session.agentSessionId,
       });
       onAccepted?.();
+      // The turn is now the CLI's problem. Anything waiting only for the
+      // handoff — a standby promotion holding the retired session's admission
+      // slot — can stop waiting here instead of at turn completion. #3727.
+      emit("provider://prompt-accepted", {
+        sessionId,
+        agentSessionId: session.agentSessionId,
+      });
     } catch (error) {
       const promptWasActive = session.currentPrompt !== null;
       rejectCurrentPrompt(
@@ -3451,6 +3495,27 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
       agentSessionId: session.agentSessionId,
     });
     admissionGate.release(sessionId);
+  }
+
+  // Reports Claude process capacity straight from the admission gate. The
+  // frontend used to infer this from its own session map, which cannot see a
+  // paired thread's inner planner or a queued spawn at all (#3727).
+  function getCapacity() {
+    const activeIds = admissionGate.activeIds();
+    return {
+      limit: admissionGate.limit,
+      active: activeIds.map((sessionId) => {
+        const session = sessions.get(sessionId);
+        return {
+          sessionId,
+          agentType: session?.agentType ?? "claude-code",
+          status: session?.status ?? "unknown",
+          createdAt: session?.createdAt ?? null,
+          pid: session?.process?.pid ?? null,
+        };
+      }),
+      pending: admissionGate.pendingIds(),
+    };
   }
 
   async function listSessions() {
@@ -3767,6 +3832,7 @@ export function createClaudeRuntime({ emit, runtimeMode = "provider-runtime" }) 
     hasSession(sessionId) {
       return sessions.has(sessionId);
     },
+    getCapacity,
     spawnSession,
     sendPrompt,
     cancelPrompt,

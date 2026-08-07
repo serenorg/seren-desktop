@@ -2127,6 +2127,12 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       </Show>
 
       {/* Error Display */}
+      <Show when={agentStore.claudeQueueNotice}>
+        <div class="mx-4 mb-2 px-3 py-2 border rounded-md text-sm bg-warning/10 border-warning/40 text-warning">
+          {agentStore.claudeQueueNotice}
+        </div>
+      </Show>
+
       <Show when={sessionError()}>
         <div
           class={`mx-4 mb-2 px-3 py-2 border rounded-md text-sm ${

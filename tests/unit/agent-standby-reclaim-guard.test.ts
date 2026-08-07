@@ -20,8 +20,20 @@ describe("#1631 — Claude idle-reclaim bypass for standby sessions", () => {
   it("getIdleClaudeSessionIds skips role === 'standby' sessions", () => {
     const idx = agentStoreSource.indexOf("function getIdleClaudeSessionIds");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 1000);
+    const body = agentStoreSource.slice(idx, idx + 2500);
     expect(body).toContain('session.role === "standby"');
+  });
+
+  // #3727 narrowed the #1631 exemption from "immortal" to "not reclaimable
+  // while warming": an unpromoted standby that was never used cannot pin a
+  // Claude slot forever. Expiry must remain the ONLY way past the guard.
+  it("exempts a standby only until its idle expiry", () => {
+    const idx = agentStoreSource.indexOf("function getIdleClaudeSessionIds");
+    const body = agentStoreSource.slice(idx, idx + 2500);
+    expect(body).toMatch(
+      /session\.role === "standby" && !isStandbyExpired\(session\)/,
+    );
+    expect(agentStoreSource).toMatch(/const STANDBY_MAX_IDLE_MS = /);
   });
 
   it("spawnSession opts exposes role: 'serving' | 'standby'", () => {

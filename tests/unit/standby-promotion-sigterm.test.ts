@@ -82,22 +82,56 @@ describe("#1686 — promoteStandbyAndDispatch defers the provider kill past disp
     );
   });
 
-  it("invokes providerService.terminateSession AFTER sendPrompt, inside a finally block", () => {
+  /**
+   * #1686's requirement is that SIGTERM to the retired child cannot race the
+   * standby's first turn. It originally encoded that as "kill inside the
+   * finally after sendPrompt" — but sendPrompt resolves only at TURN
+   * COMPLETION, so the retired session kept a Claude admission slot for the
+   * whole turn and starved other threads (#3727).
+   *
+   * The kill now fires at prompt ACCEPTANCE, which is the real boundary
+   * #1686 was reaching for: strictly after the handoff, and no longer tied to
+   * how long the turn runs. The `finally` remains as the backstop so the child
+   * is always reaped even if acceptance never arrives.
+   */
+  it("never kills the retired child before dispatch, and always reaps it by turn end", () => {
+    const preDispatchTerminateIdx = promoteBody.indexOf(
+      "this.terminateSession(servingSessionId",
+    );
+    const acceptanceIdx = promoteBody.indexOf(
+      "waitForPromptAccepted(standbyId)",
+    );
     const sendPromptIdx = promoteBody.indexOf(
       "this.sendPrompt(prompt, context, options, standbyId)",
     );
     const finallyIdx = promoteBody.indexOf("finally", sendPromptIdx);
-    const providerKillIdx = promoteBody.indexOf(
-      "providerService.terminateSession(servingSessionId)",
-      finallyIdx,
-    );
+
     expect(sendPromptIdx, "sendPrompt call must exist").toBeGreaterThan(0);
+    expect(
+      acceptanceIdx,
+      "the provider kill must be gated on prompt acceptance",
+    ).toBeGreaterThan(preDispatchTerminateIdx);
+
+    // The only provider-IPC kill of the retired session is the one the
+    // acceptance gate triggers — never an unguarded call before dispatch.
+    expect(promoteBody).toMatch(
+      /waitForPromptAccepted\(standbyId\)[\s\S]*?reapRetiredSession\(\)/,
+    );
+    expect(promoteBody).toMatch(
+      /const reapRetiredSession[\s\S]*?providerService\.terminateSession\(servingSessionId\)/,
+    );
+
+    // Backstop: turn completion (or failure) must still guarantee the reap.
     expect(finallyIdx, "finally block must follow sendPrompt").toBeGreaterThan(
       sendPromptIdx,
     );
+    const backstopIdx = promoteBody.indexOf(
+      "notifyPromptAccepted(standbyId)",
+      finallyIdx,
+    );
     expect(
-      providerKillIdx,
-      "deferred providerService.terminateSession must live inside the finally",
+      backstopIdx,
+      "the finally must force the reap even if acceptance never arrived",
     ).toBeGreaterThan(finallyIdx);
   });
 });

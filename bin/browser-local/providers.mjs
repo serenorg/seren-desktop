@@ -2351,10 +2351,9 @@ export function createProviderHandlers({
   }
 
   function submitPrompt(params) {
-    if (
-      pairedRuntime.hasSession(params?.sessionId) ||
-      lmStudioRuntime.hasSession(params?.sessionId)
-    ) {
+    // Paired sessions report acceptance from their first inner turn (#3727),
+    // so only LM Studio is left without an acceptance boundary.
+    if (lmStudioRuntime.hasSession(params?.sessionId)) {
       return Promise.reject(
         new Error(
           "This provider does not expose an explicit prompt acceptance boundary.",
@@ -2497,6 +2496,35 @@ export function createProviderHandlers({
       ...(await lmStudioRuntime.listSessions()),
       ...(await pairedRuntime.listSessions()),
     ];
+  }
+
+  // Single source of truth for Claude process capacity. Every slot holder is
+  // reported with the thread that owns it, so a caller never has to infer
+  // capacity from agent-type strings in its own session map — the split-brain
+  // that let a paired thread consume a slot invisibly (#3727).
+  async function getClaudeCapacity() {
+    const capacity = claudeRuntime.getCapacity();
+    const innerOwners = new Map(
+      pairedRuntime
+        .describeInnerSessions()
+        .map((entry) => [entry.innerSessionId, entry]),
+    );
+
+    return {
+      limit: capacity.limit,
+      active: capacity.active.map((holder) => {
+        const owner = innerOwners.get(holder.sessionId);
+        return {
+          ...holder,
+          // The id the frontend actually holds in state.sessions: the paired
+          // wrapper for an inner planner, otherwise the session itself.
+          ownerSessionId: owner?.pairedSessionId ?? holder.sessionId,
+          ownerAgentType: owner ? PAIRED_AGENT_TYPE : holder.agentType,
+          pairedRole: owner?.role ?? null,
+        };
+      }),
+      pending: capacity.pending,
+    };
   }
 
   async function setPermissionMode({ sessionId, mode }) {
@@ -2940,6 +2968,7 @@ export function createProviderHandlers({
     cancelPrompt,
     terminateSession,
     listSessions,
+    getClaudeCapacity,
     setPermissionMode,
     setOAuthRouting,
     respondToPermission,

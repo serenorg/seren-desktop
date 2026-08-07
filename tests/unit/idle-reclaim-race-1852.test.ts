@@ -40,7 +40,7 @@ describe("#1852 — Fix 2: idle-reclaim honours navigation intent", () => {
   it("getIdleClaudeSessionIds excludes sessions whose conversationId matches the navigation target", () => {
     const idx = agentStoreSource.indexOf("function getIdleClaudeSessionIds");
     expect(idx).toBeGreaterThan(0);
-    const body = agentStoreSource.slice(idx, idx + 1500);
+    const body = agentStoreSource.slice(idx, idx + 3000);
     expect(body).toContain("activeNavigationThreadIdGetter");
     expect(body).toMatch(/session\.conversationId\s*===\s*navTarget/);
   });

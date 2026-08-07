@@ -122,5 +122,15 @@ export function createAdmissionGate({ limit, onQueued, acquireTimeoutMs } = {}) 
     activeCount() {
       return active.size;
     },
+    limit: normalizedLimit,
+    // The gate is the only correct account of who holds a slot. Anything that
+    // needs to reason about capacity must read it from here rather than infer
+    // it from a session list somewhere else (#3727).
+    activeIds() {
+      return Array.from(active);
+    },
+    pendingIds() {
+      return pending.map((request) => request.sessionId);
+    },
   };
 }

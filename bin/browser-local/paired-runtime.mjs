@@ -1202,6 +1202,7 @@ export function createPairedRuntime({ emit, inner }) {
         sessionId: roleState.innerSessionId,
         prompt,
         context,
+        onAccepted: () => paired.notifyAccepted?.(),
       });
     } finally {
       const filter = roleState.sentinelFilter;
@@ -1225,7 +1226,7 @@ export function createPairedRuntime({ emit, inner }) {
     return roleState.turnText;
   }
 
-  async function sendPrompt({ sessionId, prompt, context }) {
+  async function sendPrompt({ sessionId, prompt, context, onAccepted }) {
     const paired = requirePaired(sessionId);
     if (paired.currentPrompt) {
       throw new Error("Another prompt is already active for this session.");
@@ -1233,6 +1234,20 @@ export function createPairedRuntime({ emit, inner }) {
 
     paired.cancelRequested = false;
     paired.currentPrompt = {};
+    // A paired turn is a pipeline of inner turns, so its acceptance boundary
+    // is the first inner prompt the CLI accepts. Exposing it lets a caller
+    // stop waiting for the whole turn — a standby promotion no longer has to
+    // hold the retired session's admission slot until the turn ends. #3727.
+    let acceptanceNotified = false;
+    paired.notifyAccepted = () => {
+      if (acceptanceNotified) return;
+      acceptanceNotified = true;
+      try {
+        onAccepted?.();
+      } catch {
+        // Acceptance telemetry must never fail the turn.
+      }
+    };
     // The whole pipeline is one turn from the frontend's perspective. The
     // composer's Send gate reads info.status, so every status frame emitted
     // during a phase must carry "prompting" — a mid-turn "ready" re-enables
@@ -1644,6 +1659,19 @@ export function createPairedRuntime({ emit, inner }) {
   return {
     hasSession(sessionId) {
       return pairedSessions.has(sessionId);
+    },
+    // A paired thread's planner is a real Claude session holding a real
+    // admission slot, but only this map knows which wrapper thread owns it.
+    // Capacity accounting needs that attribution to reclaim the right thread
+    // and to tear down both halves rather than orphaning the executor (#3727).
+    describeInnerSessions() {
+      return Array.from(innerToPaired.entries()).map(
+        ([innerSessionId, owner]) => ({
+          innerSessionId,
+          pairedSessionId: owner.pairedId,
+          role: owner.role,
+        }),
+      );
     },
     interceptEmit,
     spawnSession,
