@@ -87,6 +87,43 @@ describe("composite session source", () => {
     expect(terminal.spawn).not.toHaveBeenCalled();
   });
 
+  it("keeps terminal ownership when a later listing fails", async () => {
+    // A failed listing used to be absorbed into `[]`, which is also what a user
+    // with no panes returns. Forgetting ownership sent every later call for a
+    // live pane to the provider, and an idle pane emits no event to restore it.
+    const provider = stubSource([{ sessionId: "provider-1" }]);
+    const terminal = stubSource([{ sessionId: "terminal-1" }]);
+    const source = createCompositeSource({ provider, terminal });
+    await source.listSessions();
+
+    terminal.listSessions.mockRejectedValueOnce(
+      new Error("supervisor RPC timed out"),
+    );
+    await source.listSessions();
+
+    await source.sendPrompt("terminal-1", "still mine");
+
+    expect(terminal.sendPrompt).toHaveBeenCalledWith("terminal-1", "still mine");
+    expect(provider.sendPrompt).not.toHaveBeenCalled();
+  });
+
+  it("drops terminal ownership when the listing succeeds and the pane is gone", async () => {
+    // The other half of the same invariant: a real empty listing means the pane
+    // exited, and its id must stop routing to the terminal source.
+    const provider = stubSource([]);
+    const terminal = stubSource([{ sessionId: "terminal-1" }]);
+    const source = createCompositeSource({ provider, terminal });
+    await source.listSessions();
+
+    terminal.listSessions.mockResolvedValueOnce([]);
+    await source.listSessions();
+
+    await source.cancel("terminal-1");
+
+    expect(provider.cancel).toHaveBeenCalledWith("terminal-1");
+    expect(terminal.cancel).not.toHaveBeenCalled();
+  });
+
   it("sends an unknown session to the provider, which owns spawning", async () => {
     const provider = stubSource([]);
     const terminal = stubSource([]);

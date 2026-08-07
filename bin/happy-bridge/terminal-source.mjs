@@ -71,7 +71,7 @@ function normalizeSession(session) {
  * @param {{supervisorChannel: {call: (method: string, params?: object) => Promise<any>}, debugLog?: (message: string) => void}} options
  */
 export function createTerminalSource({ supervisorChannel, debugLog = () => {} }) {
-  /** @type {Map<string, {summary: object, path: string|null, offset: number, pending: string, replayed: boolean, announced: boolean, busy: boolean, echoes: Array<{text: string, at: number}>}>} */
+  /** @type {Map<string, {summary: object, path: string|null, offset: number, pending: string, decoder: TextDecoder, replayed: boolean, announced: boolean, busy: boolean, echoes: Array<{text: string, at: number}>}>} */
   const tracked = new Map();
 
   /**
@@ -135,6 +135,8 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
       // file whose earlier bytes are already published.
       entry.offset = info.size;
       entry.pending = "";
+      // Any bytes the decoder was holding belong to the discarded file.
+      entry.decoder = new TextDecoder("utf-8");
       return [];
     }
     if (info.size === entry.offset) return [];
@@ -149,7 +151,13 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
         const { bytesRead } = await handle.read(buffer, 0, length, position);
         if (bytesRead <= 0) break;
         position += bytesRead;
-        text += buffer.subarray(0, bytesRead).toString("utf8");
+        // Streaming decode: a multi-byte character split across a chunk — or
+        // across a poll, when a live CLI flushes mid-character — is held as
+        // bytes until the rest arrives. Decoding each chunk on its own turned
+        // both halves into U+FFFD and corrupted the message.
+        text += entry.decoder.decode(buffer.subarray(0, bytesRead), {
+          stream: true,
+        });
       }
       entry.offset = position;
       const lines = text.split("\n");
@@ -299,6 +307,7 @@ export function createTerminalSource({ supervisorChannel, debugLog = () => {} })
             path: null,
             offset: 0,
             pending: "",
+            decoder: new TextDecoder("utf-8"),
             replayed: false,
             announced: false,
             busy: false,
