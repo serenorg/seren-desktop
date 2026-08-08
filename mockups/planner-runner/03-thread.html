@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<style>
+  .stage { align-items: center; }
+  .thread {
+    width: 760px;
+    background: rgba(16, 22, 38, 0.9);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  /* paired header */
+  .phead {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(56,189,248,0.05);
+  }
+  .phead .name { font-size: 13px; font-weight: 700; }
+  .phead .state {
+    margin-left: auto; font-size: 11px; color: #7dd3fc;
+    background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.25);
+    padding: 3px 9px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: #7dd3fc; }
+
+  .body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* setup declaration */
+  .decl {
+    background: var(--surface-2);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+  }
+  .decl b { color: #bae6fd; }
+  .decl .h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted-foreground); margin-bottom: 6px; }
+  .decl ul { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+  .decl li { display: flex; gap: 8px; }
+  .decl li::before { content: "•"; color: var(--primary); }
+
+  /* handoff chip */
+  .handoff {
+    align-self: center;
+    font-size: 11px; color: var(--muted-foreground);
+    background: var(--surface-1); border: 1px dashed var(--border-strong);
+    padding: 5px 12px; border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+  .handoff b { color: #6ee7b7; }
+  .handoff .from { color: #7dd3fc; }
+
+  /* streaming line */
+  .stream { font-size: 12.5px; color: var(--foreground); padding: 0 2px; }
+  .stream .who { color: #6ee7b7; font-weight: 600; }
+
+  /* composer */
+  .composer {
+    border-top: 1px solid var(--border);
+    padding: 12px 14px 14px;
+    background: rgba(20,28,48,0.5);
+  }
+  .selectors { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .input {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .input .ph { flex: 1; color: var(--muted-foreground); font-size: 13px; }
+  .send {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: var(--primary); color: var(--primary-foreground);
+    display: flex; align-items: center; justify-content: center; font-size: 15px;
+  }
+  .caption { color: var(--muted-foreground); font-size: 11px; text-align: center; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="thread">
+    <div class="phead">
+      <span style="font-size:15px">🧭</span>
+      <span class="name">Planner + Runner</span>
+      <span class="tag" style="margin-left:2px">✨ Antigravity&nbsp;plans · 𝕏 Grok&nbsp;runs</span>
+      <span class="state"><span class="dot"></span> Antigravity planning…</span>
+    </div>
+
+    <div class="body">
+      <div class="decl">
+        <div class="h">Setup</div>
+        <ul>
+          <li><span><b>Antigravity</b> is planner and reviewer.</span></li>
+          <li><span><b>Grok</b> is runner for code edits, commands, and tests.</span></li>
+          <li><span>Planner: Gemini 3 Pro · high effort.</span></li>
+          <li><span>Runner: <span class="mono" style="font-size:11px">grok-code</span> · medium effort · Fast.</span></li>
+          <li><span>Handoffs appear inline when ownership changes.</span></li>
+        </ul>
+      </div>
+
+      <div class="handoff">
+        <span class="from">Antigravity</span> handed off to <b>Grok</b> to make the approved code changes.
+      </div>
+
+      <div class="stream"><span class="who">Grok</span> · editing <span class="mono" style="font-size:11px">src/services/orchestrator.ts</span> and running the focused test suite…</div>
+    </div>
+
+    <div class="composer">
+      <div class="selectors">
+        <span class="pill"><span class="role">Planner ·</span> Gemini 3 Pro <span class="caret">▾</span></span>
+        <span class="pill"><span class="role">Runner ·</span> grok-code <span class="caret">▾</span></span>
+        <span class="pill"><span class="role">Planner effort ·</span> High <span class="caret">▾</span></span>
+        <span class="pill"><span class="role">Runner effort ·</span> Medium <span class="caret">▾</span></span>
+        <span class="pill" style="border-color:rgba(52,211,153,0.4);color:#6ee7b7"><span class="role" style="color:#6ee7b7">Runner</span> Fast ⚡</span>
+      </div>
+      <div class="input">
+        <span class="ph">Message Planner + Runner…</span>
+        <span class="send">↑</span>
+      </div>
+      <div class="caption">Every role keeps its own model, reasoning, permissions &amp; speed — reuses the existing per-role selector row.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<style>
+  .stage { align-items: flex-start; }
+  .sidebar {
+    width: 340px;
+    background: rgba(20, 28, 48, 0.72);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45);
+  }
+  .newbtn {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 9px 12px;
+    background: rgba(56,189,248,0.08);
+    border: 1px solid rgba(56,189,248,0.15);
+    border-radius: 10px;
+    color: var(--primary);
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .menu {
+    margin-top: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 6px 0;
+    box-shadow: 0 18px 40px rgba(0,0,0,0.5);
+  }
+  .row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; cursor: pointer;
+    border-radius: 8px; margin: 0 6px;
+  }
+  .row:hover { background: var(--surface-3); }
+  .row .body { flex: 1; min-width: 0; }
+  .row .title { font-size: 13px; font-weight: 600; }
+  .row .desc { font-size: 11px; color: var(--muted-foreground); margin-top: 1px; }
+
+  .row.highlight {
+    background: rgba(56,189,248,0.10);
+    box-shadow: inset 0 0 0 1px rgba(56,189,248,0.45);
+  }
+  .row.highlight .title { color: #bae6fd; }
+  .titleline { display: flex; align-items: center; gap: 8px; }
+  .caption {
+    color: var(--muted-foreground);
+    font-size: 11px;
+    margin: 4px 12px 10px;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="sidebar">
+    <div class="newbtn">
+      <span style="font-size:14px;line-height:1">＋</span> New
+    </div>
+    <div class="caption">Sidebar &amp; tab-bar “New” menu — <b>Planner&nbsp;+&nbsp;Runner</b> sits directly below Claude&nbsp;+&nbsp;Codex.</div>
+    <div class="menu">
+      <div class="uilabel">Chat</div>
+      <div class="row">
+        <span class="glyph">💬</span>
+        <div class="body"><div class="title">Seren Agent</div><div class="desc">Hosted Seren model · tools &amp; MCP</div></div>
+        <span class="chip paid">Pay-as-you-go</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="uilabel">Coding agents</div>
+
+      <div class="row">
+        <span class="glyph">🤖</span>
+        <div class="body"><div class="title">Claude Code</div><div class="desc">Anthropic · chat-style coding agent</div></div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+      <div class="row">
+        <span class="glyph">⚡</span>
+        <div class="body"><div class="title">Codex</div><div class="desc">OpenAI · chat-style coding agent</div></div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+      <div class="row">
+        <span class="glyph">🤝</span>
+        <div class="body"><div class="title">Claude + Codex</div><div class="desc">Anthropic + OpenAI · paired coding agents</div></div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+
+      <div class="row highlight">
+        <span class="glyph">🧭</span>
+        <div class="body">
+          <div class="titleline"><div class="title">Planner + Runner</div><span class="chip newbadge">New</span></div>
+          <div class="desc">Pick any planner + any runner · you choose both</div>
+        </div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+
+      <div class="row">
+        <span class="glyph">✨</span>
+        <div class="body"><div class="title">Antigravity</div><div class="desc">Google · Antigravity coding agent</div></div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+      <div class="row">
+        <span class="glyph">𝕏</span>
+        <div class="body"><div class="title">Grok</div><div class="desc">xAI · chat-style coding agent</div></div>
+        <span class="chip subscription">Subscription</span>
+      </div>
+      <div class="row">
+        <span class="glyph">🖥️</span>
+        <div class="body"><div class="title">LM Studio Agent</div><div class="desc">Local models · OpenAI-compatible HTTP</div></div>
+        <span class="chip local">Local</span>
+      </div>
+
+      <div class="divider"></div>
+      <div class="uilabel">Command line</div>
+      <div class="row">
+        <span class="glyph">🤖</span>
+        <div class="body"><div class="title">Claude Code</div><div class="desc">Runs <span class="mono" style="font-size:10px">claude</span> in a terminal pane</div></div>
+        <span class="chip cli">CLI</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

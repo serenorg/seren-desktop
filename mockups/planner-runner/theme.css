@@ -1,0 +1,100 @@
+/* Seren Desktop theme tokens (dark) — mirrored from src/styles.css */
+:root {
+  --background: #0a0e17;
+  --background-gradient-start: #111827;
+  --background-gradient-mid: #0a0e17;
+  --background-gradient-end: #060a12;
+  --foreground: #e2e8f0;
+  --surface-1: #141c30;
+  --surface-2: #1c2640;
+  --surface-3: #243049;
+  --primary: #38bdf8;
+  --primary-foreground: #0a0e17;
+  --primary-hover: #7dd3fc;
+  --primary-muted: rgba(56, 189, 248, 0.12);
+  --muted-foreground: #94a3b8;
+  --destructive: #f87171;
+  --warning: #fbbf24;
+  --success: #34d399;
+  --border: rgba(148, 163, 184, 0.1);
+  --border-hover: rgba(148, 163, 184, 0.2);
+  --border-medium: rgba(148, 163, 184, 0.15);
+  --border-strong: rgba(148, 163, 184, 0.25);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  font-family: "General Sans", "DM Sans", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mono { font-family: "JetBrains Mono", "SF Mono", Menlo, Monaco, Consolas, monospace; }
+
+.stage {
+  background:
+    radial-gradient(1200px 700px at 20% -10%, #172036 0%, transparent 60%),
+    linear-gradient(160deg, var(--background-gradient-start), var(--background-gradient-mid) 45%, var(--background-gradient-end));
+  padding: 40px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+/* ---- generic bits ---- */
+.uilabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted-foreground);
+  font-weight: 600;
+  padding: 8px 12px 4px;
+}
+.divider { height: 1px; background: var(--border); margin: 6px 10px; }
+
+.chip {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.chip.subscription { color: #7dd3fc; background: rgba(56,189,248,0.12); border: 1px solid rgba(56,189,248,0.25); }
+.chip.local        { color: #86efac; background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.22); }
+.chip.paid         { color: #fcd34d; background: rgba(251,191,36,0.12); border: 1px solid rgba(251,191,36,0.22); }
+.chip.cli          { color: #cbd5e1; background: rgba(148,163,184,0.12); border: 1px solid rgba(148,163,184,0.2); }
+.chip.newbadge     { color: var(--primary-foreground); background: var(--primary); border: 1px solid var(--primary); }
+
+.glyph {
+  font-size: 15px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--foreground);
+  background: var(--surface-2);
+  border: 1px solid var(--surface-3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.pill .caret { color: var(--muted-foreground); font-size: 10px; }
+.pill .role { color: var(--muted-foreground); font-weight: 600; }
+
+.tag {
+  font-size: 10px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
