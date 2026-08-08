@@ -14,7 +14,7 @@ code is changed by this folder.
 
 | Screen | File | Shows |
 | ------ | ---- | ----- |
-| Chat start | `01-chatstart.html` / `.png` | A running Planner + Runner thread (Antigravity plans · Grok runs). Identical layout to Claude + Codex; the Planner-agent pill dropdown is open to show any agent is selectable. |
+| Chat start | `01-chatstart.html` / `.png` | A running Planner + Runner thread (Seren Agent plans · Codex runs). Identical layout to Claude + Codex; the Planner-agent pill dropdown is open showing every offered agent — the 5 CLI agents plus Seren Agent (SerenModels) and Seren Private Models. |
 | Launcher menu | `02-launcher.html` / `.png` | `Planner + Runner` as one plain row directly below `Claude + Codex` in the "New" menu. |
 
 ## Regenerate the PNGs
