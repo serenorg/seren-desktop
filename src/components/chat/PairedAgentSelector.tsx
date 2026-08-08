@@ -147,6 +147,7 @@ export const PairedAgentSelector: Component<Props> = (props) => {
             {(option) => (
               <button
                 type="button"
+                data-testid={`paired-agent-option-${props.pairedRole}-${option.id}`}
                 class={`w-full text-left px-3 py-2 border-b border-surface-2 last:border-b-0 transition-colors cursor-pointer hover:bg-surface-2 ${
                   option.id === roleStatus()?.agentType ? "bg-surface-2" : ""
                 }`}
