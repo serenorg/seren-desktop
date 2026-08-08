@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<style>
+  .stage { align-items: center; }
+  .win { width: 330px; background: var(--sidebar); }
+  .pad { padding: 12px; }
+  .newbtn {
+    display: flex; align-items: center; gap: 8px; justify-content: center;
+    width: 100%; padding: 9px 12px; color: var(--primary);
+    background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.16);
+    border-radius: 9px; font-size: 13px; font-weight: 600;
+  }
+  .menu { margin-top: 10px; }
+  .glabel { font-size: 10px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); padding: 8px 6px 4px; }
+  .row { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-radius: 8px; }
+  .row.on { background: var(--hover); }
+  .row .g { width: 22px; text-align: center; font-size: 15px; flex-shrink: 0; }
+  .row .t { font-size: 13px; font-weight: 600; color: var(--heading); }
+  .row .d { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .row .b { flex: 1; min-width: 0; }
+  .divider { height: 1px; background: var(--divider); margin: 8px 4px; }
+  .note { color: var(--muted); font-size: 11px; margin: 8px 6px 0; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="win">
+    <div class="pad">
+      <div class="newbtn">＋ New</div>
+      <div class="menu">
+        <div class="glabel">Coding agents</div>
+
+        <div class="row">
+          <span class="g">🤖</span>
+          <div class="b"><div class="t">Claude Code</div><div class="d">Anthropic · chat-style coding agent</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row">
+          <span class="g">⚡</span>
+          <div class="b"><div class="t">Codex</div><div class="d">OpenAI · chat-style coding agent</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row">
+          <span class="g">🤝</span>
+          <div class="b"><div class="t">Claude + Codex</div><div class="d">Anthropic + OpenAI · paired coding agents</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row on">
+          <span class="g">🧭</span>
+          <div class="b"><div class="t">Planner + Runner</div><div class="d">Pick any planner + any runner</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row">
+          <span class="g">✨</span>
+          <div class="b"><div class="t">Antigravity</div><div class="d">Google · Antigravity coding agent</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row">
+          <span class="g">𝕏</span>
+          <div class="b"><div class="t">Grok</div><div class="d">xAI · chat-style coding agent</div></div>
+          <span class="chip">Subscription</span>
+        </div>
+        <div class="row">
+          <span class="g">🖥️</span>
+          <div class="b"><div class="t">LM Studio Agent</div><div class="d">Local models · OpenAI-compatible HTTP</div></div>
+          <span class="chip">Local</span>
+        </div>
+      </div>
+      <div class="note">One new row, directly below Claude + Codex.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

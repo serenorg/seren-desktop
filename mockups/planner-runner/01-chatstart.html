@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="stylesheet" href="theme.css" />
+<style>
+  .stage { align-items: center; }
+  .win { width: 940px; }
+  .chat { display: flex; flex-direction: column; height: 620px; }
+
+  .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 11px 16px; border-bottom: 1px solid var(--divider);
+    font-size: 13px; font-weight: 600;
+  }
+  .head .idle { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 500; }
+
+  .toolbar {
+    display: flex; align-items: center; gap: 14px; justify-content: flex-end;
+    padding: 8px 16px; color: var(--muted); font-size: 12px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .toolbar .ic { opacity: 0.7; }
+  .toolbar .avatar {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #1b2740; color: #9cc4e6; font-size: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+
+  .body { flex: 1; padding: 18px 24px; overflow: hidden; }
+  .seren { font-size: 10px; letter-spacing: 0.09em; color: var(--muted); text-transform: uppercase; }
+  .setup-h { font-size: 15px; font-weight: 700; color: var(--heading); margin: 8px 0 12px; }
+  .setup p { font-size: 13.5px; line-height: 1.9; color: var(--foreground); }
+  .setup .mut { color: var(--muted); }
+  .hr { height: 1px; background: var(--divider); margin: 14px 0 0; }
+
+  .composer { padding: 10px 16px 14px; border-top: 1px solid var(--divider); }
+  .path { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+  .attach { font-size: 11.5px; color: var(--muted); border: 1px solid var(--pill-border); border-radius: 7px; padding: 4px 9px; display: inline-flex; gap: 6px; margin-bottom: 8px; }
+  .input {
+    background: var(--input-bg); border: 1px solid var(--pill-border);
+    border-radius: 10px; padding: 13px 14px; font-size: 13px; color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .selrow { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .send { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+  .send .mic { color: var(--muted); }
+  .sendbtn { font-size: 12px; color: var(--foreground); background: var(--pill-bg); border: 1px solid var(--pill-border); border-radius: 7px; padding: 5px 12px; }
+
+  /* one open agent dropdown — plain flat menu, same style as the model menus */
+  .pillwrap { position: relative; }
+  .menu {
+    position: absolute; bottom: calc(100% + 6px); left: 0;
+    min-width: 190px; background: var(--panel);
+    border: 1px solid var(--pill-border); border-radius: 9px; padding: 4px;
+    box-shadow: 0 14px 34px rgba(0,0,0,0.55);
+  }
+  .mi { display: flex; align-items: center; gap: 9px; padding: 7px 9px; font-size: 12.5px; border-radius: 6px; color: var(--foreground); }
+  .mi .g { width: 16px; text-align: center; }
+  .mi .ck { margin-left: auto; color: var(--primary); font-size: 12px; }
+  .mi.sel { background: var(--hover); }
+  .mhdr { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); padding: 5px 9px 4px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="win">
+    <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span></div>
+    <div class="chat">
+      <div class="head">
+        <span>🧭</span><span>Planner + Runner</span>
+        <span class="idle">Idle</span>
+      </div>
+      <div class="toolbar">
+        <span class="ic">⧉</span><span class="ic">⭳</span><span>Clear</span><span>Privacy</span>
+        <span class="avatar">T</span>
+      </div>
+
+      <div class="body">
+        <div class="seren">Seren</div>
+        <div class="setup-h">Setup</div>
+        <div class="setup">
+          <p>Antigravity is planner and reviewer.</p>
+          <p>Grok is runner for code edits, commands, and tests.</p>
+          <p>Planner: Gemini 3 Pro · high effort.</p>
+          <p>Runner: <span class="mono" style="font-size:12.5px">grok-code</span> · medium effort.</p>
+          <p>Handoffs appear inline when ownership changes.</p>
+        </div>
+        <div class="hr"></div>
+      </div>
+
+      <div class="composer">
+        <div class="path">📁 …/Projects/seren-desktop</div>
+        <div class="attach">📎 Attach</div>
+        <div class="input">Tell the agent what to do… (type / for commands)</div>
+        <div class="selrow">
+          <span class="pill">🧭 Planner + Runner <span class="car">▾</span></span>
+
+          <span class="pillwrap">
+            <span class="pill"><span class="lbl">Planner ·</span> Antigravity <span class="car">▴</span></span>
+            <div class="menu">
+              <div class="mhdr">Planner agent</div>
+              <div class="mi"><span class="g">🤖</span>Claude Code</div>
+              <div class="mi"><span class="g">⚡</span>Codex</div>
+              <div class="mi sel"><span class="g">✨</span>Antigravity<span class="ck">✓</span></div>
+              <div class="mi"><span class="g">𝕏</span>Grok</div>
+              <div class="mi"><span class="g">🖥️</span>LM Studio</div>
+            </div>
+          </span>
+
+          <span class="pill"><span class="lbl">Runner ·</span> Grok <span class="car">▾</span></span>
+          <span class="pill"><span class="lbl">Planner ·</span> Gemini 3 Pro <span class="car">▾</span></span>
+          <span class="pill"><span class="lbl">Runner ·</span> grok-code <span class="car">▾</span></span>
+          <span class="pill"><span class="lbl">Planner effort ·</span> high <span class="car">▾</span></span>
+          <span class="pill"><span class="lbl">Runner effort ·</span> medium <span class="car">▾</span></span>
+          <span class="pill">⚡ Runner fast</span>
+
+          <span class="send"><span class="mic">🎤</span><span class="mic">▷</span><span class="sendbtn">Send</span></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

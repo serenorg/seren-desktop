@@ -5,15 +5,17 @@ Design mockups for the **Planner + Runner** coding agent: a generalization of
 offered agent as the runner, each with its own model, reasoning effort,
 permissions and speed.
 
-These are static HTML mockups styled with the real Seren Desktop dark theme
-tokens (mirrored from `src/styles.css`). They are illustrative only — no app code
-is changed by this folder.
+Deliberately minimal — they mirror the live `Claude + Codex` chat start: flat,
+plain-text setup, muted pill selectors, **no new modal**. You pick each role's
+agent through the same flat dropdown you already use to pick a model.
+
+Styled with the real Seren Desktop dark-theme tokens (see `theme.css`). No app
+code is changed by this folder.
 
 | Screen | File | Shows |
 | ------ | ---- | ----- |
-| Launcher menu | `01-launcher.html` / `.png` | `Planner + Runner` inserted directly below `Claude + Codex` in the "New" menu |
-| Launch config | `02-config.html` / `.png` | Two agent pickers (Planner / Runner) with per-role model, reasoning, permission and speed controls |
-| Running thread | `03-thread.html` / `.png` | A live thread with a non-default pairing (Antigravity plans · Grok runs) and the per-role selector row |
+| Chat start | `01-chatstart.html` / `.png` | A running Planner + Runner thread (Antigravity plans · Grok runs). Identical layout to Claude + Codex; the Planner-agent pill dropdown is open to show any agent is selectable. |
+| Launcher menu | `02-launcher.html` / `.png` | `Planner + Runner` as one plain row directly below `Claude + Codex` in the "New" menu. |
 
 ## Regenerate the PNGs
 
@@ -21,4 +23,4 @@ is changed by this folder.
 node mockups/planner-runner/render.mjs
 ```
 
-Requires the repo's dev dependencies (Playwright + Chromium) to be installed.
+Requires the repo's dev dependencies (Playwright + Chromium).
