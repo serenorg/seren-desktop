@@ -63,6 +63,9 @@ const pairedRuntimeModule = await loadAgentRuntimeModule(
 // still recognizes the type and routes it to the unavailable stub.
 const PAIRED_AGENT_TYPE =
   pairedRuntimeModule.module?.PAIRED_AGENT_TYPE ?? "claude-codex";
+const PAIRED_AGENT_TYPES =
+  pairedRuntimeModule.module?.PAIRED_AGENT_TYPES ??
+  new Set(["claude-codex", "planner-runner"]);
 
 const CODEX_DEFAULT_INTENTS = new Set(["direct", "paired-executor"]);
 const CODEX_DIRECT_PREFERRED_MODELS = ["gpt-5.6-sol", "gpt-5.6"];
@@ -1920,7 +1923,7 @@ export function createProviderHandlers({
   }) {
     const settings = { approvalPolicy, sandboxMode, networkEnabled };
 
-    if (agentType === "codex" || agentType === PAIRED_AGENT_TYPE) {
+    if (agentType === "codex" || PAIRED_AGENT_TYPES.has(agentType)) {
       // Direct Codex and the paired executor both intentionally start with
       // Codex's on-failure policy, independent of Claude's global default.
       const defaultModeId = modeFromApprovalPolicy("on-failure");
@@ -1982,7 +1985,7 @@ export function createProviderHandlers({
       codexDefaultIntent,
     } = params;
 
-    if (agentType === PAIRED_AGENT_TYPE) {
+    if (PAIRED_AGENT_TYPES.has(agentType)) {
       return pairedRuntime.spawnSession(params);
     }
 
@@ -2586,7 +2589,9 @@ export function createProviderHandlers({
           // The id the frontend actually holds in state.sessions: the paired
           // wrapper for an inner planner, otherwise the session itself.
           ownerSessionId: owner?.pairedSessionId ?? holder.sessionId,
-          ownerAgentType: owner ? PAIRED_AGENT_TYPE : holder.agentType,
+          ownerAgentType: owner
+            ? (owner.pairedAgentType ?? PAIRED_AGENT_TYPE)
+            : holder.agentType,
           pairedRole: owner?.role ?? null,
         };
       }),
