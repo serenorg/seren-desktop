@@ -10,7 +10,7 @@ const agentStoreSource = readFileSync(
   "utf8",
 );
 
-function bodyAfter(marker: string, width = 12_000): string {
+function bodyAfter(marker: string, width = 14_000): string {
   const index = agentStoreSource.indexOf(marker);
   expect(index, `missing ${marker}`).toBeGreaterThanOrEqual(0);
   return agentStoreSource.slice(index, index + width);

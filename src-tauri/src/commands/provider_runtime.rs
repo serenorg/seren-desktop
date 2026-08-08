@@ -282,6 +282,7 @@ pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] = &[
     "gemini",
     "grok",
     "claude-codex",
+    "planner-runner",
     "lmstudio",
 ];
 
@@ -295,7 +296,7 @@ pub(crate) const NATIVE_AGENT_PROVIDERS: &[&str] = &[
 /// test in this module asserts that invariant.
 pub(crate) const DERIVED_KIND_CASE_SQL: &str = "CASE \
      WHEN psr.provider IS NULL THEN c.kind \
-     WHEN psr.provider IN ('claude-code', 'codex', 'gemini', 'grok', 'claude-codex', 'lmstudio') THEN 'agent' \
+     WHEN psr.provider IN ('claude-code', 'codex', 'gemini', 'grok', 'claude-codex', 'planner-runner', 'lmstudio') THEN 'agent' \
      ELSE 'chat' \
      END";
 

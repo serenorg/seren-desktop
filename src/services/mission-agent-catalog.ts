@@ -250,7 +250,7 @@ export async function loadMissionPermissionCatalog(
 
 function localAgentForTarget(
   target: MissionModelTarget,
-): Exclude<AgentType, "claude-codex" | "lmstudio"> | null {
+): Exclude<AgentType, "claude-codex" | "planner-runner" | "lmstudio"> | null {
   switch (target) {
     case "claude-code":
     case "claude-codex:planner":
@@ -268,7 +268,7 @@ function localAgentForTarget(
 }
 
 function localAgentDisplayName(
-  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+  agentType: Exclude<AgentType, "claude-codex" | "planner-runner" | "lmstudio">,
 ): string {
   switch (agentType) {
     case "claude-code":
@@ -285,7 +285,7 @@ function localAgentDisplayName(
 const localCatalogLoads = new Map<string, Promise<AgentModelCatalogEntry[]>>();
 
 function loadLocalCatalog(
-  agentType: Exclude<AgentType, "claude-codex" | "lmstudio">,
+  agentType: Exclude<AgentType, "claude-codex" | "planner-runner" | "lmstudio">,
   cwd: string,
 ): Promise<AgentModelCatalogEntry[]> {
   const key = `${agentType}:${cwd}`;
@@ -346,6 +346,8 @@ export function missionAgentAllowed(
     case "grok":
       return allowsGrokAgent(policy);
     case "claude-codex":
+      return allowsClaudeAgent(policy) && allowsCodexAgent(policy);
+    case "planner-runner":
       return allowsClaudeAgent(policy) && allowsCodexAgent(policy);
     case "lmstudio":
       return allowsLmStudioAgent(policy);

@@ -3100,6 +3100,13 @@ export function createProviderHandlers({
     },
   );
 
+  async function setRoleAgent({ sessionId, role, agentType }) {
+    if (pairedRuntime.hasSession(sessionId)) {
+      return pairedRuntime.setRoleAgent({ sessionId, role, agentType });
+    }
+    throw new Error("Role agents can only be changed on a paired session.");
+  }
+
   return {
     spawnSession,
     sendPrompt,
@@ -3124,6 +3131,7 @@ export function createProviderHandlers({
     listRemoteSessions,
     nativeForkSession,
     buildSyntheticTranscript,
+    setRoleAgent,
     setSessionModel,
     setSessionMode,
     updateSessionConfigOption,

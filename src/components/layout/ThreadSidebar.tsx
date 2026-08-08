@@ -956,9 +956,11 @@ export const ThreadSidebar: Component<ThreadSidebarProps> = (props) => {
                                       ? "𝕏"
                                       : thread.agentType === "claude-codex"
                                         ? "\u{1F91D}"
-                                        : thread.agentType === "lmstudio"
-                                          ? "\u{1F5A5}\uFE0F"
-                                          : "\u{1F916}"}
+                                        : thread.agentType === "planner-runner"
+                                          ? "\u{1F9ED}"
+                                          : thread.agentType === "lmstudio"
+                                            ? "\u{1F5A5}\uFE0F"
+                                            : "\u{1F916}"}
                               </span>
                             </Show>
                           </div>

@@ -94,7 +94,13 @@ export const ThreadTabBar: Component = () => {
   };
 
   const handleNewAgent = async (
-    agentType: "claude-code" | "codex" | "gemini" | "grok" | "claude-codex",
+    agentType:
+      | "claude-code"
+      | "codex"
+      | "gemini"
+      | "grok"
+      | "claude-codex"
+      | "planner-runner",
   ) => {
     setShowNewMenu(false);
     const cwd = fileTreeState.rootPath;
@@ -120,6 +126,7 @@ export const ThreadTabBar: Component = () => {
     if (thread.agentType === "gemini") return "✨";
     if (thread.agentType === "grok") return "𝕏";
     if (thread.agentType === "claude-codex") return "🤝";
+    if (thread.agentType === "planner-runner") return "🧭";
     return "🤖";
   };
 
@@ -341,6 +348,31 @@ export const ThreadTabBar: Component = () => {
                   🤝
                 </span>
                 <div class="flex-1 min-w-0 font-medium">Claude + Codex</div>
+                <Chip variant="subscription">Subscription</Chip>
+              </button>
+            </Show>
+            <Show
+              when={
+                allowsClaudeAgent(authStore.privateChatPolicy) &&
+                allowsCodexAgent(authStore.privateChatPolicy)
+              }
+            >
+              <button
+                type="button"
+                data-testid="new-planner-runner-agent"
+                class="flex items-center gap-2.5 w-full py-[7px] px-2.5 bg-none border-none rounded-md text-foreground text-[13px] cursor-pointer transition-colors duration-100 hover:enabled:bg-border/80 disabled:opacity-40 disabled:cursor-not-allowed text-left"
+                onClick={() => handleNewAgent("planner-runner")}
+                disabled={!fileTreeState.rootPath}
+                title={
+                  !fileTreeState.rootPath
+                    ? "Open a folder first to use agents"
+                    : undefined
+                }
+              >
+                <span class="text-[13px] w-[18px] text-center shrink-0">
+                  🧭
+                </span>
+                <div class="flex-1 min-w-0 font-medium">Planner + Runner</div>
                 <Chip variant="subscription">Subscription</Chip>
               </button>
             </Show>

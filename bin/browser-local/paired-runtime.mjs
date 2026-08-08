@@ -808,6 +808,7 @@ export function createPairedRuntime({ emit, inner }) {
       paired: {
         state: paired.state,
         activeRole: paired.activeRole,
+        agentType: paired.agentType,
         planner: roleStatusView(paired.roles.planner),
         executor: roleStatusView(paired.roles.executor),
         ledger: ledgerStatusView(paired),

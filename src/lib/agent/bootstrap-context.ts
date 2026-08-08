@@ -17,6 +17,8 @@ export function agentDisplayName(agentType?: string): string {
       return "Grok";
     case "claude-codex":
       return "Claude + Codex";
+    case "planner-runner":
+      return "Planner + Runner";
     case "lmstudio":
       return "LM Studio";
     default:
@@ -35,7 +37,7 @@ export function agentInitializationFailureMessage(agentType?: string): string {
           ? "Grok is installed and signed in"
           : agentType === "lmstudio"
             ? "LM Studio is running and reachable"
-            : agentType === "claude-codex"
+            : agentType === "claude-codex" || agentType === "planner-runner"
               ? "Claude Code and Codex are installed and signed in"
               : `${agentName} is installed and authenticated`;
 

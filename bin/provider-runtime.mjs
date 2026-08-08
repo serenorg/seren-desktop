@@ -143,6 +143,10 @@ function registerProviderHandlers() {
     providerHandlers.buildSyntheticTranscript,
   );
   registerHandler(
+    "provider_set_role_agent",
+    providerHandlers.setRoleAgent,
+  );
+  registerHandler(
     "provider_set_session_model",
     providerHandlers.setSessionModel,
   );
