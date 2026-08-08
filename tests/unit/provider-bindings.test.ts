@@ -703,6 +703,8 @@ describe("switchChatProvider", () => {
       project_root: "/Users/dev/my-project",
       is_archived: false,
       employee_id: null,
+      privileged: false,
+      routing_preference: null,
     });
 
     await switchChatProvider("t1", "seren", "claude-sonnet-4");

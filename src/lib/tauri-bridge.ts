@@ -723,6 +723,8 @@ export interface Conversation {
   is_archived: boolean;
   employee_id: string | null;
   privileged: boolean;
+  /** Seren Models routing preference ("fastest" | "cheapest"); null = default Fastest. */
+  routing_preference: string | null;
 }
 
 /**
@@ -774,6 +776,8 @@ export interface UnifiedConversationRow {
   agent_metadata: string | null;
   project_id: string | null;
   privileged: boolean;
+  /** Seren Models routing preference ("fastest" | "cheapest"); null = default Fastest. */
+  routing_preference: string | null;
 }
 
 /**
@@ -800,6 +804,7 @@ export async function createConversation(
   selectedProvider?: string,
   projectRoot?: string,
   employeeId?: string,
+  routingPreference?: string,
 ): Promise<Conversation> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -812,6 +817,7 @@ export async function createConversation(
     selectedProvider,
     projectRoot,
     employeeId,
+    routingPreference,
   });
 }
 
@@ -863,6 +869,7 @@ export async function updateConversation(
   title?: string,
   selectedModel?: string,
   selectedProvider?: string,
+  routingPreference?: string,
 ): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -873,6 +880,7 @@ export async function updateConversation(
     title,
     selectedModel,
     selectedProvider,
+    routingPreference,
   });
 }
 

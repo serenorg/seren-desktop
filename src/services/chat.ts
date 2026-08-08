@@ -21,6 +21,7 @@ import type {
   ChatResponse,
   ContentBlock,
   ProviderId,
+  ProviderSort,
   ToolCall,
   ToolResult,
 } from "@/lib/providers/types";
@@ -134,12 +135,19 @@ async function sendWithToolsRetry(
   model: string,
   tools: ReturnType<typeof getAllTools> | undefined,
   toolChoice: "auto" | undefined,
+  providerSort?: ProviderSort,
 ): Promise<ChatResponse> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= CHAT_MAX_RETRIES; attempt++) {
     try {
-      return await sendWithTools(messages, model, tools, toolChoice);
+      return await sendWithTools(
+        messages,
+        model,
+        tools,
+        toolChoice,
+        providerSort,
+      );
     } catch (error) {
       lastError = error as Error;
       const msg = lastError.message || "";
@@ -174,8 +182,15 @@ export async function sendMessage(
   provider: ProviderId,
   context?: ChatContext,
   history?: Message[],
+  providerSort?: ProviderSort,
 ): Promise<string> {
-  const request = buildChatRequest(content, model, context, history);
+  const request = buildChatRequest(
+    content,
+    model,
+    context,
+    history,
+    provider === "seren" ? providerSort : undefined,
+  );
   return sendProviderMessage(provider, request);
 }
 
@@ -189,8 +204,15 @@ export async function* streamMessage(
   provider: ProviderId,
   context?: ChatContext,
   history?: Message[],
+  providerSort?: ProviderSort,
 ): AsyncGenerator<string> {
-  const request = buildChatRequest(content, model, context, history);
+  const request = buildChatRequest(
+    content,
+    model,
+    context,
+    history,
+    provider === "seren" ? providerSort : undefined,
+  );
   request.stream = true;
   yield* streamProviderMessage(provider, request);
 }
@@ -205,12 +227,20 @@ export async function sendMessageWithRetry(
   context: ChatContext | undefined,
   onRetry?: (attempt: number) => void,
   history?: Message[],
+  providerSort?: ProviderSort,
 ): Promise<string> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= CHAT_MAX_RETRIES; attempt++) {
     try {
-      return await sendMessage(content, model, provider, context, history);
+      return await sendMessage(
+        content,
+        model,
+        provider,
+        context,
+        history,
+        providerSort,
+      );
     } catch (error) {
       lastError = error as Error;
 
@@ -259,6 +289,7 @@ export interface ToolIterationState {
   iteration: number;
   memorySource?: ToolMemorySource;
   userQuery?: string;
+  providerSort?: ProviderSort;
 }
 
 /** Stable source identity used to make memory capture idempotent across retries. */
@@ -400,6 +431,7 @@ function buildUserContent(
  * @param history - Previous messages in the conversation
  * @param images - Optional image attachments
  * @param memorySource - Stable identity for idempotent memory capture. Memory capture is skipped when absent.
+ * @param providerSort - Seren Models routing preference wire value; omitted = server-default Fastest.
  */
 export async function* streamMessageWithTools(
   content: string,
@@ -409,6 +441,7 @@ export async function* streamMessageWithTools(
   history: Message[] = [],
   images?: Attachment[],
   memorySource?: ToolMemorySource,
+  providerSort?: ProviderSort,
 ): AsyncGenerator<ToolStreamEvent> {
   // Build initial messages array
   const messages: ChatMessageWithTools[] = [];
@@ -641,6 +674,7 @@ export async function* streamMessageWithTools(
       model,
       tools,
       tools ? "auto" : undefined,
+      providerSort,
     );
     console.log("[streamMessageWithTools] Got response:", response);
 
@@ -809,6 +843,7 @@ export async function* streamMessageWithTools(
       iteration: maxIterations,
       memorySource,
       userQuery: content,
+      providerSort,
     },
   };
 }
@@ -831,6 +866,7 @@ export async function* continueToolIteration(
     fullContent: existingContent,
     memorySource,
     userQuery,
+    providerSort,
   } = state;
   let fullContent = existingContent;
   let yieldedContent = existingContent;
@@ -845,6 +881,7 @@ export async function* continueToolIteration(
       model,
       tools,
       tools ? "auto" : undefined,
+      providerSort,
     );
 
     if (response.content) {
@@ -945,6 +982,7 @@ export async function* continueToolIteration(
       iteration: state.iteration + additionalIterations,
       memorySource,
       userQuery,
+      providerSort,
     },
   };
 }

@@ -93,6 +93,8 @@ describe("conversationStore", () => {
         undefined,
         "/Users/dev/my-project",
         undefined,
+        // New threads snapshot the settings-store routing default (#3747).
+        "fastest",
       );
     });
 
@@ -514,6 +516,8 @@ describe("conversationStore", () => {
           agent_permission_mode: null,
           agent_metadata: null,
           project_id: null,
+          privileged: false,
+          routing_preference: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([
@@ -557,6 +561,8 @@ describe("conversationStore", () => {
           agent_permission_mode: null,
           agent_metadata: null,
           project_id: null,
+          privileged: false,
+          routing_preference: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([
@@ -606,6 +612,8 @@ describe("conversationStore", () => {
           agent_permission_mode: null,
           agent_metadata: null,
           project_id: null,
+          privileged: false,
+          routing_preference: null,
         },
       ]);
       vi.mocked(bridge.getMessages).mockResolvedValueOnce([

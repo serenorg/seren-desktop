@@ -4,6 +4,7 @@
 import { createStore } from "solid-js/store";
 import type { McpServerConfig, McpSettings } from "@/lib/mcp/types";
 import { isWindowsPlatform } from "@/lib/platform";
+import type { RoutingPreference } from "@/lib/providers/routing-preference";
 import { isTauriRuntime } from "@/lib/tauri-bridge";
 
 const SETTINGS_STORE = "settings.json";
@@ -51,6 +52,12 @@ export interface Settings {
    * Default: 10. Range: 0-50.
    */
   chatMaxToolIterations: number;
+  /**
+   * Seren Models routing preference stamped onto NEW threads at creation
+   * ("fastest" | "cheapest"). Existing threads keep their own per-thread
+   * value; this default does not rewrite them.
+   */
+  chatRoutingPreference: RoutingPreference;
 
   // Auto-compact settings
   autoCompactEnabled: boolean;
@@ -266,6 +273,7 @@ const DEFAULT_SETTINGS: Settings = {
   chatEnterToSend: true,
   chatThinkingExpanded: false,
   chatMaxToolIterations: 0,
+  chatRoutingPreference: "fastest",
   // Auto-compact
   autoCompactEnabled: true,
   autoCompactThreshold: 85,

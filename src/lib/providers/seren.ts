@@ -17,6 +17,7 @@ import type {
   ChatResponse,
   ProviderAdapter,
   ProviderModel,
+  ProviderSort,
   ToolCall,
   ToolChoice,
   ToolDefinition,
@@ -90,6 +91,8 @@ interface ChatCompletionRequest {
   stream: boolean;
   tools?: ToolDefinition[];
   tool_choice?: ToolChoice;
+  /** Routing preference; omitted = server-default Fastest (#3747). */
+  provider?: { sort?: ProviderSort };
 }
 
 /** Inner publisher response returned inside Seren's DataResponse envelope. */
@@ -321,6 +324,7 @@ export const serenProvider: ProviderAdapter = {
       stream: false,
       tools: request.tools,
       tool_choice: request.tool_choice,
+      provider: request.provider,
     };
 
     const response = await appFetch(url, {
@@ -380,6 +384,7 @@ export const serenProvider: ProviderAdapter = {
       model,
       messages: request.messages,
       stream: true,
+      provider: request.provider,
     };
 
     const response = await appFetch(url, {
@@ -465,6 +470,7 @@ export async function sendMessageWithTools(
   model: string,
   tools?: ToolDefinition[],
   toolChoice?: ToolChoice,
+  providerSort?: ProviderSort,
 ): Promise<ChatResponse> {
   const normalizedModel = normalizeModelId(model);
   const url = `${apiBase}/publishers/${PUBLISHER_SLUG}/chat/completions`;
@@ -475,6 +481,7 @@ export async function sendMessageWithTools(
     stream: false,
     tools,
     tool_choice: toolChoice,
+    provider: providerSort ? { sort: providerSort } : undefined,
   };
 
   const response = await appFetch(url, {

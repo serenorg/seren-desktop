@@ -652,6 +652,10 @@ pub struct Conversation {
     pub employee_id: Option<String>,
     #[serde(default)]
     pub privileged: bool,
+    /// Seren Models routing preference ("fastest" | "cheapest"). NULL keeps
+    /// the server-default Fastest routing for threads that never chose one.
+    #[serde(default)]
+    pub routing_preference: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -735,6 +739,10 @@ pub struct UnifiedConversationRow {
     // the durable SQLite value is hydrated immediately after the read.
     #[serde(default)]
     pub privileged: bool,
+    /// Seren Models routing preference ("fastest" | "cheapest"); NULL means
+    /// the thread follows the server-default Fastest routing.
+    #[serde(default)]
+    pub routing_preference: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -762,6 +770,7 @@ pub async fn create_conversation(
     selected_provider: Option<String>,
     project_root: Option<String>,
     employee_id: Option<String>,
+    routing_preference: Option<String>,
 ) -> Result<Conversation, String> {
     let created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -780,13 +789,14 @@ pub async fn create_conversation(
         is_archived: false,
         employee_id: employee_id.clone(),
         privileged: false,
+        routing_preference: routing_preference.clone(),
     };
 
     run_db(app, move |conn| {
         conn.execute(
-            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, project_root, is_archived, kind, employee_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat', ?7)",
-            params![id, title, created_at, selected_model, selected_provider, normalized_project_root, employee_id],
+            "INSERT INTO conversations (id, title, created_at, selected_model, selected_provider, project_root, is_archived, kind, employee_id, routing_preference)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 'chat', ?7, ?8)",
+            params![id, title, created_at, selected_model, selected_provider, normalized_project_root, employee_id, routing_preference],
         )?;
         mark_sync_upsert(conn, "conversations", &id)?;
         Ok(())
@@ -848,6 +858,7 @@ pub async fn list_conversations(
                        c.employee_id, c.agent_type, c.agent_session_id,
                        c.agent_cwd, c.agent_model_id, c.agent_permission_mode,
                        c.agent_metadata, c.project_id, c.privileged,
+                       c.routing_preference,
                        psr.provider AS runtime_provider,
                        {case} AS derived_kind
                 FROM conversations c
@@ -863,7 +874,7 @@ pub async fn list_conversations(
                         ELSE agent_type END AS agent_type,
                    agent_session_id, agent_cwd, agent_model_id,
                    agent_permission_mode, agent_metadata, project_id,
-                   privileged
+                   privileged, routing_preference
             FROM derived
             WHERE is_archived = 0
               AND (?1 IS NULL OR derived_kind = ?1)
@@ -899,6 +910,7 @@ pub async fn list_conversations(
                     agent_metadata: row.get(14)?,
                     project_id: row.get(15)?,
                     privileged: row.get::<_, i32>(16)? != 0,
+                    routing_preference: row.get(17)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -920,7 +932,7 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                          THEN COALESCE(c.selected_provider, psr.provider)
                          ELSE c.selected_provider END AS selected_provider,
                     c.project_root, c.is_archived, c.employee_id,
-                    c.privileged
+                    c.privileged, c.routing_preference
              FROM conversations c
              LEFT JOIN provider_session_runtime psr ON psr.thread_id = c.id
              WHERE c.id = ?1
@@ -941,6 +953,7 @@ pub async fn get_conversation(app: AppHandle, id: String) -> Result<Option<Conve
                     is_archived: row.get::<_, i32>(6)? != 0,
                     employee_id: row.get(7)?,
                     privileged: row.get::<_, i32>(8)? != 0,
+                    routing_preference: row.get(9)?,
                 })
             })
             .optional()?;
@@ -957,6 +970,7 @@ pub async fn update_conversation(
     title: Option<String>,
     selected_model: Option<String>,
     selected_provider: Option<String>,
+    routing_preference: Option<String>,
 ) -> Result<(), String> {
     let index_id = id.clone();
     let index_title = title.clone();
@@ -979,6 +993,13 @@ pub async fn update_conversation(
             conn.execute(
                 "UPDATE conversations SET selected_provider = ?1 WHERE id = ?2",
                 params![p, id],
+            )?;
+            mark_sync_upsert(conn, "conversations", &id)?;
+        }
+        if let Some(r) = routing_preference {
+            conn.execute(
+                "UPDATE conversations SET routing_preference = ?1 WHERE id = ?2",
+                params![r, id],
             )?;
             mark_sync_upsert(conn, "conversations", &id)?;
         }

@@ -15,6 +15,7 @@ import type {
   ProviderAdapter,
   ProviderId,
   ProviderModel,
+  ProviderSort,
 } from "./types";
 
 export { fetchSerenModelCatalog } from "./seren";
@@ -208,6 +209,7 @@ export function buildChatRequest(
     range?: { startLine: number; endLine: number } | null;
   },
   history?: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  providerSort?: ProviderSort,
 ): ChatRequest {
   const messages: ChatMessage[] = [];
 
@@ -248,6 +250,7 @@ export function buildChatRequest(
     messages,
     model,
     stream: false,
+    provider: providerSort ? { sort: providerSort } : undefined,
   };
 }
 

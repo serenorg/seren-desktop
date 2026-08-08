@@ -143,6 +143,12 @@ export interface ChatMessage {
 }
 
 /**
+ * Wire values seren-router accepts for `provider.sort`. Any other value is
+ * rejected with a 400, so senders must validate before attaching.
+ */
+export type ProviderSort = "price" | "throughput" | "latency";
+
+/**
  * Request payload for chat completions.
  */
 export interface ChatRequest {
@@ -152,6 +158,8 @@ export interface ChatRequest {
   maxTokens?: number;
   tools?: ToolDefinition[];
   tool_choice?: ToolChoice;
+  /** Seren Models routing preference; omitted = server-default Fastest. */
+  provider?: { sort?: ProviderSort };
 }
 
 // ============================================================================

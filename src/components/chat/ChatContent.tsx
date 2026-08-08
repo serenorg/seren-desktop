@@ -60,6 +60,7 @@ import {
   computeProviderBoundaries,
   providerDisplayName,
 } from "@/lib/provider-boundaries";
+import { providerSortForPreference } from "@/lib/providers/routing-preference";
 import type { Attachment, ProviderId } from "@/lib/providers/types";
 import {
   escapeHtmlWithSkillsAndLinks,
@@ -139,6 +140,7 @@ import { PublisherSuggestions } from "./PublisherSuggestions";
 import { ReasoningEffortSelector } from "./ReasoningEffortSelector";
 import { RerouteAnnouncement } from "./RerouteAnnouncement";
 import { RLMStepsBlock } from "./RLMStepsBlock";
+import { RoutingPreferenceSelector } from "./RoutingPreferenceSelector";
 import { SatisfactionSignal } from "./SatisfactionSignal";
 import { SkillsButton } from "./SkillsButton";
 import { SlashCommandPopup } from "./SlashCommandPopup";
@@ -1325,6 +1327,7 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
           );
         },
         historyBeforeRetry,
+        providerSortForPreference(conversationStore.getRoutingPreference(id)),
       );
 
       const updated = {
@@ -2306,6 +2309,9 @@ export const ChatContent: Component<ChatContentProps> = (props) => {
                   <ModelSelector threadId={conversationId()} />
                   <ToolsetSelector />
                   <ReasoningEffortSelector />
+                  <Show when={activeThreadProvider() === "seren"}>
+                    <RoutingPreferenceSelector threadId={conversationId()} />
+                  </Show>
                   <SkillsButton
                     recentSkill={recentSkill()}
                     onLaunch={() => {

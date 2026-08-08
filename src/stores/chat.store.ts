@@ -30,6 +30,11 @@ import {
   type CompactionWindowItem,
   selectCompactionWindow,
 } from "@/lib/compaction/window";
+import {
+  normalizeRoutingPreference,
+  providerSortForPreference,
+  type RoutingPreference,
+} from "@/lib/providers/routing-preference";
 import { PROVIDER_CONFIGS, type ProviderId } from "@/lib/providers/types";
 import {
   archiveConversation as archiveConversationDb,
@@ -102,6 +107,8 @@ export interface Conversation {
   compactedSummary?: CompactedSummary;
   /** Reasoning effort level: "minimal" | "low" | "medium" | "high" | "xhigh". */
   reasoningEffort?: string;
+  /** Seren Models routing preference; null/absent = server-default Fastest. */
+  routingPreference?: RoutingPreference | null;
 }
 
 type MessagePatch = Partial<
@@ -157,6 +164,7 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     selectedProvider: (row.selected_provider as ProviderId | AgentType) ?? null,
     isArchived: row.is_archived,
     privileged: row.privileged,
+    routingPreference: normalizeRoutingPreference(row.routing_preference),
   };
 }
 
@@ -875,7 +883,14 @@ export const chatStore = {
       const summaryOutcome = await runSummarizerWithPolicy({
         primaryModel: activeConvo?.selectedModel ?? this.selectedModel,
         attempt: (model) =>
-          sendMessage(summaryPrompt, model, compactionProvider, undefined),
+          sendMessage(
+            summaryPrompt,
+            model,
+            compactionProvider,
+            undefined,
+            undefined,
+            providerSortForPreference(activeConvo?.routingPreference),
+          ),
         isAuthError: (e) =>
           isLikelyAuthError(e instanceof Error ? e.message : String(e)),
         refreshAuth: refreshAccessToken,

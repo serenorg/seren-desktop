@@ -84,6 +84,7 @@ pub fn route(
         publisher_slug,
         reasoning_effort: capabilities.reasoning_effort.clone(),
         project_root: capabilities.project_root.clone(),
+        provider_sort: capabilities.provider_sort.clone(),
     }
 }
 
@@ -564,6 +565,7 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
             effective_agent_policy: EffectiveAgentPolicy::default(),
         }
@@ -595,6 +597,7 @@ mod tests {
             installed_skills: skills,
             model_rankings: vec![],
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
             effective_agent_policy: EffectiveAgentPolicy::default(),
         }

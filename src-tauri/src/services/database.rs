@@ -742,7 +742,8 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
             project_id TEXT,
             project_root TEXT,
             employee_id TEXT,
-            privileged INTEGER NOT NULL DEFAULT 0
+            privileged INTEGER NOT NULL DEFAULT 0,
+            routing_preference TEXT
         )",
         [],
     )?;
@@ -1067,6 +1068,18 @@ pub fn setup_schema(conn: &Connection) -> Result<()> {
     if !has_privileged {
         conn.execute(
             "ALTER TABLE conversations ADD COLUMN privileged INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    // Seren Models routing preference (#3747). Nullable so pre-existing
+    // threads keep the default (Fastest) behavior without a backfill.
+    let has_routing_preference: bool = conn
+        .prepare("SELECT routing_preference FROM conversations LIMIT 1")
+        .is_ok();
+    if !has_routing_preference {
+        conn.execute(
+            "ALTER TABLE conversations ADD COLUMN routing_preference TEXT",
             [],
         )?;
     }
@@ -2199,6 +2212,57 @@ mod tests {
             agent_metadata,
             Some("{\"pendingBootstrapPromptContext\":\"seed\"}".to_string())
         );
+    }
+
+    #[test]
+    fn migration_adds_routing_preference_column() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Pre-#3747 schema: no routing_preference column.
+        conn.execute(
+            "CREATE TABLE conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                selected_model TEXT,
+                selected_provider TEXT,
+                is_archived INTEGER DEFAULT 0,
+                kind TEXT NOT NULL DEFAULT 'chat'
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO conversations (id, title, created_at) VALUES ('c1', 'Old', 1000)",
+            [],
+        )
+        .unwrap();
+
+        setup_schema(&conn).unwrap();
+
+        // Legacy rows stay NULL (server-default Fastest routing); new writes persist.
+        let legacy: Option<String> = conn
+            .query_row(
+                "SELECT routing_preference FROM conversations WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy, None);
+
+        conn.execute(
+            "UPDATE conversations SET routing_preference = 'cheapest' WHERE id = 'c1'",
+            [],
+        )
+        .unwrap();
+        let updated: Option<String> = conn
+            .query_row(
+                "SELECT routing_preference FROM conversations WHERE id = 'c1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(updated, Some("cheapest".to_string()));
     }
 
     #[test]

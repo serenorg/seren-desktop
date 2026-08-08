@@ -757,7 +757,28 @@ created if missing.",
             body["reasoning"] = serde_json::json!({ "effort": effort });
         }
 
+        self.apply_provider_sort(&mut body, routing);
+
         body
+    }
+
+    /// Inject the routing preference as `provider.sort` (#3747). Only
+    /// seren-models understands the field, and seren-router rejects unknown
+    /// values with a 400, so both the publisher and the value are gated here.
+    fn apply_provider_sort(&self, body: &mut serde_json::Value, routing: &RoutingDecision) {
+        if self.publisher_slug != DEFAULT_PUBLISHER_SLUG {
+            return;
+        }
+        if let Some(ref sort) = routing.provider_sort {
+            if matches!(sort.as_str(), "price" | "throughput" | "latency") {
+                body["provider"] = serde_json::json!({ "sort": sort });
+                log::info!("[ChatModelWorker] provider.sort={sort} attached");
+            } else {
+                log::warn!(
+                    "[ChatModelWorker] Ignoring unknown provider_sort value: {sort}"
+                );
+            }
+        }
     }
 
     /// Extract text from a content value that may be a string, an array of parts,
@@ -2141,6 +2162,7 @@ impl Worker for ChatModelWorker {
                 body["tools"] = serde_json::json!(tools);
                 body["tool_choice"] = serde_json::json!("auto");
             }
+            self.apply_provider_sort(&mut body, routing);
             // Cap output tokens on tool-call rounds — tool selections are small.
             if round > 0 {
                 body["max_tokens"] = serde_json::json!(4096);
@@ -2706,6 +2728,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -2727,6 +2750,55 @@ mod tests {
         assert_eq!(messages[0]["role"], "system");
         assert_eq!(messages[1]["content"], "previous message");
         assert_eq!(messages[2]["content"], "Hello world");
+        // No routing preference set → provider.sort must be absent so the
+        // server keeps its default Fastest policy (#3747).
+        assert!(body.get("provider").is_none());
+    }
+
+    #[test]
+    fn provider_sort_reaches_seren_models_bodies_only() {
+        let routing = |sort: Option<&str>| RoutingDecision {
+            worker_type: super::super::types::WorkerType::ChatModel,
+            model_id: "anthropic/claude-sonnet-4".to_string(),
+            delegation: super::super::types::DelegationType::InLoop,
+            reason: "General chat".to_string(),
+            selected_skills: vec![],
+            publisher_slug: None,
+            reasoning_effort: None,
+            provider_sort: sort.map(String::from),
+            project_root: None,
+        };
+
+        // seren-models worker with a valid preference → provider.sort on the body.
+        let worker = ChatModelWorker::new();
+        let body =
+            worker.build_request_body("hi", &[], &routing(Some("price")), "", &[], &[], None);
+        assert_eq!(body["provider"]["sort"], "price");
+
+        // The tool-loop body is built separately from build_request_body;
+        // apply_provider_sort is the shared injection point for both.
+        let mut loop_body = serde_json::json!({
+            "model": "anthropic/claude-sonnet-4",
+            "messages": [],
+            "stream": true
+        });
+        worker.apply_provider_sort(&mut loop_body, &routing(Some("price")));
+        assert_eq!(loop_body["provider"]["sort"], "price");
+
+        // Unknown values never reach the wire — seren-router 400s on them.
+        let mut invalid_body = serde_json::json!({ "model": "m", "stream": true });
+        worker.apply_provider_sort(&mut invalid_body, &routing(Some("balanced")));
+        assert!(invalid_body.get("provider").is_none());
+
+        // A non-seren-models publisher (private chat) must not see the field.
+        let private_worker = ChatModelWorker::with_tools(
+            Vec::new(),
+            Some("seren-private-models".to_string()),
+            EffectiveAgentPolicy::default(),
+        );
+        let mut private_body = serde_json::json!({ "model": "m", "stream": true });
+        private_worker.apply_provider_sort(&mut private_body, &routing(Some("price")));
+        assert!(private_body.get("provider").is_none());
     }
 
     #[test]
@@ -2740,6 +2812,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
         let dynamic_guidance =
@@ -2797,6 +2870,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -2840,6 +2914,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -2876,6 +2951,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -2905,6 +2981,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -3368,6 +3445,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -4084,6 +4162,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
         let tools = vec![
@@ -4117,6 +4196,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
         let tools = vec![make_tool("gateway__gmail__send_message")];
@@ -4149,6 +4229,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -4184,6 +4265,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -4216,6 +4298,7 @@ mod tests {
             selected_skills: vec![],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 

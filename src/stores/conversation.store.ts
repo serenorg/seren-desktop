@@ -2,6 +2,10 @@
 // ABOUTME: Replaces separate chat and local-agent message state with UnifiedMessage types.
 
 import { createStore } from "solid-js/store";
+import {
+  normalizeRoutingPreference,
+  type RoutingPreference,
+} from "@/lib/providers/routing-preference";
 import type { ProviderId } from "@/lib/providers/types";
 import {
   archiveConversation as archiveConversationDb,
@@ -18,6 +22,7 @@ import {
 } from "@/lib/tauri-bridge";
 import type { AgentType } from "@/services/providers";
 import { privacyStore } from "@/stores/privacy.store";
+import { settingsStore } from "@/stores/settings.store";
 import type { UnifiedMessage } from "@/types/conversation";
 import { deserializeMetadata, serializeMetadata } from "@/types/conversation";
 
@@ -35,6 +40,8 @@ export interface Conversation {
   isArchived: boolean;
   employeeId: string | null;
   privileged?: boolean;
+  /** Seren Models routing preference; null = server-default Fastest. */
+  routingPreference: RoutingPreference | null;
 }
 
 interface ConversationState {
@@ -104,6 +111,7 @@ function dbToConversation(db: DbConversation): Conversation {
     isArchived: db.is_archived,
     employeeId: db.employee_id ?? null,
     privileged: db.privileged,
+    routingPreference: normalizeRoutingPreference(db.routing_preference),
   };
 }
 
@@ -118,6 +126,7 @@ function unifiedRowToConversation(row: UnifiedConversationRow): Conversation {
     isArchived: row.is_archived,
     employeeId: row.employee_id,
     privileged: row.privileged,
+    routingPreference: normalizeRoutingPreference(row.routing_preference),
   };
 }
 
@@ -290,6 +299,9 @@ export const conversationStore = {
     employeeId?: string | null,
   ): Promise<Conversation> {
     const id = crypto.randomUUID();
+    // New threads snapshot the user's default routing preference; the
+    // per-thread selector owns the value from then on (#3747).
+    const routingPreference = settingsStore.get("chatRoutingPreference");
 
     try {
       await createConversationDb(
@@ -299,6 +311,7 @@ export const conversationStore = {
         selectedProvider ?? undefined,
         projectRoot,
         employeeId ?? undefined,
+        routingPreference,
       );
     } catch (error) {
       console.warn("Failed to persist conversation", error);
@@ -313,6 +326,7 @@ export const conversationStore = {
       projectRoot: projectRoot ?? null,
       isArchived: false,
       employeeId: employeeId ?? null,
+      routingPreference,
     };
 
     setState("conversations", (convos) => [conversation, ...convos]);
@@ -435,6 +449,44 @@ export const conversationStore = {
             }
           : c,
       ),
+    );
+  },
+
+  /**
+   * Persist the thread's Seren Models routing preference and mirror it in
+   * memory. The in-memory row only updates after the write succeeds so the
+   * selector never shows a preference the next request would not honor.
+   */
+  async updateConversationRoutingPreference(
+    id: string,
+    routingPreference: RoutingPreference,
+  ) {
+    try {
+      await updateConversationDb(
+        id,
+        undefined,
+        undefined,
+        undefined,
+        routingPreference,
+      );
+    } catch (error) {
+      console.warn("Failed to update routing preference", error);
+      return;
+    }
+
+    setState("conversations", (convos) =>
+      convos.map((c) => (c.id === id ? { ...c, routingPreference } : c)),
+    );
+  },
+
+  /**
+   * The thread's routing preference; null (unknown thread or legacy row)
+   * keeps the server-default Fastest routing.
+   */
+  getRoutingPreference(id: string | null): RoutingPreference | null {
+    if (!id) return null;
+    return (
+      state.conversations.find((c) => c.id === id)?.routingPreference ?? null
     );
   },
 

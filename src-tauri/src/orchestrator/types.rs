@@ -117,6 +117,11 @@ pub struct RoutingDecision {
     /// Project root for live repo context injection.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_root: Option<String>,
+    /// Seren Models `provider.sort` wire value ("price" | "throughput" |
+    /// "latency") resolved from the thread's routing preference. Only
+    /// injected into seren-models request bodies.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider_sort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -215,6 +220,10 @@ pub struct UserCapabilities {
     /// Values: "minimal", "low", "medium", "high", "xhigh". None = provider default.
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// Seren Models `provider.sort` wire value resolved by the frontend from
+    /// the thread's routing preference. None = server-default Fastest routing.
+    #[serde(default)]
+    pub provider_sort: Option<String>,
     /// Project root directory path. Used to gather live repo context (git status,
     /// branch, directory structure) for injection into the system prompt.
     #[serde(default)]
@@ -493,6 +502,7 @@ mod tests {
             }],
             publisher_slug: None,
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
         };
 
@@ -616,6 +626,7 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
             effective_agent_policy: EffectiveAgentPolicy::default(),
         };
@@ -641,6 +652,7 @@ mod tests {
             installed_skills: vec![],
             model_rankings: vec![],
             reasoning_effort: None,
+            provider_sort: None,
             project_root: None,
             effective_agent_policy: EffectiveAgentPolicy::default(),
         };

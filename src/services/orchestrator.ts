@@ -8,6 +8,7 @@ import {
   extractEvidenceFromUnifiedMessages,
   validateFinalOutput,
 } from "@/lib/agent-output-validation";
+import { providerSortForPreference } from "@/lib/providers/routing-preference";
 import type {
   Attachment,
   ProviderId,
@@ -138,6 +139,9 @@ interface UserCapabilities {
   tool_definitions: ToolDefinition[];
   installed_skills: SkillRef[];
   reasoning_effort: string | null;
+  /** Seren Models `provider.sort` wire value resolved from the thread's
+   * routing preference; null = server-default Fastest routing. */
+  provider_sort: string | null;
   /** Active project root, threaded through to RoutingDecision.project_root
    * so the Rust ChatModelWorker can inject live git/repo context. */
   project_root: string | null;
@@ -1501,6 +1505,14 @@ function buildCapabilities(
       path: s.path,
     })),
     reasoning_effort: chatStore.reasoningEffort ?? null,
+    // Only public Seren Models honors provider.sort; private chat and agent
+    // providers must not carry a routing preference (#3747).
+    provider_sort:
+      provider === "seren" && !forcePrivateChat
+        ? (providerSortForPreference(
+            conversationStore.getRoutingPreference(threadId),
+          ) ?? null)
+        : null,
     project_root: fileTreeState.rootPath ?? null,
     effective_agent_policy: {
       sandbox_mode: settingsStore.settings.agentSandboxMode,

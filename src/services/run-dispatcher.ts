@@ -3,6 +3,7 @@
 
 import { createEffect, createRoot } from "solid-js";
 import { sendProviderMessage } from "@/lib/providers";
+import { providerSortForPreference } from "@/lib/providers/routing-preference";
 import { reportError } from "@/lib/support/hook";
 import {
   continueToolIteration,
@@ -32,6 +33,7 @@ import { getLiveSerenModelCatalog } from "@/services/seren-model-catalog";
 import { agentStore } from "@/stores/agent.store";
 import { fileTreeState } from "@/stores/fileTree";
 import { runState } from "@/stores/run.store";
+import { settingsStore } from "@/stores/settings.store";
 
 const MAX_CONCURRENT_TASKS = 3;
 const TURN_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
@@ -491,11 +493,21 @@ async function runSerenChatTask(
     throw new Error("Seren model catalog returned no usable model");
   }
 
+  // Run tasks have no per-thread selector; they follow the user's default
+  // routing preference for new work (#3747).
+  const providerSort = providerSortForPreference(
+    settingsStore.get("chatRoutingPreference"),
+  );
+
   for await (const event of streamMessageWithTools(
     buildTaskPrompt(objective, task),
     model,
     undefined,
     true,
+    [],
+    undefined,
+    undefined,
+    providerSort,
   )) {
     if (event.type === "complete") return event.finalContent;
     if (event.type === "iteration_limit") {

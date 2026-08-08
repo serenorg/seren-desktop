@@ -12,6 +12,7 @@ import {
 } from "solid-js";
 import { isBuiltinServer, isLocalServer } from "@/lib/mcp/types";
 import { isWindowsPlatform } from "@/lib/platform";
+import { ROUTING_PREFERENCE_OPTIONS } from "@/lib/providers/routing-preference";
 import {
   type EraseTargetReport,
   eraseAllConversationData,
@@ -613,6 +614,34 @@ export const SettingsPanel: Component<SettingsPanelProps> = (props) => {
                   placeholder="Select a model"
                 />
               </Show>
+            </div>
+
+            <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
+              <label class="flex flex-col gap-0.5 flex-1">
+                <span class="text-[0.95rem] font-medium text-foreground">
+                  Default Routing
+                </span>
+                <span class="text-[0.8rem] text-muted-foreground">
+                  How Seren Models picks a provider for new threads. Each thread
+                  can override this from the composer.
+                </span>
+              </label>
+              <select
+                value={settingsState.app.chatRoutingPreference}
+                onChange={(e) =>
+                  settingsStore.set(
+                    "chatRoutingPreference",
+                    e.currentTarget.value === "cheapest"
+                      ? "cheapest"
+                      : "fastest",
+                  )
+                }
+                class="w-[140px] px-3 py-2 bg-surface-3/80 border border-border-strong rounded-md text-foreground text-[0.9rem] focus:outline-none focus:border-accent"
+              >
+                <For each={ROUTING_PREFERENCE_OPTIONS}>
+                  {(option) => <option value={option.id}>{option.name}</option>}
+                </For>
+              </select>
             </div>
 
             <div class="flex items-start justify-between gap-4 py-3 border-b border-border">
