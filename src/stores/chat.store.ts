@@ -363,9 +363,20 @@ export const chatStore = {
     const id = crypto.randomUUID();
     const model = state.selectedModel;
     const provider = null; // Will be determined from model
+    // New threads snapshot the user's default routing preference (#3747),
+    // matching conversationStore.createConversationWithModel.
+    const routingPreference = settingsStore.get("chatRoutingPreference");
 
     try {
-      await createConversationDb(id, title, model, provider ?? undefined);
+      await createConversationDb(
+        id,
+        title,
+        model,
+        provider ?? undefined,
+        undefined,
+        undefined,
+        routingPreference,
+      );
     } catch (error) {
       console.warn("Failed to persist conversation", error);
     }
@@ -377,6 +388,7 @@ export const chatStore = {
       selectedModel: model,
       selectedProvider: provider,
       isArchived: false,
+      routingPreference,
     };
 
     setState("conversations", (convos) => [conversation, ...convos]);
