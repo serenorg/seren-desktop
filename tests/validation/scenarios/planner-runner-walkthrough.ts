@@ -98,6 +98,14 @@ export default async function run(ctx: ScenarioContext): Promise<void> {
         30_000,
       ))
     ) {
+      await ctx.writeArtifact(
+        "00-signin-failure-screenshot.json",
+        await ctx.client.screenshot("body"),
+      );
+      await ctx.writeArtifact(
+        "00-signin-failure-text.json",
+        await ctx.client.dumpText("body"),
+      );
       throw new Error("Sign-in did not complete");
     }
   }
