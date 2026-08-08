@@ -29,6 +29,8 @@ export function providerDisplayName(
       return "Grok";
     case "claude-codex":
       return "Claude + Codex";
+    case "planner-runner":
+      return "Planner + Runner";
     case "lmstudio":
       return "LM Studio";
     default: {

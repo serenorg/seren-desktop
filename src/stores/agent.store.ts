@@ -515,6 +515,7 @@ import type {
   DiffEvent,
   DiffProposalEvent,
   PairedRole,
+  PairedRoleAgentType,
   PairedSpawnConfig,
   PairedStatus,
   PairedTranscriptEvent,
@@ -1463,7 +1464,11 @@ export interface ActiveSession {
 // ============================================================================
 
 function usesClaudeMemory(agentType: AgentType): boolean {
-  return agentType === "claude-code" || agentType === "claude-codex";
+  return (
+    agentType === "claude-code" ||
+    agentType === "claude-codex" ||
+    agentType === "planner-runner"
+  );
 }
 
 /**
@@ -1474,7 +1479,11 @@ function usesClaudeMemory(agentType: AgentType): boolean {
  * only ever holds the `claude-codex` wrapper. #3727.
  */
 function agentTypeTakesClaudeSlot(agentType: AgentType): boolean {
-  return agentType === "claude-code" || agentType === "claude-codex";
+  return (
+    agentType === "claude-code" ||
+    agentType === "claude-codex" ||
+    agentType === "planner-runner"
+  );
 }
 
 function encodeClaudeProjectDirForPath(cwd: string): string {
@@ -3391,9 +3400,11 @@ export const agentStore = {
             ? "Grok Agent"
             : resolvedAgentType === "claude-codex"
               ? "Claude + Codex"
-              : resolvedAgentType === "lmstudio"
-                ? "LM Studio Agent"
-                : "Claude Code Agent");
+              : resolvedAgentType === "planner-runner"
+                ? "Planner + Runner"
+                : resolvedAgentType === "lmstudio"
+                  ? "LM Studio Agent"
+                  : "Claude Code Agent");
 
     // Prevent concurrent spawns for the same conversation. Internal retries
     // (initRetryAttempt > 0) are allowed through because they are sequential
@@ -3570,7 +3581,9 @@ export const agentStore = {
                   ? providerService.ensureGrokCli
                   : resolvedAgentType === "claude-codex"
                     ? providerService.ensurePairedCli
-                    : null;
+                    : resolvedAgentType === "planner-runner"
+                      ? providerService.ensureGeneralPairedCli
+                      : null;
 
         if (ensureFn) {
           console.log("[AgentStore] Ensuring CLI is installed...");
@@ -3660,7 +3673,8 @@ export const agentStore = {
         // opts.paired.
         const reasoningEffort =
           resolvedAgentType === "claude-code" ||
-          resolvedAgentType === "claude-codex"
+          resolvedAgentType === "claude-codex" ||
+          resolvedAgentType === "planner-runner"
             ? settingsStore.settings.claudeReasoningEffort
             : undefined;
 
@@ -4408,7 +4422,10 @@ export const agentStore = {
       // PairedStatus the runtime's flat session info does not expose. Re-adopting
       // one would drop the paired UI, so leave paired resumes on the existing
       // terminate+respawn path (which reseeds pairedConfig from metadata). #2672
-      if (liveInfo.agentType === "claude-codex") {
+      if (
+        liveInfo.agentType === "claude-codex" ||
+        liveInfo.agentType === "planner-runner"
+      ) {
         return false;
       }
 
@@ -4673,6 +4690,7 @@ export const agentStore = {
       convo.agent_type === "gemini" ||
       convo.agent_type === "grok" ||
       convo.agent_type === "claude-codex" ||
+      convo.agent_type === "planner-runner" ||
       convo.agent_type === "lmstudio"
         ? (convo.agent_type as AgentType)
         : state.selectedAgentType;
@@ -5307,10 +5325,11 @@ export const agentStore = {
     // swap, fork, and restoreSessionSettings machinery here assumes one.
     // The planner's 1M window makes overflow rare — skip rather than risk
     // a half-restored pair (#2368).
-    if (session.info.agentType === "claude-codex") {
-      console.info(
-        "[AgentStore] Compaction skipped for paired Claude + Codex thread",
-      );
+    if (
+      session.info.agentType === "claude-codex" ||
+      session.info.agentType === "planner-runner"
+    ) {
+      console.info("[AgentStore] Compaction skipped for paired agent thread");
       return { outcome: "skipped_nothing_to_compact" };
     }
 
@@ -7126,6 +7145,40 @@ export const agentStore = {
     }
   },
 
+  /**
+   * Swap a Planner + Runner role to a different agent (#3748). Native CLIs
+   * are ensured before the runtime replaces that role's inner session; the
+   * refreshed paired status echo re-renders the pills and declaration.
+   */
+  async setPairedAgent(
+    role: PairedRole,
+    agentType: PairedRoleAgentType,
+    forSessionId?: string,
+  ) {
+    const sessionId = forSessionId ?? state.activeSessionId;
+    if (!sessionId || !state.sessions[sessionId]) return;
+    try {
+      const ensureFn =
+        agentType === "claude-code"
+          ? providerService.ensureClaudeCli
+          : agentType === "codex"
+            ? providerService.ensureCodexCli
+            : agentType === "gemini"
+              ? providerService.ensureGeminiCli
+              : agentType === "grok"
+                ? providerService.ensureGrokCli
+                : agentType === "lmstudio"
+                  ? providerService.ensureLmStudioCli
+                  : null;
+      if (ensureFn) await ensureFn();
+      await providerService.setRoleAgent(sessionId, role, agentType);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[AgentStore] Failed to set paired role agent:", error);
+      setState("sessions", sessionId, "error", message);
+    }
+  },
+
   /** Role-scoped config (reasoning effort) for paired threads (#2368). */
   async setPairedConfigOption(
     role: PairedRole,
@@ -7840,6 +7893,7 @@ export const agentStore = {
             sess &&
             sess.role === "serving" &&
             sess.info.agentType !== "claude-codex" &&
+            sess.info.agentType !== "planner-runner" &&
             !sess.standbySessionId &&
             !sess.isCompacting &&
             !sess.predictiveCompactInFlight &&
@@ -9273,7 +9327,7 @@ export const agentStore = {
       return null;
     }
     const forkedMessages = allMessages.slice(0, forkIndex + 1).map((message) =>
-      agentType === "claude-codex" &&
+      (agentType === "claude-codex" || agentType === "planner-runner") &&
       message.id === `paired-declaration-${session.conversationId}`
         ? {
             ...message,

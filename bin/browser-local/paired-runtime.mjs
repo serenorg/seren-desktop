@@ -1,9 +1,14 @@
-// ABOUTME: Paired Claude + Codex coordinator — Claude plans/reviews, Codex executes (#2368).
+// ABOUTME: Paired planner/executor coordinator — one agent plans/reviews, another executes (#2368, #3748).
 // ABOUTME: Presents one paired session to the frontend; inner runtime events are remapped with role attribution.
 
 import { randomUUID } from "node:crypto";
 
 export const PAIRED_AGENT_TYPE = "claude-codex";
+export const GENERAL_PAIRED_AGENT_TYPE = "planner-runner";
+export const PAIRED_AGENT_TYPES = new Set([
+  PAIRED_AGENT_TYPE,
+  GENERAL_PAIRED_AGENT_TYPE,
+]);
 
 const PAIRED_LEDGER_VERSION = 1;
 const DEFAULT_EXECUTOR_MAX_ATTEMPTS = 3;
@@ -91,20 +96,29 @@ export function resolvePlannerModel(explicitModelId, availableModels) {
   return { modelId: null, reason: "default", name: null };
 }
 
-const ROLE_DEFS = {
-  planner: {
-    role: "planner",
-    label: "Claude",
-    agentType: "claude-code",
-    defaultModelLabel: "Claude Default",
-  },
-  executor: {
-    role: "executor",
-    label: "Codex",
-    agentType: "codex",
-    defaultModelLabel: "Codex Recommended",
+// Fixed pairing for the legacy `claude-codex` wrapper; also the default
+// pairing a new `planner-runner` thread opens with (#3748).
+const ROLE_AGENT_DEFAULTS = { planner: "claude-code", executor: "codex" };
+
+// Per-agent presentation for either role. Labels feed the setup declaration,
+// handoffs, and role prompts; defaultModelLabel is the float-forward text the
+// selectors show until the user pins a model.
+const AGENT_IDENTITIES = {
+  "claude-code": { label: "Claude", defaultModelLabel: "Claude Default" },
+  codex: { label: "Codex", defaultModelLabel: "Codex Recommended" },
+  gemini: { label: "Antigravity", defaultModelLabel: "Antigravity Default" },
+  grok: { label: "Grok", defaultModelLabel: "Grok Default" },
+  lmstudio: { label: "LM Studio", defaultModelLabel: "LM Studio Default" },
+  seren: { label: "Seren", defaultModelLabel: "Seren Default" },
+  "seren-private": {
+    label: "Seren Private",
+    defaultModelLabel: "Private Default",
   },
 };
+
+export function pairedRoleAgentTypes() {
+  return Object.keys(AGENT_IDENTITIES);
+}
 
 function modelDisplayName(roleState) {
   const id = roleState.models?.currentModelId;
@@ -127,7 +141,7 @@ function describeRoleModel(roleState) {
     ? (modelDisplayName(roleState) ??
         MODEL_DISPLAY_LABELS[roleState.pinnedModelId] ??
         roleState.pinnedModelId)
-    : ROLE_DEFS[roleState.role].defaultModelLabel;
+    : roleState.defaultModelLabel;
   const current = modelDisplayName(roleState);
   return current && current !== base ? `${base} · currently ${current}` : base;
 }
@@ -137,13 +151,15 @@ export function buildPairedDeclaration(paired) {
   const executor = paired.roles.executor;
   const plannerEffort = effortDisplayValue(planner) ?? "runtime default";
   const executorEffort = effortDisplayValue(executor) ?? "runtime default";
+  const runnerWord = paired.runnerWord ?? "executor";
+  const runnerTitle = runnerWord === "runner" ? "Runner" : "Executor";
   return [
     "**Setup**",
     "",
-    "- Claude is planner and reviewer.",
-    "- Codex is executor for code edits, commands, and tests.",
+    `- ${planner.label} is planner and reviewer.`,
+    `- ${executor.label} is ${runnerWord} for code edits, commands, and tests.`,
     `- Planner: ${describeRoleModel(planner)} · ${plannerEffort} effort.`,
-    `- Executor: ${describeRoleModel(executor)} · ${executorEffort} effort.`,
+    `- ${runnerTitle}: ${describeRoleModel(executor)} · ${executorEffort} effort.`,
     "- Handoffs appear inline when ownership changes.",
   ].join("\n");
 }
@@ -195,10 +211,10 @@ function createSentinelFilter(sentinel) {
   };
 }
 
-function buildPlannerPrompt(userPrompt) {
+function buildPlannerPrompt(userPrompt, executorLabel) {
   return [
     "You are the PLANNER in a paired workflow. A separate executor agent",
-    "(Codex) will make all code edits, run commands, and run tests — you do",
+    `(${executorLabel}) will make all code edits, run commands, and run tests — you do`,
     "not. Read only the files you need to write an accurate plan.",
     "",
     "If the user is not ready for execution — they asked you to discuss,",
@@ -230,12 +246,12 @@ function buildPlannerPrompt(userPrompt) {
   ].join("\n");
 }
 
-function buildExecutorPrompt(userPrompt, planText, phase) {
+function buildExecutorPrompt(userPrompt, planText, phase, plannerLabel) {
   const assertionLines = phase.assertions
     .map((assertion) => `${assertion.id}: ${assertion.description}`)
     .join("\n");
   return [
-    "You are the EXECUTOR in a paired workflow. Claude's plan is approved",
+    `You are the EXECUTOR in a paired workflow. ${plannerLabel}'s plan is approved`,
     "guidance, but the repository is the source of truth. Inspect the",
     "relevant files, callers, tests, and config before editing. If the plan",
     "conflicts with the code, adapt and report the deviation.",
@@ -289,14 +305,14 @@ function buildExecutorPrompt(userPrompt, planText, phase) {
     "Original user request:",
     userPrompt,
     "",
-    "Approved plan from Claude:",
+    `Approved plan from ${plannerLabel}:`,
     planText || "(The planner did not produce plan text; use the user request directly.)",
   ].join("\n");
 }
 
-function buildRepairPrompt(userPrompt, planText, phase, diagnostics) {
+function buildRepairPrompt(userPrompt, planText, phase, diagnostics, plannerLabel) {
   return [
-    buildExecutorPrompt(userPrompt, planText, phase),
+    buildExecutorPrompt(userPrompt, planText, phase, plannerLabel),
     "",
     `This is bounded repair attempt ${phase.attempts.length + 1}.`,
     "Repair only the failed or missing assertions below, then re-run their",
@@ -309,9 +325,14 @@ function buildRepairPrompt(userPrompt, planText, phase, diagnostics) {
   ].join("\n");
 }
 
-function buildReviewPrompt(userPrompt, executorReport, checkpointSummary) {
+function buildReviewPrompt(
+  userPrompt,
+  executorReport,
+  checkpointSummary,
+  executorLabel,
+) {
   return [
-    "You are the REVIEWER in a paired workflow. Codex (the executor) just",
+    `You are the REVIEWER in a paired workflow. ${executorLabel} (the executor) just`,
     "implemented your plan. Review the work below against the user's request.",
     "Do NOT edit files. Verify the changes look correct, call out any gaps or",
     "risks, and finish with a short summary for the user: who planned, what",
@@ -325,7 +346,7 @@ function buildReviewPrompt(userPrompt, executorReport, checkpointSummary) {
     "Original user request:",
     userPrompt,
     "",
-    "Executor report from Codex:",
+    `Executor report from ${executorLabel}:`,
     executorReport || "(The executor did not produce a report.)",
   ].join("\n");
 }
@@ -626,9 +647,16 @@ export function createPairedRuntime({ emit, inner }) {
   const pairedSessions = new Map();
   const innerToPaired = new Map();
 
-  function createRoleState(role) {
+  function createRoleState(role, agentType) {
+    const identity = AGENT_IDENTITIES[agentType] ?? {
+      label: agentType,
+      defaultModelLabel: "Default",
+    };
     return {
-      ...ROLE_DEFS[role],
+      role,
+      agentType,
+      label: identity.label,
+      defaultModelLabel: identity.defaultModelLabel,
       innerSessionId: null,
       agentSessionId: null,
       models: undefined,
@@ -653,6 +681,17 @@ export function createPairedRuntime({ emit, inner }) {
     return JSON.stringify({
       planner,
       executor,
+      // The chosen pairing rides in the composite so a resumed thread spawns
+      // the same agents even if the conversation row's pairedConfig is stale.
+      // The legacy claude-codex composite stays byte-compatible (#3748).
+      ...(paired.agentType === GENERAL_PAIRED_AGENT_TYPE
+        ? {
+            agents: {
+              planner: paired.roles.planner.agentType,
+              executor: paired.roles.executor.agentType,
+            },
+          }
+        : {}),
       ledger: persistedLedger(paired.ledger),
     });
   }
@@ -765,10 +804,11 @@ export function createPairedRuntime({ emit, inner }) {
       sessionId: paired.id,
       status,
       agentSessionId: compositeAgentSessionId(paired),
-      agentInfo: { name: "Claude + Codex", version: "paired" },
+      agentInfo: { name: paired.displayName, version: "paired" },
       paired: {
         state: paired.state,
         activeRole: paired.activeRole,
+        agentType: paired.agentType,
         planner: roleStatusView(paired.roles.planner),
         executor: roleStatusView(paired.roles.executor),
         ledger: ledgerStatusView(paired),
@@ -989,12 +1029,36 @@ export function createPairedRuntime({ emit, inner }) {
     if (role === "planner") {
       const info = await inner.spawnSession({
         ...base,
-        agentType: ROLE_DEFS.planner.agentType,
+        agentType: roleState.agentType,
         approvalPolicy: params.approvalPolicy,
-        reasoningEffort: config.effort ?? params.reasoningEffort,
+        // The global claudeReasoningEffort default only applies to a Claude
+        // planner; other planner agents keep their own runtime default unless
+        // the user pinned an effort (#3748).
+        reasoningEffort:
+          config.effort ??
+          (roleState.agentType === "claude-code"
+            ? params.reasoningEffort
+            : undefined),
         initialModelId: config.modelId ?? undefined,
       });
       roleState.agentSessionId = info?.agentSessionId ?? roleState.agentSessionId;
+
+      if (roleState.agentType !== "claude-code") {
+        // Non-Claude planners float on their own runtime default (#3748
+        // decision: no cross-agent auto-pin). Honor an explicit user pin only.
+        if (config.modelId) {
+          try {
+            await inner.setSessionModel({
+              sessionId: innerSessionId,
+              modelId: config.modelId,
+            });
+          } catch {
+            roleState.pinnedModelId = null;
+            roleState.notice = `Pinned model ${config.modelId} is no longer available. Using the ${roleState.label} default instead.`;
+          }
+        }
+        return info;
+      }
 
       // Pin the planner/reviewer model. Prefer the user's explicit choice, then
       // Fable 5 (#2825), then the newest Opus when the account has no Fable
@@ -1034,13 +1098,16 @@ export function createPairedRuntime({ emit, inner }) {
 
     const info = await inner.spawnSession({
       ...base,
-      agentType: ROLE_DEFS.executor.agentType,
+      agentType: roleState.agentType,
       // Match direct Codex sessions: paired executor work should start in
-      // Permission Mode: Auto, not inherit Claude's default on-request policy.
+      // Permission Mode: Auto, not inherit the planner's default on-request
+      // policy. Runtimes without an equivalent mode map or ignore it.
       approvalPolicy: "on-failure",
       initialModelId: config.modelId ?? undefined,
       reasoningEffort: config.effort ?? undefined,
-      codexDefaultIntent: "paired-executor",
+      ...(roleState.agentType === "codex"
+        ? { codexDefaultIntent: "paired-executor" }
+        : {}),
     });
     roleState.agentSessionId = info?.agentSessionId ?? roleState.agentSessionId;
 
@@ -1083,14 +1150,39 @@ export function createPairedRuntime({ emit, inner }) {
     return info;
   }
 
+  function resolveRoleAgent(role, wrapperType, pairedConfig, resumeAgents) {
+    if (wrapperType !== GENERAL_PAIRED_AGENT_TYPE) {
+      return ROLE_AGENT_DEFAULTS[role];
+    }
+    const candidate =
+      resumeAgents?.[role] ?? pairedConfig?.[role]?.agentType ?? null;
+    return candidate && AGENT_IDENTITIES[candidate]
+      ? candidate
+      : ROLE_AGENT_DEFAULTS[role];
+  }
+
   async function spawnSession(params) {
     const pairedId = params.localSessionId ?? randomUUID();
     const resumeState = parseResumeState(params.resumeAgentSessionId);
     const resumeIds = resumeState.resumeIds;
 
+    const wrapperType =
+      params.agentType === GENERAL_PAIRED_AGENT_TYPE
+        ? GENERAL_PAIRED_AGENT_TYPE
+        : PAIRED_AGENT_TYPE;
+    const resumeAgents = resumeIds?.agents ?? null;
+
     const paired = {
       id: pairedId,
       cwd: params.cwd,
+      agentType: wrapperType,
+      displayName:
+        wrapperType === GENERAL_PAIRED_AGENT_TYPE
+          ? "Planner + Runner"
+          : "Claude + Codex",
+      runnerWord:
+        wrapperType === GENERAL_PAIRED_AGENT_TYPE ? "runner" : "executor",
+      spawnParams: params,
       status: "initializing",
       createdAt: new Date().toISOString(),
       timeoutSecs: params.timeoutSecs ?? undefined,
@@ -1098,8 +1190,14 @@ export function createPairedRuntime({ emit, inner }) {
       state: "idle",
       activeRole: null,
       roles: {
-        planner: createRoleState("planner"),
-        executor: createRoleState("executor"),
+        planner: createRoleState(
+          "planner",
+          resolveRoleAgent("planner", wrapperType, params.paired, resumeAgents),
+        ),
+        executor: createRoleState(
+          "executor",
+          resolveRoleAgent("executor", wrapperType, params.paired, resumeAgents),
+        ),
       },
       ledger: resumeState.ledger,
       resumeIds,
@@ -1137,7 +1235,7 @@ export function createPairedRuntime({ emit, inner }) {
 
       return {
         id: paired.id,
-        agentType: PAIRED_AGENT_TYPE,
+        agentType: paired.agentType,
         cwd: paired.cwd,
         status: paired.status,
         createdAt: paired.createdAt,
@@ -1294,7 +1392,7 @@ export function createPairedRuntime({ emit, inner }) {
         planText = await runRoleTurn(
           paired,
           "planner",
-          buildPlannerPrompt(prompt),
+          buildPlannerPrompt(prompt, paired.roles.executor.label),
           context,
         );
         collectMeta("planner", phase);
@@ -1335,11 +1433,11 @@ export function createPairedRuntime({ emit, inner }) {
       if (phase.status !== "reviewing" || !executorReport || !checkpoint) {
         emitHandoff(
           paired,
-          resumable ? "Ledger" : "Claude",
-          "Codex",
+          resumable ? "Ledger" : paired.roles.planner.label,
+          paired.roles.executor.label,
           resumable
-            ? `${phase.id} resumed directly with Codex; planner re-entry was blocked.`
-            : "Claude handed off to Codex to make the approved code changes.",
+            ? `${phase.id} resumed directly with ${paired.roles.executor.label}; planner re-entry was blocked.`
+            : `${paired.roles.planner.label} handed off to ${paired.roles.executor.label} to make the approved code changes.`,
         );
         phase.status = "executing";
         setPhase(paired, "executing", "executor");
@@ -1356,8 +1454,14 @@ export function createPairedRuntime({ emit, inner }) {
                       `Attempt ${attempt.number}: ${attempt.diagnostics}`,
                   )
                   .join("\n"),
+                paired.roles.planner.label,
               )
-            : buildExecutorPrompt(phase.userPrompt, planText, phase);
+            : buildExecutorPrompt(
+                phase.userPrompt,
+                planText,
+                phase,
+                paired.roles.planner.label,
+              );
         while (phase.attempts.length < phase.budget.maxAttempts) {
           executorReport = await runRoleTurn(
             paired,
@@ -1420,15 +1524,16 @@ export function createPairedRuntime({ emit, inner }) {
                   `Attempt ${attempt.number}: ${attempt.diagnostics}`,
               )
               .join("\n"),
+            paired.roles.planner.label,
           );
         }
       }
 
       emitHandoff(
         paired,
-        "Codex",
-        "Claude",
-        "Codex handed back to Claude at the declared ledger checkpoint.",
+        paired.roles.executor.label,
+        paired.roles.planner.label,
+        `${paired.roles.executor.label} handed back to ${paired.roles.planner.label} at the declared ledger checkpoint.`,
       );
       phase.status = "reviewing";
       setPhase(paired, "reviewing", "planner");
@@ -1440,6 +1545,7 @@ export function createPairedRuntime({ emit, inner }) {
           phase.userPrompt,
           executorReport,
           checkpointContext(paired.ledger, phase),
+          paired.roles.executor.label,
         ),
       );
       collectMeta("planner", phase);
@@ -1542,7 +1648,7 @@ export function createPairedRuntime({ emit, inner }) {
   async function listSessions() {
     return Array.from(pairedSessions.values()).map((paired) => ({
       id: paired.id,
-      agentType: PAIRED_AGENT_TYPE,
+      agentType: paired.agentType,
       cwd: paired.cwd,
       status: paired.status,
       createdAt: paired.createdAt,
@@ -1560,6 +1666,45 @@ export function createPairedRuntime({ emit, inner }) {
       );
     }
     return paired.roles[role];
+  }
+
+  /**
+   * Swap one role to a different agent mid-thread (#3748). The old inner leg
+   * is terminated and a fresh leg spawns with the new agent's defaults; the
+   * other role and the ledger are untouched. Pins do not carry across agents —
+   * a model pinned on Codex means nothing to Antigravity.
+   */
+  async function setRoleAgent({ sessionId, role, agentType }) {
+    const paired = requirePaired(sessionId);
+    if (paired.agentType !== GENERAL_PAIRED_AGENT_TYPE) {
+      throw new Error("Role agents are fixed for Claude + Codex threads.");
+    }
+    if (!AGENT_IDENTITIES[agentType]) {
+      throw new Error(`Unknown paired role agent: ${agentType}`);
+    }
+    if (paired.currentPrompt) {
+      throw new Error("Wait for the current turn to finish before changing agents.");
+    }
+    const previous = requireRole(paired, role);
+    if (previous.agentType === agentType) return;
+
+    if (previous.innerSessionId) {
+      try {
+        await inner.terminateSession({ sessionId: previous.innerSessionId });
+      } catch {
+        // Best-effort: the old leg may already be gone.
+      }
+      innerToPaired.delete(previous.innerSessionId);
+    }
+    if (paired.resumeIds?.[role]) {
+      // A fresh agent cannot resume the retired agent's provider session.
+      paired.resumeIds = { ...paired.resumeIds, [role]: null };
+    }
+
+    paired.roles[role] = createRoleState(role, agentType);
+    await spawnRole(paired, role, paired.spawnParams, { [role]: {} });
+    refreshDeclaration(paired);
+    emitPairedStatus(paired);
   }
 
   async function setSessionModel({ sessionId, modelId, role }) {
@@ -1670,6 +1815,11 @@ export function createPairedRuntime({ emit, inner }) {
           innerSessionId,
           pairedSessionId: owner.pairedId,
           role: owner.role,
+          pairedAgentType:
+            pairedSessions.get(owner.pairedId)?.agentType ?? PAIRED_AGENT_TYPE,
+          roleAgentType:
+            pairedSessions.get(owner.pairedId)?.roles?.[owner.role]?.agentType ??
+            null,
         }),
       );
     },
@@ -1679,6 +1829,7 @@ export function createPairedRuntime({ emit, inner }) {
     cancelPrompt,
     terminateSession,
     listSessions,
+    setRoleAgent,
     setSessionModel,
     updateSessionConfigOption,
     setPermissionMode,

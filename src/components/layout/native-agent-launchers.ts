@@ -46,6 +46,13 @@ export const NATIVE_AGENT_LAUNCHER_METADATA = {
     testId: "new-claude-codex-agent",
     chip: { label: "Subscription", variant: "subscription" },
   },
+  "planner-runner": {
+    label: "Planner + Runner",
+    description: "Pick any planner + any runner",
+    glyph: "🧭",
+    testId: "new-planner-runner-agent",
+    chip: { label: "Subscription", variant: "subscription" },
+  },
   gemini: {
     label: "Antigravity",
     description: "Google · Antigravity coding agent",
@@ -79,6 +86,10 @@ function isAllowedByOrganizationPolicy(
     case "codex":
       return allowsCodexAgent(policy);
     case "claude-codex":
+      return allowsClaudeAgent(policy) && allowsCodexAgent(policy);
+    case "planner-runner":
+      // The default pairing is Claude + Codex; a swapped role re-checks its
+      // own agent's policy gate at swap time.
       return allowsClaudeAgent(policy) && allowsCodexAgent(policy);
     case "gemini":
       return allowsGeminiAgent(policy);

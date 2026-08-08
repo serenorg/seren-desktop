@@ -39,7 +39,7 @@ import {
 
 const DEFAULT_BASE_URL = "http://localhost:1234";
 const LMSTUDIO_AGENT_TYPE = "lmstudio";
-const MAX_TOOL_ITERATIONS = 25;
+export const MAX_TOOL_ITERATIONS = 25;
 const DEFAULT_CONTEXT_LENGTH = 4096;
 const RESERVED_OUTPUT_TOKENS = 1024;
 const REQUEST_INPUT_OVERHEAD_TOKENS = 128;
@@ -522,7 +522,7 @@ async function parseMcpResponse(response) {
   return { sessionId, result: payload.result ?? null };
 }
 
-function createMcpGatewayClient({ capability, url } = {}) {
+export function createMcpGatewayClient({ capability, url } = {}) {
   let nextId = 1;
   let sessionId = null;
   let initialized = false;
@@ -675,7 +675,7 @@ export function schemaFromMcpTool(tool) {
   };
 }
 
-async function buildToolCatalog(session) {
+export async function buildToolCatalog(session) {
   const used = new Set();
   const tools = [];
   const handlers = new Map();
@@ -1220,7 +1220,10 @@ export function isToolIncompatibilityError(message) {
 }
 
 async function streamOpenAiResponse({ session, body, signal, onContent }) {
-  const response = await fetch(`${openAiBaseUrl(session.baseUrl)}/chat/completions`, {
+  const chatUrl =
+    session.chatCompletionsUrl ??
+    `${openAiBaseUrl(session.baseUrl)}/chat/completions`;
+  const response = await fetch(chatUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -1323,7 +1326,7 @@ async function streamOpenAiResponse({ session, body, signal, onContent }) {
  * tools for that model and retry, so the user always gets a reply instead of a
  * silent empty response.
  */
-async function runChatCompletion({ session, tools, signal, onContent }) {
+export async function runChatCompletion({ session, tools, signal, onContent }) {
   const requestModelId = session.currentModelId;
   const useTools =
     tools.length > 0 &&
@@ -1487,7 +1490,7 @@ function buildPermissionRequestEvent(
   };
 }
 
-function listPendingPermissions(session) {
+export function listPendingPermissions(session) {
   return Array.from(session.pendingPermissions.values()).map(
     (pending) => pending.permissionRequest,
   );
@@ -1537,7 +1540,7 @@ async function requestPermission(session, toolCall, args, fileAccess) {
   return permission;
 }
 
-async function executeToolCall(session, toolCall, handlers) {
+export async function executeToolCall(session, toolCall, handlers) {
   const args = safeJsonParse(toolCall.function.arguments, {});
   const handler = handlers.get(toolCall.function.name);
   const title = handler?.displayName ?? toolCall.function.name;

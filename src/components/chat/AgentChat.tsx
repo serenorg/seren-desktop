@@ -120,6 +120,7 @@ import { DataDestinationsPanel } from "./DataDestinationsPanel";
 import { DiffCard } from "./DiffCard";
 import { ImageAttachmentBar } from "./ImageAttachmentBar";
 import { OAuthAccountSwitcher } from "./OAuthAccountSwitcher";
+import { PairedAgentSelector } from "./PairedAgentSelector";
 import { PairedEffortSelector } from "./PairedEffortSelector";
 import { PairedFastModeSelector } from "./PairedFastModeSelector";
 import { PairedModelSelector } from "./PairedModelSelector";
@@ -590,6 +591,7 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       threadType === "gemini" ||
       threadType === "grok" ||
       threadType === "claude-codex" ||
+      threadType === "planner-runner" ||
       threadType === "lmstudio"
     ) {
       return threadType;
@@ -601,23 +603,32 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
       sessionAgent === "gemini" ||
       sessionAgent === "grok" ||
       sessionAgent === "claude-codex" ||
+      sessionAgent === "planner-runner" ||
       sessionAgent === "lmstudio"
     ) {
       return sessionAgent;
     }
     return agentStore.selectedAgentType;
   });
-  const isPairedThread = createMemo(() => lockedAgentType() === "claude-codex");
-  // Compact paired-workflow stage for the thread header (#2368).
+  const isPairedThread = createMemo(
+    () =>
+      lockedAgentType() === "claude-codex" ||
+      lockedAgentType() === "planner-runner",
+  );
+  // Compact paired-workflow stage for the thread header (#2368). Labels come
+  // from the live role status so a swapped pairing names its own agents.
   const pairedHeaderState = createMemo(() => {
     if (!isPairedThread()) return null;
-    switch (threadSession()?.paired?.state) {
+    const paired = threadSession()?.paired;
+    const plannerLabel = paired?.planner?.label ?? "Claude";
+    const executorLabel = paired?.executor?.label ?? "Codex";
+    switch (paired?.state) {
       case "planning":
-        return "Claude planning";
+        return `${plannerLabel} planning`;
       case "executing":
-        return "Codex editing";
+        return `${executorLabel} editing`;
       case "reviewing":
-        return "Claude reviewing";
+        return `${plannerLabel} reviewing`;
       case "waiting-approval":
         return "Waiting for approval";
       default:
@@ -634,6 +645,8 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
         return "Grok";
       case "claude-codex":
         return "Claude + Codex";
+      case "planner-runner":
+        return "Planner + Runner";
       case "lmstudio":
         return "LM Studio";
       default:
@@ -1754,7 +1767,9 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
           data-testid="paired-thread-header"
         >
           <span class="text-xs font-medium text-foreground">
-            {"\u{1F91D}"} Claude + Codex
+            {lockedAgentType() === "planner-runner"
+              ? `${"\u{1F9ED}"} Planner + Runner`
+              : `${"\u{1F91D}"} Claude + Codex`}
           </span>
           <span class="text-[11px] text-muted-foreground">
             {pairedHeaderState()}
@@ -2080,9 +2095,11 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                   ? "Grok"
                   : agentType === "claude-codex"
                     ? "Claude + Codex"
-                    : agentType === "lmstudio"
-                      ? "LM Studio"
-                      : "Claude Code";
+                    : agentType === "planner-runner"
+                      ? "Planner + Runner"
+                      : agentType === "lmstudio"
+                        ? "LM Studio"
+                        : "Claude Code";
           const reason = agentStore.agentFallbackReason;
           const title =
             reason === "prompt_too_long"
@@ -2356,6 +2373,14 @@ export const AgentChat: Component<AgentChatProps> = (props) => {
                     </>
                   }
                 >
+                  <PairedAgentSelector
+                    session={threadSession()}
+                    pairedRole="planner"
+                  />
+                  <PairedAgentSelector
+                    session={threadSession()}
+                    pairedRole="executor"
+                  />
                   <PairedModelSelector
                     session={threadSession()}
                     pairedRole="planner"

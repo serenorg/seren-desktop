@@ -43,6 +43,10 @@ describe("#3680 complete automatic CLI provisioning roster", () => {
         kind: "derived",
         dependencies: ["claude-code", "codex"],
       },
+      "planner-runner": {
+        kind: "derived",
+        dependencies: ["claude-code", "codex"],
+      },
       gemini: { kind: "verified-artifact", target: "antigravity" },
       grok: { kind: "npm", target: "grok" },
       lmstudio: { kind: "external-app", target: "lmstudio" },

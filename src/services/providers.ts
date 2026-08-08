@@ -30,7 +30,18 @@ export type AgentType =
   | "gemini"
   | "grok"
   | "claude-codex"
+  | "planner-runner"
   | "lmstudio";
+
+/**
+ * Agents selectable as a Planner + Runner role (#3748): every single-agent
+ * native runtime plus the hosted Seren runtimes. The paired wrappers cannot
+ * nest inside themselves.
+ */
+export type PairedRoleAgentType =
+  | Exclude<AgentType, "claude-codex" | "planner-runner">
+  | "seren"
+  | "seren-private";
 export type UnlistenFn = () => void;
 
 /**
@@ -119,7 +130,7 @@ export function assertPrivilegedConversationProvider(
 
 export type ProviderOrigin = "desktop" | "remote";
 
-/** Roles inside a paired `claude-codex` thread (#2368). */
+/** Roles inside a paired `claude-codex` or `planner-runner` thread (#2368, #3748). */
 export type PairedRole = "planner" | "executor";
 
 export interface AgentOAuthRouting {
@@ -157,6 +168,7 @@ export function supportsConversationFork(agentType: AgentType): boolean {
     agentType === "gemini" ||
     agentType === "grok" ||
     agentType === "claude-codex" ||
+    agentType === "planner-runner" ||
     agentType === "lmstudio"
   );
 }
@@ -411,6 +423,8 @@ export interface PairedRoleStatus {
 export interface PairedStatus {
   state: PairedState;
   activeRole: PairedRole | null;
+  /** Wrapper agent type; absent on claude-codex statuses from older runtimes. */
+  agentType?: "claude-codex" | "planner-runner";
   planner: PairedRoleStatus;
   executor: PairedRoleStatus;
 }
@@ -429,8 +443,18 @@ export interface PairedTranscriptEvent {
 
 /** Per-role spawn configuration restored from the conversation row. */
 export interface PairedSpawnConfig {
-  planner?: { modelId?: string; effort?: string; serviceTier?: string };
-  executor?: { modelId?: string; effort?: string; serviceTier?: string };
+  planner?: {
+    agentType?: PairedRoleAgentType;
+    modelId?: string;
+    effort?: string;
+    serviceTier?: string;
+  };
+  executor?: {
+    agentType?: PairedRoleAgentType;
+    modelId?: string;
+    effort?: string;
+    serviceTier?: string;
+  };
 }
 
 /** Capture only explicit paired role pins that a fresh session can restore. */
@@ -439,12 +463,21 @@ export function pairedSpawnConfigFromStatus(
 ): PairedSpawnConfig | undefined {
   if (!paired) return undefined;
 
+  const persistAgents = paired.agentType === "planner-runner";
   const roleConfig = (
     role: PairedRoleStatus,
   ):
-    | { modelId?: string; effort?: string; serviceTier?: string }
+    | {
+        agentType?: PairedRoleAgentType;
+        modelId?: string;
+        effort?: string;
+        serviceTier?: string;
+      }
     | undefined => {
     const config = {
+      ...(persistAgents && role.agentType
+        ? { agentType: role.agentType as PairedRoleAgentType }
+        : {}),
       ...(role.pinnedModelId ? { modelId: role.pinnedModelId } : {}),
       ...(role.pinnedEffort ? { effort: role.pinnedEffort } : {}),
       ...(role.pinnedServiceTier
@@ -860,6 +893,22 @@ export async function listRemoteSessions(
 }
 
 /**
+ * Swap one Planner + Runner role to a different agent (#3748). The runtime
+ * terminates that role's inner session and spawns the new agent in place.
+ */
+export async function setRoleAgent(
+  sessionId: string,
+  role: PairedRole,
+  agentType: PairedRoleAgentType,
+): Promise<void> {
+  return invokeProvider("provider_set_role_agent", {
+    sessionId,
+    role,
+    agentType,
+  });
+}
+
+/**
  * Set the AI model for an agent runtime session. Paired sessions require a
  * role so only that role's inner session is touched.
  */
@@ -1088,6 +1137,18 @@ export async function ensurePairedCli(): Promise<string> {
   return invokeProvider<string>(
     "provider_ensure_agent_cli",
     { agentType: "claude-codex" },
+    { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
+  );
+}
+
+/**
+ * Ensure the CLIs backing a Planner + Runner thread's default pairing are
+ * installed. A swapped role's CLI is ensured separately before the swap.
+ */
+export async function ensureGeneralPairedCli(): Promise<string> {
+  return invokeProvider<string>(
+    "provider_ensure_agent_cli",
+    { agentType: "planner-runner" },
     { timeoutMs: CLI_ENSURE_TIMEOUT_MS },
   );
 }

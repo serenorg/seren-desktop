@@ -53,6 +53,11 @@ const lmStudioRuntimeModule = await loadAgentRuntimeModule(
   "lmstudio",
   () => import("./lmstudio-runtime.mjs"),
 );
+const serenRuntimeModule = await loadAgentRuntimeModule(
+  "seren-hosted",
+  () => import("./seren-runtime.mjs"),
+);
+
 const pairedRuntimeModule = await loadAgentRuntimeModule(
   "claude-codex",
   () => import("./paired-runtime.mjs"),
@@ -63,6 +68,12 @@ const pairedRuntimeModule = await loadAgentRuntimeModule(
 // still recognizes the type and routes it to the unavailable stub.
 const PAIRED_AGENT_TYPE =
   pairedRuntimeModule.module?.PAIRED_AGENT_TYPE ?? "claude-codex";
+const PAIRED_AGENT_TYPES =
+  pairedRuntimeModule.module?.PAIRED_AGENT_TYPES ??
+  new Set(["claude-codex", "planner-runner"]);
+const SEREN_HOSTED_AGENT_TYPES =
+  serenRuntimeModule.module?.SEREN_HOSTED_AGENT_TYPES ??
+  new Set(["seren", "seren-private"]);
 
 const CODEX_DEFAULT_INTENTS = new Set(["direct", "paired-executor"]);
 const CODEX_DIRECT_PREFERRED_MODELS = ["gpt-5.6-sol", "gpt-5.6"];
@@ -1793,6 +1804,13 @@ export function createProviderHandlers({
     { emit, runtimeMode },
   );
 
+  const serenRuntime = instantiateAgentRuntime(
+    "seren-hosted",
+    serenRuntimeModule,
+    "createSerenHostedRuntime",
+    { emit, runtimeMode },
+  );
+
   async function withTemporaryCodexSession(cwd, callback) {
     const processHandle = spawnCodex(cwd);
     const session = createCodexSessionRecord({
@@ -1920,7 +1938,7 @@ export function createProviderHandlers({
   }) {
     const settings = { approvalPolicy, sandboxMode, networkEnabled };
 
-    if (agentType === "codex" || agentType === PAIRED_AGENT_TYPE) {
+    if (agentType === "codex" || PAIRED_AGENT_TYPES.has(agentType)) {
       // Direct Codex and the paired executor both intentionally start with
       // Codex's on-failure policy, independent of Claude's global default.
       const defaultModeId = modeFromApprovalPolicy("on-failure");
@@ -1982,7 +2000,7 @@ export function createProviderHandlers({
       codexDefaultIntent,
     } = params;
 
-    if (agentType === PAIRED_AGENT_TYPE) {
+    if (PAIRED_AGENT_TYPES.has(agentType)) {
       return pairedRuntime.spawnSession(params);
     }
 
@@ -2000,6 +2018,10 @@ export function createProviderHandlers({
 
     if (agentType === "lmstudio") {
       return lmStudioRuntime.spawnSession(params);
+    }
+
+    if (SEREN_HOSTED_AGENT_TYPES.has(agentType)) {
+      return serenRuntime.spawnSession(params);
     }
 
     if (agentType !== "codex") {
@@ -2340,6 +2362,20 @@ export function createProviderHandlers({
           onAccepted,
         });
       }
+      if (serenRuntime.hasSession(sessionId)) {
+        emit("provider://user-message", {
+          sessionId,
+          text: prompt,
+          origin: source,
+        });
+        return serenRuntime.sendPrompt({
+          sessionId,
+          prompt,
+          context,
+          origin: source,
+          onAccepted,
+        });
+      }
       emit("provider://user-message", {
         sessionId,
         text: prompt,
@@ -2466,6 +2502,9 @@ export function createProviderHandlers({
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.cancelPrompt({ sessionId });
       }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.cancelPrompt({ sessionId });
+      }
       return claudeRuntime.cancelPrompt({ sessionId });
     }
     if (session.activeTurnId) {
@@ -2522,6 +2561,9 @@ export function createProviderHandlers({
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.terminateSession({ sessionId });
       }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.terminateSession({ sessionId });
+      }
       return claudeRuntime.terminateSession({ sessionId });
     }
 
@@ -2561,6 +2603,7 @@ export function createProviderHandlers({
       ...(await geminiRuntime.listSessions()),
       ...(await grokRuntime.listSessions()),
       ...(await lmStudioRuntime.listSessions()),
+      ...(await serenRuntime.listSessions()),
       ...(await pairedRuntime.listSessions()),
     ];
   }
@@ -2586,7 +2629,9 @@ export function createProviderHandlers({
           // The id the frontend actually holds in state.sessions: the paired
           // wrapper for an inner planner, otherwise the session itself.
           ownerSessionId: owner?.pairedSessionId ?? holder.sessionId,
-          ownerAgentType: owner ? PAIRED_AGENT_TYPE : holder.agentType,
+          ownerAgentType: owner
+            ? (owner.pairedAgentType ?? PAIRED_AGENT_TYPE)
+            : holder.agentType,
           pairedRole: owner?.role ?? null,
         };
       }),
@@ -2608,6 +2653,9 @@ export function createProviderHandlers({
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setPermissionMode({ sessionId, mode });
+      }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.setPermissionMode({ sessionId, mode });
       }
       return claudeRuntime.setPermissionMode({ sessionId, mode });
     }
@@ -2633,6 +2681,9 @@ export function createProviderHandlers({
       }
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setOAuthRouting({ sessionId, routing });
+      }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.setOAuthRouting({ sessionId, routing });
       }
       return claudeRuntime.setOAuthRouting({ sessionId, routing });
     }
@@ -2678,6 +2729,16 @@ export function createProviderHandlers({
         return runPermissionResolution({
           sessionId, requestId, optionId, source,
           action: () => lmStudioRuntime.respondToPermission({
+            sessionId,
+            requestId,
+            optionId,
+          }),
+        });
+      }
+      if (serenRuntime.hasSession(sessionId)) {
+        return runPermissionResolution({
+          sessionId, requestId, optionId, source,
+          action: () => serenRuntime.respondToPermission({
             sessionId,
             requestId,
             optionId,
@@ -2873,6 +2934,9 @@ export function createProviderHandlers({
       if (lmStudioRuntime.hasSession(sessionId)) {
         return lmStudioRuntime.setSessionModel({ sessionId, modelId });
       }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.setSessionModel({ sessionId, modelId });
+      }
       return claudeRuntime.setModel({ sessionId, modelId });
     }
 
@@ -2958,6 +3022,14 @@ export function createProviderHandlers({
           role,
         });
       }
+      if (serenRuntime.hasSession(sessionId)) {
+        return serenRuntime.updateSessionConfigOption({
+          sessionId,
+          configId,
+          valueId,
+          role,
+        });
+      }
       return claudeRuntime.setConfigOption({ sessionId, configId, valueId });
     }
 
@@ -3028,6 +3100,13 @@ export function createProviderHandlers({
     },
   );
 
+  async function setRoleAgent({ sessionId, role, agentType }) {
+    if (pairedRuntime.hasSession(sessionId)) {
+      return pairedRuntime.setRoleAgent({ sessionId, role, agentType });
+    }
+    throw new Error("Role agents can only be changed on a paired session.");
+  }
+
   return {
     spawnSession,
     sendPrompt,
@@ -3052,6 +3131,7 @@ export function createProviderHandlers({
     listRemoteSessions,
     nativeForkSession,
     buildSyntheticTranscript,
+    setRoleAgent,
     setSessionModel,
     setSessionMode,
     updateSessionConfigOption,

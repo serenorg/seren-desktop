@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // @ts-expect-error — plain-JS runtime module without type declarations.
 import {
   createPairedRuntime,
+  GENERAL_PAIRED_AGENT_TYPE,
   PAIRED_AGENT_TYPE,
   resolvePlannerModel,
 } from "../../bin/browser-local/paired-runtime.mjs";
@@ -1483,5 +1484,145 @@ describe("resolvePlannerModel (#2827)", () => {
     expect(resolvePlannerModel(null, undefined)).toMatchObject({
       reason: "default",
     });
+  });
+});
+
+describe("planner-runner — configurable pairing (#3748)", () => {
+  let h: ReturnType<typeof createHarness>;
+  beforeEach(() => {
+    h = createHarness();
+  });
+
+  async function spawnGeneral(params: Record<string, unknown> = {}) {
+    return h.paired.spawnSession({
+      agentType: GENERAL_PAIRED_AGENT_TYPE,
+      cwd: "/tmp/project",
+      localSessionId: "paired-1",
+      ...params,
+    });
+  }
+
+  it("defaults to the Claude + Codex pairing when no roles are configured", async () => {
+    const info = await spawnGeneral();
+    expect(info.agentType).toBe(GENERAL_PAIRED_AGENT_TYPE);
+    const spawnTypes = h.inner.spawnSession.mock.calls.map(
+      (c) => c[0].agentType,
+    );
+    expect(spawnTypes).toEqual(["claude-code", "codex"]);
+  });
+
+  it("spawns the configured role agents and names them in the declaration", async () => {
+    await spawnGeneral({
+      paired: {
+        planner: { agentType: "gemini" },
+        executor: { agentType: "grok" },
+      },
+    });
+    const spawnTypes = h.inner.spawnSession.mock.calls.map(
+      (c) => c[0].agentType,
+    );
+    expect(spawnTypes).toEqual(["gemini", "grok"]);
+
+    const declarations = eventsFor(h.emitted, "provider://paired-event").filter(
+      (e) => e.payload.kind === "declaration",
+    );
+    const text = String(declarations[0].payload.text);
+    expect(text).toContain("Antigravity is planner and reviewer");
+    expect(text).toContain("Grok is runner");
+  });
+
+  it("allows the same agent in both roles", async () => {
+    await spawnGeneral({
+      paired: {
+        planner: { agentType: "codex" },
+        executor: { agentType: "codex" },
+      },
+    });
+    const spawnTypes = h.inner.spawnSession.mock.calls.map(
+      (c) => c[0].agentType,
+    );
+    expect(spawnTypes).toEqual(["codex", "codex"]);
+  });
+
+  it("keeps a non-Claude planner on its own default model — no Fable pin", async () => {
+    await spawnGeneral({
+      paired: { planner: { agentType: "gemini" } },
+    });
+    expect(h.inner.setSessionModel).not.toHaveBeenCalled();
+  });
+
+  it("still pins Fable for a Claude planner", async () => {
+    await spawnGeneral();
+    expect(h.inner.setSessionModel).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "claude-fable-5[1m]" }),
+    );
+  });
+
+  it("records the pairing in the composite session id for resume", async () => {
+    const info = await spawnGeneral({
+      paired: {
+        planner: { agentType: "gemini" },
+        executor: { agentType: "grok" },
+      },
+    });
+    const composite = JSON.parse(String(info.agentSessionId));
+    expect(composite.agents).toEqual({ planner: "gemini", executor: "grok" });
+  });
+
+  it("respawns the recorded pairing from a resume composite over stale config", async () => {
+    const resume = JSON.stringify({
+      planner: "planner-remote-id",
+      executor: "executor-remote-id",
+      agents: { planner: "grok", executor: "lmstudio" },
+    });
+    await spawnGeneral({
+      resumeAgentSessionId: resume,
+      paired: { planner: { agentType: "gemini" } },
+    });
+    const spawnTypes = h.inner.spawnSession.mock.calls.map(
+      (c) => c[0].agentType,
+    );
+    expect(spawnTypes).toEqual(["grok", "lmstudio"]);
+  });
+
+  it("swaps one role's agent in place and refreshes the declaration", async () => {
+    await spawnGeneral();
+    const executorInner = h.inner.spawnSession.mock.calls[1][0]
+      .localSessionId as string;
+
+    await h.paired.setRoleAgent({
+      sessionId: "paired-1",
+      role: "executor",
+      agentType: "gemini",
+    });
+
+    expect(h.inner.terminateSession).toHaveBeenCalledWith({
+      sessionId: executorInner,
+    });
+    const spawnTypes = h.inner.spawnSession.mock.calls.map(
+      (c) => c[0].agentType,
+    );
+    expect(spawnTypes).toEqual(["claude-code", "codex", "gemini"]);
+
+    const declarations = eventsFor(h.emitted, "provider://paired-event").filter(
+      (e) => e.payload.kind === "declaration",
+    );
+    const latest = String(declarations.at(-1)?.payload.text);
+    expect(latest).toContain("Antigravity is runner");
+  });
+
+  it("refuses role swaps on a claude-codex thread", async () => {
+    await h.paired.spawnSession({
+      agentType: PAIRED_AGENT_TYPE,
+      cwd: "/tmp/project",
+      localSessionId: "paired-1",
+    });
+    await expect(
+      h.paired.setRoleAgent({
+        sessionId: "paired-1",
+        role: "executor",
+        agentType: "gemini",
+      }),
+    ).rejects.toThrow(/fixed/i);
   });
 });

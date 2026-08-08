@@ -265,6 +265,7 @@ export function defaultContextWindowFor(
   // Paired threads gauge against the planner (Claude defaults to the 1M
   // tier); the runtime-reported contextWindow corrects this per turn.
   if (agentType === "claude-codex") return 1_000_000;
+  if (agentType === "planner-runner") return 1_000_000;
   if (agentType === "claude-code" && modelId) {
     if (/\[1m\]$/i.test(modelId)) {
       const stripped = modelId.replace(/\[1m\]$/i, "").replace(/-\d{8}$/, "");

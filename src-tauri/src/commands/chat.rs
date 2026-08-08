@@ -162,19 +162,52 @@ fn delete_agent_transcripts_best_effort(targets: &[AgentTranscriptTarget]) {
 fn split_paired_session_ids(
     agent_type: &str,
     session_id: &str,
-) -> (Option<String>, Option<String>) {
+) -> (Vec<String>, Vec<String>) {
     let non_empty = |value: &str| (!value.is_empty()).then(|| value.to_string());
     match agent_type {
-        "claude-code" => (non_empty(session_id), None),
-        "codex" => (None, non_empty(session_id)),
+        "claude-code" => (non_empty(session_id).into_iter().collect(), Vec::new()),
+        "codex" => (Vec::new(), non_empty(session_id).into_iter().collect()),
         "claude-codex" => match serde_json::from_str::<PairedSessionIds>(session_id) {
             Ok(ids) => (
-                ids.planner.filter(|id| !id.is_empty()),
-                ids.executor.filter(|id| !id.is_empty()),
+                ids.planner
+                    .filter(|id| !id.is_empty())
+                    .into_iter()
+                    .collect(),
+                ids.executor
+                    .filter(|id| !id.is_empty())
+                    .into_iter()
+                    .collect(),
             ),
-            Err(_) => (None, None),
+            Err(_) => (Vec::new(), Vec::new()),
         },
-        _ => (None, None),
+        // A planner-runner composite names each role's agent; either role can
+        // be a Claude or Codex leg (including both the same), and legs backed
+        // by other agents keep no local transcript this cleanup owns (#3748).
+        "planner-runner" => match serde_json::from_str::<PairedSessionIds>(session_id) {
+            Ok(ids) => {
+                let mut claude = Vec::new();
+                let mut codex = Vec::new();
+                let agents = ids.agents.unwrap_or_default();
+                let mut route = |session: Option<String>, agent: Option<&str>| {
+                    let Some(id) = session.filter(|id| !id.is_empty()) else {
+                        return;
+                    };
+                    match agent {
+                        Some("claude-code") => claude.push(id),
+                        Some("codex") => codex.push(id),
+                        _ => {}
+                    }
+                };
+                route(
+                    ids.planner,
+                    agents.planner.as_deref().or(Some("claude-code")),
+                );
+                route(ids.executor, agents.executor.as_deref().or(Some("codex")));
+                (claude, codex)
+            }
+            Err(_) => (Vec::new(), Vec::new()),
+        },
+        _ => (Vec::new(), Vec::new()),
     }
 }
 
@@ -182,6 +215,16 @@ fn split_paired_session_ids(
 /// conversation's composite `agent_session_id`. The trailing ledger is ignored.
 #[derive(Deserialize)]
 struct PairedSessionIds {
+    planner: Option<String>,
+    executor: Option<String>,
+    #[serde(default)]
+    agents: Option<PairedSessionAgents>,
+}
+
+/// The per-role agent types a `planner-runner` composite records so transcript
+/// cleanup routes each leg to the right provider's on-disk format.
+#[derive(Default, Deserialize)]
+struct PairedSessionAgents {
     planner: Option<String>,
     executor: Option<String>,
 }
@@ -196,10 +239,10 @@ fn remove_agent_transcripts(
     codex_root: Option<&std::path::Path>,
 ) {
     for target in targets {
-        let (claude_id, codex_id) =
+        let (claude_ids, codex_ids) =
             split_paired_session_ids(&target.agent_type, &target.session_id);
 
-        if let Some(claude_id) = claude_id {
+        for claude_id in claude_ids {
             if let (Some(root), Some(cwd)) = (claude_root, target.agent_cwd.as_deref()) {
                 if uuid::Uuid::parse_str(&claude_id).is_ok() {
                     let path = crate::claude_memory::session_jsonl_path(
@@ -211,7 +254,7 @@ fn remove_agent_transcripts(
                 }
             }
         }
-        if let Some(codex_id) = codex_id {
+        for codex_id in codex_ids {
             if let Some(root) = codex_root {
                 for path in crate::terminal::codex_transcripts_for_session(root, &codex_id) {
                     remove_transcript_file(&path);
@@ -2959,7 +3002,7 @@ mod tests {
         is_happy_provider_session_archived_in_db, list_legacy_happy_restoration_candidates_in_db,
         lookup_agent_conversation_owner_in_db, lookup_happy_restoration_candidate_in_db,
         lookup_happy_session_id_by_conversation_in_db, migrate_happy_restoration_relay_in_db,
-        remove_agent_transcripts,
+        remove_agent_transcripts, split_paired_session_ids,
         set_agent_conversation_session_id_in_db,
         upsert_agent_conversation_in_db, vacuum_database,
     };
@@ -3352,6 +3395,42 @@ mod tests {
 
         // Idempotent: a second pass over now-missing files must not panic.
         remove_agent_transcripts(&targets, Some(claude_root.path()), Some(codex_root.path()));
+    }
+
+    #[test]
+    fn split_planner_runner_composite_routes_legs_by_agent_type() {
+        // Roles route to the provider that owns their on-disk transcript
+        // format — either bucket can hold either role, including both (#3748).
+        let swapped = serde_json::json!({
+            "planner": "11111111-1111-4111-8111-111111111111",
+            "executor": "22222222-2222-4222-8222-222222222222",
+            "agents": { "planner": "codex", "executor": "claude-code" },
+        })
+        .to_string();
+        let (claude, codex) = split_paired_session_ids("planner-runner", &swapped);
+        assert_eq!(claude, vec!["22222222-2222-4222-8222-222222222222"]);
+        assert_eq!(codex, vec!["11111111-1111-4111-8111-111111111111"]);
+
+        // Hosted and other-provider legs keep no local transcript here.
+        let hosted = serde_json::json!({
+            "planner": "33333333-3333-4333-8333-333333333333",
+            "executor": "44444444-4444-4444-8444-444444444444",
+            "agents": { "planner": "seren", "executor": "gemini" },
+        })
+        .to_string();
+        let (claude, codex) = split_paired_session_ids("planner-runner", &hosted);
+        assert!(claude.is_empty());
+        assert!(codex.is_empty());
+
+        // A composite without an agents map is the default pairing.
+        let default_pairing = serde_json::json!({
+            "planner": "55555555-5555-4555-8555-555555555555",
+            "executor": "66666666-6666-4666-8666-666666666666",
+        })
+        .to_string();
+        let (claude, codex) = split_paired_session_ids("planner-runner", &default_pairing);
+        assert_eq!(claude, vec!["55555555-5555-4555-8555-555555555555"]);
+        assert_eq!(codex, vec!["66666666-6666-4666-8666-666666666666"]);
     }
 
     #[test]

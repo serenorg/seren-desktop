@@ -24,6 +24,7 @@ const runtimeAgentTypes: AgentType[] = [
   "codex",
   "claude-code",
   "claude-codex",
+  "planner-runner",
   "gemini",
   "grok",
   "lmstudio",
@@ -88,7 +89,7 @@ describe("ThreadSidebar — chip vocabulary (#1832)", () => {
     const hosted = Object.values(NATIVE_AGENT_LAUNCHER_METADATA).filter(
       (metadata) => metadata.chip.variant === "subscription",
     );
-    expect(hosted).toHaveLength(5);
+    expect(hosted).toHaveLength(6);
     expect(
       hosted.every((metadata) =>
         metadata.chip.label.startsWith("Subscription"),
@@ -363,10 +364,14 @@ describe("AgentChat — paired thread surfaces (#2368)", () => {
   });
 
   it("shows the compact paired header states", () => {
-    expect(agentChatTsx).toContain('"Claude planning"');
-    expect(agentChatTsx).toContain('"Codex editing"');
-    expect(agentChatTsx).toContain('"Claude reviewing"');
+    // Role labels come from the live paired status so a swapped pairing names
+    // its own agents; Claude/Codex remain the defaults (#3748).
+    expect(agentChatTsx).toContain("${plannerLabel} planning");
+    expect(agentChatTsx).toContain("${executorLabel} editing");
+    expect(agentChatTsx).toContain("${plannerLabel} reviewing");
     expect(agentChatTsx).toContain('"Waiting for approval"');
+    expect(agentChatTsx).toContain('?? "Claude"');
+    expect(agentChatTsx).toContain('?? "Codex"');
   });
 
   it("renders handoff events as inline transcript activity lines", () => {
