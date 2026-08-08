@@ -381,6 +381,8 @@ function isAgentAuthenticated(agentType) {
       return false;
     case "claude-codex":
       return hasClaudeCredentials() && hasCodexCredentials();
+    case "planner-runner":
+      return hasClaudeCredentials() && hasCodexCredentials();
     default:
       return false;
   }
@@ -420,6 +422,10 @@ const AGENT_CLI_PROVISIONING = Object.freeze({
   codex: { kind: "npm", target: "codex" },
   "claude-code": { kind: "npm", target: "claude" },
   "claude-codex": {
+    kind: "derived",
+    dependencies: ["claude-code", "codex"],
+  },
+  "planner-runner": {
     kind: "derived",
     dependencies: ["claude-code", "codex"],
   },
@@ -1000,6 +1006,46 @@ export function createBrowserLocalAgentRegistry({ emit }) {
         // agent type, so automatic login targets the right CLI. A manual
         // paired login starts with the planner; the executor's own
         // login-required event follows if Codex also needs auth.
+        definitions["claude-code"].launchLogin();
+      },
+    },
+    "planner-runner": {
+      type: "planner-runner",
+      name: "Planner + Runner",
+      description: "Paired workflow — pick any agent to plan and any to run",
+      command: "claude",
+      async getAvailability() {
+        const claudeInstalled = resolveInstalledClaudeBinary() !== "claude";
+        const codexInstalled = resolveInstalledCodexBinary() !== "codex";
+        const missing = [
+          ...(claudeInstalled ? [] : ["Claude Code"]),
+          ...(codexInstalled ? [] : ["Codex"]),
+        ];
+        return {
+          type: "planner-runner",
+          name: "Planner + Runner",
+          description: "Paired workflow — pick any agent to plan and any to run",
+          command: "claude",
+          available: true,
+          authenticated: isAgentAuthenticated("planner-runner"),
+          ...(missing.length === 0
+            ? {}
+            : {
+                unavailableReason: `Seren installs the ${missing.join(" and ")} CLI${missing.length > 1 ? "s" : ""} automatically when you start the agent.`,
+              }),
+        };
+      },
+      async canSpawn() {
+        return true;
+      },
+      async ensureCli() {
+        // The default pairing spawns Claude + Codex; a swapped role's CLI is
+        // ensured by the frontend before the swap reaches the runtime.
+        const claudeBin = await definitions["claude-code"].ensureCli();
+        await definitions.codex.ensureCli();
+        return claudeBin;
+      },
+      launchLogin() {
         definitions["claude-code"].launchLogin();
       },
     },
